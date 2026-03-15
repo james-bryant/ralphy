@@ -8,5 +8,5 @@ approval_policy = "on-request"
 network_access = true
 writable_roots = [
     'C:\Users\james',
-    'C:\Users\james\.m2',
+    'Cw:\Users\james\.m2',
 ]

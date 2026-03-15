@@ -93,3 +93,9 @@
 .ralphy-shell .shell-nav-button {
     -fx-alignment: center-left;
 }
+
+.ralphy-shell .shell-nav-button-active {
+    -fx-background-color: -color-accent;
+    -fx-border-color: -color-accent;
+    -fx-text-fill: #020617;
+}

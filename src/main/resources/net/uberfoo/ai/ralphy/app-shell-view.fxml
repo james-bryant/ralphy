@@ -11,7 +11,7 @@
 <?import javafx.scene.layout.StackPane?>
 <?import javafx.scene.layout.VBox?>
 
-<BorderPane prefHeight="800.0" prefWidth="1280.0" xmlns:fx="http://javafx.com/fxml"
+<BorderPane id="shellRoot" prefHeight="800.0" prefWidth="1280.0" xmlns:fx="http://javafx.com/fxml"
             fx:controller="net.uberfoo.ai.ralphy.AppShellController">
     <left>
         <VBox id="navigationPane" fx:id="navigationPane" prefWidth="260.0" spacing="16.0">
@@ -37,17 +37,20 @@
                     <String fx:value="section-title"/>
                 </styleClass>
             </Label>
-            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="Projects">
+            <Button id="projectsNavButton" fx:id="projectsNavButton" maxWidth="Infinity" mnemonicParsing="false"
+                    onAction="#showProjects" text="Projects">
                 <styleClass>
                     <String fx:value="shell-nav-button"/>
                 </styleClass>
             </Button>
-            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="PRD Editor">
+            <Button id="prdEditorNavButton" fx:id="prdEditorNavButton" maxWidth="Infinity" mnemonicParsing="false"
+                    onAction="#showPrdEditor" text="PRD Editor">
                 <styleClass>
                     <String fx:value="shell-nav-button"/>
                 </styleClass>
             </Button>
-            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="Execution">
+            <Button id="executionNavButton" fx:id="executionNavButton" maxWidth="Infinity" mnemonicParsing="false"
+                    onAction="#showExecution" text="Execution">
                 <styleClass>
                     <String fx:value="shell-nav-button"/>
                 </styleClass>
@@ -68,7 +71,7 @@
             <padding>
                 <Insets bottom="24.0" left="24.0" right="24.0" top="24.0"/>
             </padding>
-            <Label text="Workspace">
+            <Label id="workspaceTitleLabel" fx:id="workspaceTitleLabel" text="Workspace">
                 <styleClass>
                     <String fx:value="workspace-title"/>
                 </styleClass>

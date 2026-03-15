@@ -10,6 +10,7 @@ after each iteration and it's included in prompts for context.
 - Bridge JavaFX FXML to Spring through a dedicated controller factory that calls `AutowireCapableBeanFactory#createBean(...)`; this gives each loaded view a fresh controller instance while still enabling constructor injection of Spring beans.
 - Keep the JavaFX `Application` class thin by delegating stage setup to a Spring-managed configurer; the launcher stays conventional while tests can load and inspect the primary scene on the FX thread without calling `Application.launch(...)`.
 - Apply JavaFX theming at scene creation by attaching one shared stylesheet plus a root style class; descendant controls can then consume looked-up color tokens and reusable surface classes without each view loading CSS separately.
+- For deterministic JavaFX smoke tests, start the toolkit once with `Platform.setImplicitExit(false)`, show a real `Stage` through the same Spring-managed stage configurer as production, and drive button actions on the FX thread via a reusable harness.
 
 ---
 
@@ -70,4 +71,18 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - For extra JavaFX style classes in FXML, nested `<styleClass>` entries are more reliable than a space-delimited `styleClass` attribute when you need to preserve default control styling and have descendant CSS selectors resolve consistently.
     - FX-thread test helpers should catch `Throwable`, not just `Exception`, or failed assertions inside `Platform.runLater(...)` show up as misleading timeouts.
+---
+
+## 2026-03-15 - US-005
+- Added a reusable JavaFX UI harness that starts the toolkit once, boots the Spring-backed shell into a real `Stage`, and exposes deterministic node lookup, style inspection, and button interaction helpers for future shell smoke tests.
+- Reworked `AppShellUiTest` into a launch-level smoke test that verifies the visible primary shell, confirms shared theme application, and drives top-level navigation buttons to assert workspace/status updates and active navigation state.
+- Enabled shell navigation interactions in the app by wiring button ids and action handlers in FXML, updating the controller to swap workspace/status placeholder content, and styling the active navigation button.
+- Verified `.\mvnw.cmd clean verify jacoco:report` passes and completed the Windows smoke check by launching `.\mvnw.cmd -q -DskipTests javafx:run` and detecting the live `Ralphy` top-level window before shutdown.
+- Files changed: `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - A reusable `Stage` harness gives JavaFX UI tests real launch coverage without depending on the one-shot `Application.launch(...)` lifecycle inside JUnit.
+  - Gotchas encountered
+    - Closing the last JavaFX window during tests will tear down the toolkit unless `Platform.setImplicitExit(false)` is set before the harness starts opening and closing stages.
+    - Stable `id` attributes on the shell root, workspace title, and navigation buttons are necessary for reliable smoke assertions once the test moves beyond simple scene construction.
 ---
