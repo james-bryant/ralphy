@@ -8,6 +8,7 @@
     -color-text-primary: #e5eefc;
     -color-text-secondary: #94a3b8;
     -color-accent: #38bdf8;
+    -color-status-danger: #fca5a5;
     -fx-background-color: -color-surface-canvas;
 }
 
@@ -98,4 +99,8 @@
     -fx-background-color: -color-accent;
     -fx-border-color: -color-accent;
     -fx-text-fill: #020617;
+}
+
+.ralphy-shell .validation-text {
+    -fx-text-fill: -color-status-danger;
 }

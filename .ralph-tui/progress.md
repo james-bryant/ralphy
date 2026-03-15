@@ -12,6 +12,8 @@ after each iteration and it's included in prompts for context.
 - Apply JavaFX theming at scene creation by attaching one shared stylesheet plus a root style class; descendant controls can then consume looked-up color tokens and reusable surface classes without each view loading CSS separately.
 - For deterministic JavaFX smoke tests, start the toolkit once with `Platform.setImplicitExit(false)`, show a real `Stage` through the same Spring-managed stage configurer as production, and drive button actions on the FX thread via a reusable harness.
 - Keep Windows smoke guidance in-repo with a "current baseline" section for already shipped shell behavior plus separate native Windows and WSL scenario sections for future workflows; that preserves one canonical checklist across incremental delivery.
+- For JavaFX flows that use native directory choosers in production, wrap the chooser in a Spring-managed adapter with queued test selections so UI harnesses can cover browse workflows without opening OS dialogs.
+- Validate local Git repositories by checking for `.git` metadata existence, not just a `.git` directory, because worktrees expose `.git` as a file.
 
 ---
 
@@ -98,4 +100,20 @@ after each iteration and it's included in prompts for context.
     - Smoke checklists for incremental desktop delivery work best when they preserve future workflow coverage but explicitly call out the currently shippable baseline and `N/A` handling for not-yet-landed stories.
   - Gotchas encountered
     - `wsl.exe -l -v` returned `E_ACCESSDENIED` in this sandbox, so WSL availability could not be enumerated here even though the repository checklist still documents the required WSL verification path.
+---
+
+## 2026-03-15 - US-007
+- Implemented an in-memory active-project flow for opening existing local repositories, including a Spring-managed directory chooser, `.git`-based repository validation, and shell UI updates that show the active repository name/path and inline validation failures.
+- Expanded the Projects workspace card and status bar to expose `Open Existing Repository`, reject non-Git folders with a clear message, and keep the previously active repository when validation fails.
+- Added automated coverage for repository selection through both a service-level validation test and a JavaFX UI test that drives the browse workflow through the reusable chooser seam.
+- Updated the Windows smoke checklist baseline to include opening a valid repository and confirming rejection of a non-Git folder.
+- Verified `.\mvnw.cmd clean verify jacoco:report` passes, confirmed the JavaFX UI tests pass in that run, and completed a Windows launch smoke by starting `.\mvnw.cmd -q -DskipTests javafx:run` and detecting the live `Ralphy` top-level window before shutdown.
+- Files changed: `src/main/java/net/uberfoo/ai/ralphy/ActiveProject.java`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`, `src/main/java/net/uberfoo/ai/ralphy/RepositoryDirectoryChooser.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`, `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `docs/windows-smoke-checklist.md`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - Native chooser workflows stay testable when the chooser itself is abstracted behind a Spring bean that the JavaFX harness can preload with deterministic selections.
+    - Showing active project state in a shell-global surface such as the status bar avoids tying project awareness to one workspace tab.
+  - Gotchas encountered
+    - Git worktrees expose `.git` as a file, so repository validation must treat either a file or directory marker as valid metadata.
+    - JavaFX validation labels should bind `managedProperty()` to `visibleProperty()` or hidden error states still reserve layout space and leave awkward gaps in the card.
 ---

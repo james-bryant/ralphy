@@ -23,9 +23,13 @@ Run this baseline even when later workflow stories are still incomplete. For any
 2. Confirm a top-level window titled `Ralphy` opens.
 3. Confirm the shell renders the expected dark theme and the left navigation shows `Projects`, `PRD Editor`, and `Execution`.
 4. Open `Projects` and confirm the workspace title becomes `Projects` and the status bar reads `Projects workspace ready.`
-5. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
-6. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
-7. Close the app cleanly.
+5. Use `Open Existing Repository` to choose a known local Git repository.
+6. Confirm the `Active Repository` card shows the selected repository name and full path, and the status bar `Active Project` value updates.
+7. Use `Open Existing Repository` again and choose a non-Git folder.
+8. Confirm a validation message states the selected folder is not a Git repository and the previous active project remains unchanged.
+9. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
+10. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
+11. Close the app cleanly.
 
 ## Scenario A: Native Windows Execution Profile
 

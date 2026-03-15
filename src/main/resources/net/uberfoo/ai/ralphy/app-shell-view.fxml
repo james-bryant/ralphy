@@ -94,7 +94,34 @@
                             <String fx:value="card-title"/>
                         </styleClass>
                     </Label>
-                    <Label text="Repository details, project metadata, and onboarding prompts will appear in this region." wrapText="true"/>
+                    <Label text="Open an existing local Git repository to make it the active project." wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <Button id="openRepositoryButton" fx:id="openRepositoryButton" mnemonicParsing="false"
+                            onAction="#openExistingRepository" text="Open Existing Repository"/>
+                    <Label text="Active Repository">
+                        <styleClass>
+                            <String fx:value="section-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="activeProjectNameLabel" fx:id="activeProjectNameLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="card-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="activeProjectPathLabel" fx:id="activeProjectPathLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="projectValidationMessageLabel" fx:id="projectValidationMessageLabel" visible="false"
+                           wrapText="true">
+                        <styleClass>
+                            <String fx:value="validation-text"/>
+                        </styleClass>
+                    </Label>
                 </VBox>
                 <VBox HBox.hgrow="ALWAYS" spacing="8.0">
                     <styleClass>
@@ -141,6 +168,12 @@
             </Label>
             <Label id="statusLabel" fx:id="statusLabel"/>
             <Region HBox.hgrow="ALWAYS"/>
+            <Label text="Active Project">
+                <styleClass>
+                    <String fx:value="status-title"/>
+                </styleClass>
+            </Label>
+            <Label id="activeProjectStatusLabel" fx:id="activeProjectStatusLabel"/>
             <Label text="Windows-first application shell">
                 <styleClass>
                     <String fx:value="muted-text"/>

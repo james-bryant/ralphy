@@ -5,12 +5,20 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AppShellUiTest {
     private JavaFxUiHarness harness;
+
+    @TempDir
+    Path tempDir;
 
     @BeforeAll
     static void startJavaFxToolkit() throws Exception {
@@ -68,5 +76,42 @@ class AppShellUiTest {
                 harness.text("#workspacePlaceholderLabel"));
         assertEquals("Execution workspace ready.", harness.text("#statusLabel"));
         assertTrue(harness.hasStyleClass("#executionNavButton", "shell-nav-button-active"));
+    }
+
+    @Test
+    void appShellCanOpenGitRepositoriesAndRejectNonGitFolders() throws Exception {
+        Path nonGitDirectory = Files.createDirectory(tempDir.resolve("plain-folder"));
+        Path gitRepository = createGitRepository("sample-repo");
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell();
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(nonGitDirectory);
+        harness.clickOn("#openRepositoryButton");
+
+        assertEquals("Selected folder is not a Git repository: " + nonGitDirectory.toAbsolutePath().normalize(),
+                harness.text("#projectValidationMessageLabel"));
+        assertEquals("No active repository selected.", harness.text("#activeProjectNameLabel"));
+        assertEquals("No active project selected.", harness.text("#activeProjectStatusLabel"));
+
+        repositoryDirectoryChooser.queueSelectionForTest(gitRepository);
+        harness.clickOn("#openRepositoryButton");
+
+        Path expectedRepositoryPath = gitRepository.toAbsolutePath().normalize();
+        assertEquals(gitRepository.getFileName().toString(), harness.text("#activeProjectNameLabel"));
+        assertEquals(expectedRepositoryPath.toString(), harness.text("#activeProjectPathLabel"));
+        assertEquals("", harness.text("#projectValidationMessageLabel"));
+        assertEquals(gitRepository.getFileName().toString(), harness.text("#activeProjectStatusLabel"));
+        assertEquals(expectedRepositoryPath,
+                harness.getRequiredBean(ActiveProjectService.class).activeProject().orElseThrow().repositoryPath());
+    }
+
+    private Path createGitRepository(String directoryName) throws IOException {
+        Path repository = Files.createDirectory(tempDir.resolve(directoryName));
+        Files.createDirectory(repository.resolve(".git"));
+        return repository;
     }
 }
