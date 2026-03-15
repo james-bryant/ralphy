@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
+<?import java.lang.String?>
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
@@ -13,61 +14,135 @@
 <BorderPane prefHeight="800.0" prefWidth="1280.0" xmlns:fx="http://javafx.com/fxml"
             fx:controller="net.uberfoo.ai.ralphy.AppShellController">
     <left>
-        <VBox id="navigationPane" fx:id="navigationPane" prefWidth="260.0" spacing="16.0" style="-fx-background-color: #f3f5f7;">
+        <VBox id="navigationPane" fx:id="navigationPane" prefWidth="260.0" spacing="16.0">
+            <styleClass>
+                <String fx:value="shell-sidebar"/>
+            </styleClass>
             <padding>
                 <Insets bottom="24.0" left="20.0" right="20.0" top="24.0"/>
             </padding>
-            <Label id="brandLabel" fx:id="brandLabel" style="-fx-font-size: 26px; -fx-font-weight: bold;"/>
-            <Label id="taglineLabel" fx:id="taglineLabel" style="-fx-text-fill: #5d6772;" wrapText="true"/>
+            <Label id="brandLabel" fx:id="brandLabel">
+                <styleClass>
+                    <String fx:value="shell-brand"/>
+                </styleClass>
+            </Label>
+            <Label id="taglineLabel" fx:id="taglineLabel" wrapText="true">
+                <styleClass>
+                    <String fx:value="muted-text"/>
+                </styleClass>
+            </Label>
             <Separator/>
-            <Label style="-fx-font-size: 14px; -fx-font-weight: bold;" text="Navigation"/>
-            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="Projects"/>
-            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="PRD Editor"/>
-            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="Execution"/>
+            <Label text="Navigation">
+                <styleClass>
+                    <String fx:value="section-title"/>
+                </styleClass>
+            </Label>
+            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="Projects">
+                <styleClass>
+                    <String fx:value="shell-nav-button"/>
+                </styleClass>
+            </Button>
+            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="PRD Editor">
+                <styleClass>
+                    <String fx:value="shell-nav-button"/>
+                </styleClass>
+            </Button>
+            <Button disable="true" maxWidth="Infinity" mnemonicParsing="false" text="Execution">
+                <styleClass>
+                    <String fx:value="shell-nav-button"/>
+                </styleClass>
+            </Button>
             <Region VBox.vgrow="ALWAYS"/>
-            <Label id="navigationPlaceholderLabel" fx:id="navigationPlaceholderLabel" style="-fx-text-fill: #5d6772;" wrapText="true"/>
+            <Label id="navigationPlaceholderLabel" fx:id="navigationPlaceholderLabel" wrapText="true">
+                <styleClass>
+                    <String fx:value="muted-text"/>
+                </styleClass>
+            </Label>
         </VBox>
     </left>
     <center>
-        <VBox id="workspacePane" fx:id="workspacePane" spacing="18.0" style="-fx-background-color: #ffffff;">
+        <VBox id="workspacePane" fx:id="workspacePane" spacing="18.0">
+            <styleClass>
+                <String fx:value="shell-workspace"/>
+            </styleClass>
             <padding>
                 <Insets bottom="24.0" left="24.0" right="24.0" top="24.0"/>
             </padding>
-            <Label style="-fx-font-size: 22px; -fx-font-weight: bold;" text="Workspace"/>
-            <Label id="workspacePlaceholderLabel" fx:id="workspacePlaceholderLabel" style="-fx-text-fill: #4f5965;" wrapText="true"/>
+            <Label text="Workspace">
+                <styleClass>
+                    <String fx:value="workspace-title"/>
+                </styleClass>
+            </Label>
+            <Label id="workspacePlaceholderLabel" fx:id="workspacePlaceholderLabel" wrapText="true">
+                <styleClass>
+                    <String fx:value="muted-text"/>
+                </styleClass>
+            </Label>
             <HBox spacing="16.0">
-                <VBox HBox.hgrow="ALWAYS" spacing="8.0" style="-fx-background-color: #f8fafc; -fx-border-color: #d8dee6; -fx-border-radius: 12; -fx-background-radius: 12;">
+                <VBox HBox.hgrow="ALWAYS" spacing="8.0">
+                    <styleClass>
+                        <String fx:value="shell-card"/>
+                    </styleClass>
                     <padding>
                         <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
                     </padding>
-                    <Label style="-fx-font-size: 16px; -fx-font-weight: bold;" text="Project Context"/>
+                    <Label text="Project Context">
+                        <styleClass>
+                            <String fx:value="card-title"/>
+                        </styleClass>
+                    </Label>
                     <Label text="Repository details, project metadata, and onboarding prompts will appear in this region." wrapText="true"/>
                 </VBox>
-                <VBox HBox.hgrow="ALWAYS" spacing="8.0" style="-fx-background-color: #f8fafc; -fx-border-color: #d8dee6; -fx-border-radius: 12; -fx-background-radius: 12;">
+                <VBox HBox.hgrow="ALWAYS" spacing="8.0">
+                    <styleClass>
+                        <String fx:value="shell-card"/>
+                    </styleClass>
                     <padding>
                         <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
                     </padding>
-                    <Label style="-fx-font-size: 16px; -fx-font-weight: bold;" text="Execution Overview"/>
+                    <Label text="Execution Overview">
+                        <styleClass>
+                            <String fx:value="card-title"/>
+                        </styleClass>
+                    </Label>
                     <Label text="Run controls, current story state, and live execution output will appear here." wrapText="true"/>
                 </VBox>
             </HBox>
-            <StackPane style="-fx-background-color: #f8fafc; -fx-border-color: #d8dee6; -fx-border-radius: 12; -fx-background-radius: 12;">
+            <StackPane>
+                <styleClass>
+                    <String fx:value="shell-card"/>
+                </styleClass>
                 <padding>
                     <Insets bottom="40.0" left="18.0" right="18.0" top="40.0"/>
                 </padding>
-                <Label style="-fx-font-size: 16px;" text="Editor surface placeholder"/>
+                <Label text="Editor surface placeholder">
+                    <styleClass>
+                        <String fx:value="card-title"/>
+                    </styleClass>
+                </Label>
             </StackPane>
         </VBox>
     </center>
     <bottom>
-        <HBox id="statusPane" fx:id="statusPane" alignment="CENTER_LEFT" spacing="12.0" style="-fx-background-color: #eef2f5;">
+        <HBox id="statusPane" fx:id="statusPane" alignment="CENTER_LEFT" spacing="12.0">
+            <styleClass>
+                <String fx:value="shell-status-bar"/>
+            </styleClass>
             <padding>
                 <Insets bottom="12.0" left="16.0" right="16.0" top="12.0"/>
             </padding>
-            <Label style="-fx-font-weight: bold;" text="Status"/>
+            <Label text="Status">
+                <styleClass>
+                    <String fx:value="status-title"/>
+                </styleClass>
+            </Label>
             <Label id="statusLabel" fx:id="statusLabel"/>
             <Region HBox.hgrow="ALWAYS"/>
-            <Label style="-fx-text-fill: #5d6772;" text="Windows-first application shell"/>
+            <Label text="Windows-first application shell">
+                <styleClass>
+                    <String fx:value="muted-text"/>
+                </styleClass>
+            </Label>
         </HBox>
     </bottom>
 </BorderPane>

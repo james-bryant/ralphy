@@ -1,0 +1,95 @@
+.ralphy-shell {
+    -color-surface-canvas: #020617;
+    -color-surface-sidebar: #0f172a;
+    -color-surface-primary: #111827;
+    -color-surface-raised: #1e293b;
+    -color-surface-interactive: #273449;
+    -color-border-muted: #334155;
+    -color-text-primary: #e5eefc;
+    -color-text-secondary: #94a3b8;
+    -color-accent: #38bdf8;
+    -fx-background-color: -color-surface-canvas;
+}
+
+.ralphy-shell .label {
+    -fx-text-fill: -color-text-primary;
+}
+
+.ralphy-shell .button {
+    -fx-background-color: -color-surface-interactive;
+    -fx-background-radius: 10;
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 10;
+    -fx-focus-color: -color-accent;
+    -fx-faint-focus-color: transparent;
+    -fx-padding: 10 14 10 14;
+    -fx-text-fill: -color-text-primary;
+}
+
+.ralphy-shell .button:disabled {
+    -fx-background-color: -color-surface-raised;
+    -fx-border-color: -color-border-muted;
+    -fx-opacity: 1.0;
+    -fx-text-fill: -color-text-secondary;
+}
+
+.ralphy-shell .separator *.line {
+    -fx-border-color: -color-border-muted;
+}
+
+.ralphy-shell .shell-sidebar {
+    -fx-background-color: -color-surface-sidebar;
+    -fx-border-color: transparent -color-border-muted transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.ralphy-shell .shell-workspace {
+    -fx-background-color: -color-surface-primary;
+}
+
+.ralphy-shell .shell-status-bar {
+    -fx-background-color: -color-surface-sidebar;
+    -fx-border-color: -color-border-muted transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+
+.ralphy-shell .shell-card {
+    -fx-background-color: -color-surface-raised;
+    -fx-background-radius: 12;
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 12;
+}
+
+.ralphy-shell .shell-brand {
+    -fx-font-size: 26px;
+    -fx-font-weight: bold;
+}
+
+.ralphy-shell .workspace-title {
+    -fx-font-size: 22px;
+    -fx-font-weight: bold;
+}
+
+.ralphy-shell .section-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-text-secondary;
+}
+
+.ralphy-shell .card-title {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+}
+
+.ralphy-shell .status-title {
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-text-secondary;
+}
+
+.ralphy-shell .muted-text {
+    -fx-text-fill: -color-text-secondary;
+}
+
+.ralphy-shell .shell-nav-button {
+    -fx-alignment: center-left;
+}

@@ -29,6 +29,8 @@ public class AppShellStageConfigurer {
     }
 
     public Scene createScene() throws IOException {
-        return new Scene(springFxmlLoader.load("app-shell-view.fxml"), DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        Scene scene = new Scene(springFxmlLoader.load("app-shell-view.fxml"), DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        AppTheme.apply(scene);
+        return scene;
     }
 }

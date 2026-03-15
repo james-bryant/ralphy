@@ -1,0 +1,70 @@
+# Iteration 3 Log
+
+## Metadata
+
+- **Task ID**: US-003
+- **Task Title**: Replace the Hello Sample with an App Shell
+- **Description**: As a user, I want the sample hello screen replaced with a real application shell so that the app can host project, editor, and execution workflows.
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-03-15T21:07:39.140Z
+- **Ended At**: 2026-03-15T21:15:42.083Z
+- **Duration**: 8m 2s
+- **Input Tokens**: 494114
+- **Output Tokens**: 21228
+- **Total Tokens**: 515342
+- **Agent**: codex
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+I’m treating this as a JavaFX app-shell replacement task. First I’m checking the current project structure and `.ralph-tui/progress.md`, and I’m not pulling in a Spring Boot skill because this story is about the desktop UI layer rather than a Spring Boot service.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg --files'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content .ralph-tui\\p...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Force'
+I have the iteration context. Next I’m reading the existing JavaFX launcher, controller, FXML, and the PRD/task file so I can replace the scaffold without fighting the current Spring wiring.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content tasks\\prd-ra...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\test\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\re...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+The scaffold is still intact: `HelloApplication`, `HelloController`, and `hello-view.fxml` are the primary path. I’m checking the module and test dependencies next so I can swap in a shell cleanly and add the required UI coverage instead of just changing labels.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "TestFX|javafx.*tes...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content pom.xml'
+I have enough context to map the change. I’m planning to replace the sample scene with a Spring-loaded shell view, add a focused JavaFX UI smoke test around the shell regions and title, then run the full Maven verify flow and a Windows launch smoke run before updating `.ralph-tui/progress.md`.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "HelloApplication|H...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+I’m editing the launch path now. The changes are: replace the sample application/controller/FXML trio with a Ralphy shell, add a stage-configurer seam so the shell is testable without `Application.launch`, and update the Spring bridge test to validate injection against the new shell bean instead of the greeting sample.
+The shell files are in place. I’m adding the UI smoke test now and tightening the FXML node IDs so the test can assert the actual shell regions instead of just relying on string constants.
+The code path is swapped. I’m running the focused tests first to catch FXML, JavaFX-thread, or Spring-wiring issues before I spend time on the full `clean verify` cycle.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command './mvnw.cmd -q -Dtest=Java...
+
+[91m[Error: At line:2 char:44
++ ./mvnw.cmd -q -Dtest=JavaFxSpringBridgeTest,AppShellUiTest test
++                                            ~
+Missing argument in parameter list.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingArgument
+ 
+][0m
+PowerShell rejected the Maven property parsing. I’m rerunning with explicit argument quoting so I can get a real test result instead of a shell parse error.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "& .\\mvnw.cmd '-q' '-Dtes...
+The focused tests passed. I’m moving to the full quality gate now: `clean verify jacoco:report`, then I’ll do a Windows launch smoke run against the actual app entry point before I update the progress log.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "& .\\mvnw.cmd clean verif...
+The build is green. I’m doing a real Windows launch smoke now by starting the JavaFX app through the normal Maven launch path, polling for a `Ralphy` desktop window title, and then shutting the process back down.
+[94m[shell][0m $ $attempt++) {     Start-Sleep -Seconds 2     $windowProcess = Get-Process -Name java,javaw -ErrorAct...
+The Windows smoke run succeeded: the launched JavaFX process exposed a top-level window titled `Ralphy`. I’m doing a quick pass for leftover scaffold references, then I’ll append the progress log with the implementation and the reusable pattern this story established.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "HelloApplication|H...
+I’ve verified there are no remaining scaffold references in live source code. I’m updating `.ralph-tui/progress.md` now with the story results, the stage-configurer testing pattern, and the Windows smoke approach that worked in this environment.
+Replaced the scaffolded hello sample with a real Ralphy shell. The primary launch path now goes through [RalphyApplication.java](/C:/Users/james/IdeaProjects/ralphy/src/main/java/net/uberfoo/ai/ralphy/RalphyApplication.java), [AppShellStageConfigurer.java](/C:/Users/james/IdeaProjects/ralphy/src/main/java/net/uberfoo/ai/ralphy/AppShellStageConfigurer.java), and [app-shell-view.fxml](/C:/Users/james/IdeaProjects/ralphy/src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml), with branded navigation, workspace, and status placeholders. The old hello application/controller/FXML were removed, and the loader/launcher now target the new shell.
+
+Added automated UI coverage in [AppShellUiTest.java](/C:/Users/james/IdeaProjects/ralphy/src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java) and updated [JavaFxSpringBridgeTest.java](/C:/Users/james/IdeaProjects/ralphy/src/test/java/net/uberfoo/ai/ralphy/JavaFxSpringBridgeTest.java) for the new Spring-backed shell descriptor. I also appended the required story entry and reusable pattern to [.ralph-tui/progress.md](/C:/Users/james/IdeaProjects/ralphy/.ralph-tui/progress.md).
+
+`.\mvnw.cmd clean verify jacoco:report` passed. Windows smoke verification also passed by launching `.\mvnw.cmd -q -DskipTests javafx:run` and confirming a top-level window titled `Ralphy`.
+
+<promise>COMPLETE</promise>

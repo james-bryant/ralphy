@@ -9,6 +9,7 @@ after each iteration and it's included in prompts for context.
 - For JPMS with Spring on the JavaFX desktop app, explicitly `requires spring.beans` and `requires spring.core` when `module-info.java` opens packages to those modules; relying on `spring.context` alone leaves compiler warnings.
 - Bridge JavaFX FXML to Spring through a dedicated controller factory that calls `AutowireCapableBeanFactory#createBean(...)`; this gives each loaded view a fresh controller instance while still enabling constructor injection of Spring beans.
 - Keep the JavaFX `Application` class thin by delegating stage setup to a Spring-managed configurer; the launcher stays conventional while tests can load and inspect the primary scene on the FX thread without calling `Application.launch(...)`.
+- Apply JavaFX theming at scene creation by attaching one shared stylesheet plus a root style class; descendant controls can then consume looked-up color tokens and reusable surface classes without each view loading CSS separately.
 
 ---
 
@@ -55,4 +56,18 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - CSS selector lookups in JavaFX tests are more reliable when important nodes have an explicit `id`; relying on `fx:id` alone is a weak test contract.
     - A practical Windows smoke check for JavaFX in this environment is to launch `javafx:run` and poll the spawned `java` or `javaw` process for the expected `MainWindowTitle`.
+---
+
+## 2026-03-15 - US-004
+- Implemented a shared JavaFX dark theme with reusable surface and text tokens in `app-theme.css`, and attached it once at scene creation through the new `AppTheme` utility.
+- Updated the shell FXML to consume shared theme classes instead of inline per-node colors so the navigation rail, workspace, cards, buttons, and status bar all render with the dark palette by default.
+- Expanded the JavaFX shell UI test to assert the shared stylesheet is applied and that key shell regions resolve to the expected dark background and text colors.
+- Completed Windows smoke verification by launching `.\mvnw.cmd -q -DskipTests javafx:run`, capturing the live `Ralphy` window, and visually confirming the dark shell palette.
+- Files changed: `src/main/java/net/uberfoo/ai/ralphy/AppTheme.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellStageConfigurer.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - A scene-level stylesheet plus a root theme class is enough for new JavaFX shell views to inherit default dark text and surface styling without loading CSS per FXML file.
+  - Gotchas encountered
+    - For extra JavaFX style classes in FXML, nested `<styleClass>` entries are more reliable than a space-delimited `styleClass` attribute when you need to preserve default control styling and have descendant CSS selectors resolve consistently.
+    - FX-thread test helpers should catch `Throwable`, not just `Exception`, or failed assertions inside `Platform.runLater(...)` show up as misleading timeouts.
 ---
