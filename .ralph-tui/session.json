@@ -3,10 +3,10 @@
   "sessionId": "2b071c1d-d46d-451d-a0fb-67440ae4d3de",
   "status": "running",
   "startedAt": "2026-03-15T20:49:42.750Z",
-  "updatedAt": "2026-03-15T21:34:16.315Z",
-  "currentIteration": 4,
+  "updatedAt": "2026-03-15T21:39:30.827Z",
+  "currentIteration": 5,
   "maxIterations": 40,
-  "tasksCompleted": 4,
+  "tasksCompleted": 5,
   "isPaused": false,
   "agentPlugin": "codex",
   "trackerState": {
@@ -54,6 +54,16 @@
       "durationMs": 595108,
       "startedAt": "2026-03-15T21:15:45.071Z",
       "endedAt": "2026-03-15T21:25:40.179Z"
+    },
+    {
+      "iteration": 5,
+      "status": "completed",
+      "taskId": "US-005",
+      "taskTitle": "Add a JavaFX UI Test Harness",
+      "taskCompleted": true,
+      "durationMs": 514607,
+      "startedAt": "2026-03-15T21:25:41.706Z",
+      "endedAt": "2026-03-15T21:34:16.313Z"
     }
   ],
   "skippedTaskIds": [],

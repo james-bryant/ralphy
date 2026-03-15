@@ -1,0 +1,89 @@
+# Iteration 5 Log
+
+## Metadata
+
+- **Task ID**: US-005
+- **Task Title**: Add a JavaFX UI Test Harness
+- **Description**: As a developer, I want automated UI test support so that major JavaFX regressions are caught early.
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-03-15T21:25:41.706Z
+- **Ended At**: 2026-03-15T21:34:16.313Z
+- **Duration**: 8m 34s
+- **Input Tokens**: 938107
+- **Output Tokens**: 21470
+- **Total Tokens**: 959577
+- **Agent**: codex
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+I’m checking the existing project state first: `.ralph-tui/progress.md`, the current test setup, and whether a JavaFX UI harness already exists so I can either verify completion or implement only what’s missing.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content .ralph-tui\\p...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Force'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "TestFX|javafx|Appl...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg --files .'
+The shell already has a basic JavaFX scene test, but I need to confirm whether it is a real launchable UI harness or just direct scene construction. I’m reading the Maven/test wiring and the current UI test next, then I’ll decide if this story is already satisfied or needs additional harness work.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content pom.xml'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\test\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+The current test only proves the shell scene can be constructed. It does not actually show a `Stage` or drive UI interaction, so I’m treating US-005 as still incomplete and inspecting the shell FXML plus any existing run/test constraints before I wire a proper harness.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\re...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content tasks\\prd-ra...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\test\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+I have enough context to move from inspection to implementation.
+
+Plan:
+1. Add minimal shell navigation behavior so there is something deterministic for the UI harness to drive.
+2. Replace the scene-construction-only UI test with a launch harness that starts the actual primary shell, waits for the showing stage, and interacts with navigation/main regions.
+3. Run `.\mvnw.cmd clean verify jacoco:report`, then do the Windows smoke launch check and append the US-005 notes to `.ralph-tui/progress.md`.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\ja...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\main\\re...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short'
+Using `springboot-tdd` for the feature/test workflow and `springboot-verification` for the required Maven verification loop, since this is a Spring-backed desktop app story with new automated tests and explicit build gates.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content .agents\\skil...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content .agents\\skil...
+I’m editing the test side first to make the missing behavior explicit: a reusable JavaFX stage harness plus a smoke test that shows the shell and drives navigation. After that I’ll patch the shell controller/FXML to satisfy the test.
+The new smoke test is in place and should fail against the current shell, which is what I want before patching production code. I’m running that single test now to see the exact breakpoints rather than guessing.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd -q -Dtest=App...
+
+[91m[Error: 
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.5)
+
+2026-03-15T16:30:35.153-05:00  INFO 78544 --- [           main] o.a.maven.surefire.booter.ForkedBooter   : Starting ForkedBooter v3.5.2 using Java 25.0.2 with PID 78544 (started by james in C:\Users\ja][0m
+The failing point is exactly in the new smoke test, not the harness machinery. I’m patching the shell now: add stable node ids, wire navigation actions, expose active state, and fix the root background assertion to target the actual shell root instead of a bogus color transform.
+The controller and FXML are patched. I’m re-running the focused UI smoke test now to catch any remaining FX-thread or selector issues before I run the full verify gate.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd -q -Dtest=App...
+The focused UI harness passes. I’m running the full required gate now: `.\mvnw.cmd clean verify jacoco:report`. After that I’ll do the Windows smoke launch and update `progress.md`.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd clean verify ...
+The automated gate is green. I’m doing the Windows smoke step the same way the earlier stories documented it: launch `javafx:run`, wait for a live top-level `Ralphy` window, then shut it down cleanly enough for the session.
+[94m[shell][0m $ $attempt++) {         Start-Sleep -Seconds 1         $window = Get-Process | Where-Object { $_.MainW...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Date -Format yyyy-MM-...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --stat -- src/ma...
+I’m updating `.ralph-tui/progress.md` now with the reusable harness pattern and the US-005 implementation notes, including the automated verify result and the Windows smoke check.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short'
+I created temporary smoke logs while checking the live window. I’m removing those scratch files so the workspace only carries the actual story changes plus the pre-existing unrelated worktree noise.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Remove-Item .ralph-tui\\u...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short'
+[94m[shell][0m $ '"'{0}:{1}' -f "'$i, $_ }'
+[94m[shell][0m $ '"'{0}:{1}' -f "'$i, $_ }'
+[94m[shell][0m $ '"'{0}:{1}' -f "'$i, $_ }'
+[94m[shell][0m $ '"'{0}:{1}' -f "'$i, $_ }'
+[94m[shell][0m $ '"'{0}:{1}' -f "'$i, $_ }'
+[94m[shell][0m $ '"'{0}:{1}' -f "'$i, $_ }'
+Implemented a real JavaFX UI harness and launch-level shell smoke test. [JavaFxUiHarness.java](C:/Users/james/IdeaProjects/ralphy/src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java#L20) now starts the toolkit once, shows the Spring-configured shell stage, and provides deterministic lookup/click helpers; [AppShellUiTest.java](C:/Users/james/IdeaProjects/ralphy/src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java#L12) uses it to verify the visible `Ralphy` shell, shared theme, and navigation interactions. To support that, [AppShellController.java](C:/Users/james/IdeaProjects/ralphy/src/main/java/net/uberfoo/ai/ralphy/AppShellController.java#L9), [app-shell-view.fxml](C:/Users/james/IdeaProjects/ralphy/src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml#L14), and [app-theme.css](C:/Users/james/IdeaProjects/ralphy/src/main/resources/net/uberfoo/ai/ralphy/app-theme.css#L93) now expose stable ids, live nav actions, and active-button styling.
+
+`.\mvnw.cmd clean verify jacoco:report` passed, so the build now fails on shell smoke regressions through Surefire. Windows smoke verification also passed by launching `.\mvnw.cmd -q -DskipTests javafx:run` and detecting a live top-level `Ralphy` window. I appended the US-005 notes and reusable harness pattern to [progress.md](C:/Users/james/IdeaProjects/ralphy/.ralph-tui/progress.md#L76).
+
+<promise>COMPLETE</promise>

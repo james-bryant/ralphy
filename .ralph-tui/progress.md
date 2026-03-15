@@ -11,6 +11,7 @@ after each iteration and it's included in prompts for context.
 - Keep the JavaFX `Application` class thin by delegating stage setup to a Spring-managed configurer; the launcher stays conventional while tests can load and inspect the primary scene on the FX thread without calling `Application.launch(...)`.
 - Apply JavaFX theming at scene creation by attaching one shared stylesheet plus a root style class; descendant controls can then consume looked-up color tokens and reusable surface classes without each view loading CSS separately.
 - For deterministic JavaFX smoke tests, start the toolkit once with `Platform.setImplicitExit(false)`, show a real `Stage` through the same Spring-managed stage configurer as production, and drive button actions on the FX thread via a reusable harness.
+- Keep Windows smoke guidance in-repo with a "current baseline" section for already shipped shell behavior plus separate native Windows and WSL scenario sections for future workflows; that preserves one canonical checklist across incremental delivery.
 
 ---
 
@@ -85,4 +86,16 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - Closing the last JavaFX window during tests will tear down the toolkit unless `Platform.setImplicitExit(false)` is set before the harness starts opening and closing stages.
     - Stable `id` attributes on the shell root, workspace title, and navigation buttons are necessary for reliable smoke assertions once the test moves beyond simple scene construction.
+---
+
+## 2026-03-15 - US-006
+- Added `docs/windows-smoke-checklist.md` as the repository-owned manual smoke artifact for Windows development, covering onboarding, PRD editing, loop start, pause, and log viewing across native Windows and WSL execution-profile scenarios.
+- Anchored the checklist to the current shipped shell with a baseline launch/navigation smoke so the document is usable now while still defining the future native and WSL workflow expectations in one canonical place.
+- Verified `.\mvnw.cmd clean verify jacoco:report` passes, confirmed the JavaFX UI tests pass in that run, and completed a Windows launch smoke by starting `.\mvnw.cmd -q -DskipTests javafx:run` and detecting the live `Ralphy` top-level window before shutdown.
+- Files changed: `docs/windows-smoke-checklist.md`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - Smoke checklists for incremental desktop delivery work best when they preserve future workflow coverage but explicitly call out the currently shippable baseline and `N/A` handling for not-yet-landed stories.
+  - Gotchas encountered
+    - `wsl.exe -l -v` returned `E_ACCESSDENIED` in this sandbox, so WSL availability could not be enumerated here even though the repository checklist still documents the required WSL verification path.
 ---
