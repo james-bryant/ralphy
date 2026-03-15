@@ -309,8 +309,43 @@ class ActiveProjectServiceTest {
                 .contains("\"nativeWindowsPreflight\""));
     }
 
+    @Test
+    void saveExecutionProfileRunsAndStoresWslPreflightForWslProjects() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("wsl-workspaces"));
+        Path repository = createGitDirectoryRepository(workspaceRoot, "wsl-preflight-repo");
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        ActiveProjectService.ExecutionProfileSaveResult saveResult = activeProjectService.saveExecutionProfile(
+                new ExecutionProfile(
+                        ExecutionProfile.ProfileType.WSL,
+                        "Ubuntu-24.04",
+                        workspaceRoot.toString(),
+                        "/mnt/c/wsl-workspaces"
+                )
+        );
+
+        assertTrue(saveResult.successful());
+        WslPreflightReport report = activeProjectService.latestWslPreflightReport().orElseThrow();
+        assertTrue(report.passed());
+        assertEquals(5, report.checks().size());
+        WslPreflightReport storedReport = projectMetadataInitializer
+                .readWslPreflight(new ActiveProject(repository))
+                .orElseThrow();
+        assertEquals(report.status(), storedReport.status());
+        assertTrue(Files.readString(new ActiveProject(repository).projectMetadataPath())
+                .contains("\"wslPreflight\""));
+    }
+
     private Path createGitDirectoryRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
+        Files.createDirectory(repository.resolve(".git"));
+        return repository;
+    }
+
+    private Path createGitDirectoryRepository(Path parentDirectory, String directoryName) throws IOException {
+        Path repository = Files.createDirectory(parentDirectory.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
         return repository;
     }
@@ -325,7 +360,9 @@ class ActiveProjectServiceTest {
                 projectMetadataInitializer,
                 projectStorageInitializer,
                 localMetadataStorage,
-                createPreflightService()
+                createNativePreflightService(),
+                createWslPreflightService(),
+                true
         );
     }
 
@@ -333,7 +370,7 @@ class ActiveProjectServiceTest {
         return LocalMetadataStorage.forTest(tempDir.resolve("local-storage"));
     }
 
-    private NativeWindowsPreflightService createPreflightService() throws IOException {
+    private NativeWindowsPreflightService createNativePreflightService() throws IOException {
         Path codexHome = tempDir.resolve("codex-home");
         Files.createDirectories(codexHome);
         Files.writeString(codexHome.resolve("auth.json"), """
@@ -354,6 +391,31 @@ class ActiveProjectServiceTest {
                     default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
                 }
         );
+    }
+
+    private WslPreflightService createWslPreflightService() {
+        return new WslPreflightService((workingDirectory, command) -> {
+            if (command.contains("--list")) {
+                return WslPreflightService.CommandResult.success(0, "Ubuntu-24.04\nDebian");
+            }
+
+            String script = command.getLast();
+            if (script.contains("pwd")) {
+                return WslPreflightService.CommandResult.success(0, "/mnt/c/wsl-workspaces/wsl-preflight-repo");
+            }
+            if (script.contains("codex --version")) {
+                return WslPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
+            }
+            if (script.contains("OPENAI_API_KEY")) {
+                return WslPreflightService.CommandResult.success(0,
+                        "Detected stored Codex login tokens in /home/test/.codex/auth.json.");
+            }
+            if (script.contains("git rev-parse --is-inside-work-tree")) {
+                return WslPreflightService.CommandResult.success(0, "true");
+            }
+
+            return WslPreflightService.CommandResult.failure("Unexpected command");
+        });
     }
 
     private void assertManagedProjectStorage(ActiveProject activeProject) {

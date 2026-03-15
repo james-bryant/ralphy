@@ -58,11 +58,11 @@ Use this scenario now for profile selection, native preflight, and save verifica
 
 ## Scenario B: WSL Execution Profile
 
-Use this scenario now for WSL profile selection and save verification. The desktop app still launches on Windows; only the Codex execution profile changes, and later stories will add WSL preflight plus run controls.
+Use this scenario now for WSL profile selection, path-mapping validation, and WSL preflight verification. The desktop app still launches on Windows; only the Codex execution profile changes, and later stories will add the WSL run controls.
 
 | Area | Action | Expected Result |
 | --- | --- | --- |
-| Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the WSL profile, choose a distro, and save any Windows-to-WSL path mapping. | The project becomes active, the selected distro is shown, new projects gain initial `.ralph-tui/project-metadata.json`, path mapping resolves correctly, and WSL preflight reports readiness or actionable remediation. |
+| Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the WSL profile, choose a distro, save any Windows-to-WSL path mapping, and review the WSL preflight section. | The project becomes active, the selected distro is shown, new projects gain initial `.ralph-tui/project-metadata.json`, path mapping resolves correctly, and WSL preflight reports readiness or actionable remediation. |
 | PRD Editing | Open the active PRD in `PRD Editor`, make a small Markdown edit, save, and reopen it. | PRD editing behavior matches the native Windows flow because authoring still happens in the Windows desktop UI. |
 | Loop Start | Start one eligible story from `Execution` while the WSL profile is selected. | The story moves into a queued or running state, live output begins, and the launcher runs through the saved WSL profile and mapped repository path. |
 | Pause | Request `Pause` while a story is running through WSL. | The current step is allowed to finish inside WSL, the UI reaches a paused state, and the next story does not start. |

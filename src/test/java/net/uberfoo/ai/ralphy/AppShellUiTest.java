@@ -307,8 +307,86 @@ class AppShellUiTest {
         assertTrue(checks.contains("FAIL | Quality Gate | Quality Gate Command"));
     }
 
+    @Test
+    void appShellShowsStoredWslPreflightFailuresWithCategories() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("wsl-workspaces"));
+        Path repository = createGitRepository(workspaceRoot, "wsl-preflight-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.saveExecutionProfile(projectId, new ExecutionProfile(
+                ExecutionProfile.ProfileType.WSL,
+                "Ubuntu-24.04",
+                workspaceRoot.toString(),
+                "/mnt/c/wsl-workspaces"
+        ));
+
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeWslPreflight(activeProject, new WslPreflightReport(
+                "2026-03-15T23:45:00Z",
+                WslPreflightReport.OverallStatus.FAIL,
+                List.of(
+                        new WslPreflightReport.CheckResult(
+                                "wsl_distribution",
+                                "WSL Distribution",
+                                WslPreflightReport.CheckCategory.DISTRIBUTION,
+                                WslPreflightReport.CheckStatus.PASS,
+                                "Found the configured WSL distribution Ubuntu-24.04."
+                        ),
+                        new WslPreflightReport.CheckResult(
+                                "path_mapping",
+                                "Repository Path Mapping",
+                                WslPreflightReport.CheckCategory.PATH_MAPPING,
+                                WslPreflightReport.CheckStatus.PASS,
+                                "Mapped the active repository to /mnt/c/wsl-workspaces/wsl-preflight-repo."
+                        ),
+                        new WslPreflightReport.CheckResult(
+                                "codex_cli",
+                                "Codex CLI",
+                                WslPreflightReport.CheckCategory.TOOLING,
+                                WslPreflightReport.CheckStatus.FAIL,
+                                "Codex CLI is unavailable inside the selected WSL distribution: codex: not found"
+                        ),
+                        new WslPreflightReport.CheckResult(
+                                "codex_auth",
+                                "Codex Auth",
+                                WslPreflightReport.CheckCategory.AUTHENTICATION,
+                                WslPreflightReport.CheckStatus.FAIL,
+                                "No OPENAI_API_KEY environment variable or stored Codex credentials were found in /home/test/.codex/auth.json."
+                        ),
+                        new WslPreflightReport.CheckResult(
+                                "git_ready",
+                                "Git Readiness",
+                                WslPreflightReport.CheckCategory.GIT,
+                                WslPreflightReport.CheckStatus.PASS,
+                                "Git can access the active repository at /mnt/c/wsl-workspaces/wsl-preflight-repo."
+                        )
+                )
+        ));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertEquals("WSL execution blocked", harness.text("#wslPreflightSummaryLabel"));
+        assertTrue(harness.text("#wslPreflightDetailLabel").contains("WSL runs stay blocked"));
+        String checks = harness.text("#wslPreflightChecksLabel");
+        assertTrue(checks.contains("PASS | Distribution | WSL Distribution"));
+        assertTrue(checks.contains("PASS | Path Mapping | Repository Path Mapping"));
+        assertTrue(checks.contains("FAIL | Tooling | Codex CLI"));
+        assertTrue(checks.contains("FAIL | Authentication | Codex Auth"));
+        assertTrue(checks.contains("PASS | Git | Git Readiness"));
+    }
+
     private Path createGitRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
+        Files.createDirectory(repository.resolve(".git"));
+        return repository;
+    }
+
+    private Path createGitRepository(Path parentDirectory, String directoryName) throws IOException {
+        Path repository = Files.createDirectory(parentDirectory.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
         return repository;
     }

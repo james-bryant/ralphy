@@ -31,6 +31,15 @@ public class AppShellController {
     private static final String NO_NATIVE_PREFLIGHT_SUMMARY = "Native preflight not run";
     private static final String NO_NATIVE_PREFLIGHT_DETAIL =
             "Run native Windows preflight before starting a PowerShell loop.";
+    private static final String NO_ACTIVE_WSL_PREFLIGHT_SUMMARY = "No active project";
+    private static final String NO_ACTIVE_WSL_PREFLIGHT_DETAIL =
+            "Open or create a repository to check WSL Codex readiness.";
+    private static final String NO_WSL_PREFLIGHT_SUMMARY = "WSL preflight not run";
+    private static final String NO_WSL_PREFLIGHT_DETAIL =
+            "Run WSL preflight before starting a WSL loop.";
+    private static final String WSL_PREFLIGHT_PROFILE_REQUIRED_SUMMARY = "WSL profile not selected";
+    private static final String WSL_PREFLIGHT_PROFILE_REQUIRED_DETAIL =
+            "Save a WSL execution profile before running WSL preflight.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -134,7 +143,22 @@ public class AppShellController {
     private Button runNativePreflightButton;
 
     @FXML
+    private Button runWslPreflightButton;
+
+    @FXML
     private TextField windowsPathPrefixField;
+
+    @FXML
+    private Label wslPreflightChecksLabel;
+
+    @FXML
+    private Label wslPreflightDetailLabel;
+
+    @FXML
+    private Label wslPreflightMessageLabel;
+
+    @FXML
+    private Label wslPreflightSummaryLabel;
 
     @FXML
     private TextField wslDistributionField;
@@ -165,6 +189,7 @@ public class AppShellController {
         projectValidationMessageLabel.managedProperty().bind(projectValidationMessageLabel.visibleProperty());
         executionProfileMessageLabel.managedProperty().bind(executionProfileMessageLabel.visibleProperty());
         nativePreflightMessageLabel.managedProperty().bind(nativePreflightMessageLabel.visibleProperty());
+        wslPreflightMessageLabel.managedProperty().bind(wslPreflightMessageLabel.visibleProperty());
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
@@ -175,6 +200,7 @@ public class AppShellController {
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
         setExecutionProfileMessage("");
         setNativePreflightMessage("");
+        setWslPreflightMessage("");
     }
 
     @FXML
@@ -259,6 +285,7 @@ public class AppShellController {
 
         renderExecutionProfile(saveResult.executionProfile());
         renderNativeWindowsPreflight();
+        renderWslPreflight();
         setExecutionProfileMessage("");
     }
 
@@ -267,6 +294,13 @@ public class AppShellController {
         ActiveProjectService.NativeWindowsPreflightRunResult runResult = activeProjectService.runNativeWindowsPreflight();
         renderNativeWindowsPreflight();
         setNativePreflightMessage(runResult.message());
+    }
+
+    @FXML
+    private void runWslPreflight() {
+        ActiveProjectService.WslPreflightRunResult runResult = activeProjectService.runWslPreflight();
+        renderWslPreflight();
+        setWslPreflightMessage(runResult.message());
     }
 
     private void activateSection(ShellSection section, Button activeButton) {
@@ -311,6 +345,7 @@ public class AppShellController {
 
     private void renderActiveProject(ActiveProject activeProject) {
         setNativePreflightMessage("");
+        setWslPreflightMessage("");
         if (activeProject == null) {
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
@@ -318,6 +353,7 @@ public class AppShellController {
             renderExecutionProfile(null);
             renderExecutionOverview(null);
             renderNativeWindowsPreflight();
+            renderWslPreflight();
             return;
         }
 
@@ -327,6 +363,7 @@ public class AppShellController {
         renderExecutionProfile(activeProjectService.executionProfile().orElse(ExecutionProfile.nativePowerShell()));
         renderExecutionOverview(activeProject);
         renderNativeWindowsPreflight();
+        renderWslPreflight();
     }
 
     private void renderExecutionProfile(ExecutionProfile executionProfile) {
@@ -431,6 +468,44 @@ public class AppShellController {
         nativePreflightChecksLabel.setText(formatNativeWindowsPreflightChecks(report));
     }
 
+    private void renderWslPreflight() {
+        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
+        if (!activeProjectPresent) {
+            runWslPreflightButton.setDisable(true);
+            wslPreflightSummaryLabel.setText(NO_ACTIVE_WSL_PREFLIGHT_SUMMARY);
+            wslPreflightDetailLabel.setText(NO_ACTIVE_WSL_PREFLIGHT_DETAIL);
+            wslPreflightChecksLabel.setText("");
+            return;
+        }
+
+        ExecutionProfile executionProfile = activeProjectService.executionProfile()
+                .orElse(ExecutionProfile.nativePowerShell());
+        if (executionProfile.type() != ExecutionProfile.ProfileType.WSL) {
+            runWslPreflightButton.setDisable(true);
+            wslPreflightSummaryLabel.setText(WSL_PREFLIGHT_PROFILE_REQUIRED_SUMMARY);
+            wslPreflightDetailLabel.setText(WSL_PREFLIGHT_PROFILE_REQUIRED_DETAIL);
+            wslPreflightChecksLabel.setText("");
+            return;
+        }
+
+        runWslPreflightButton.setDisable(false);
+        Optional<WslPreflightReport> wslPreflightReport = activeProjectService.latestWslPreflightReport();
+        if (wslPreflightReport.isEmpty()) {
+            wslPreflightSummaryLabel.setText(NO_WSL_PREFLIGHT_SUMMARY);
+            wslPreflightDetailLabel.setText(NO_WSL_PREFLIGHT_DETAIL);
+            wslPreflightChecksLabel.setText("");
+            return;
+        }
+
+        WslPreflightReport report = wslPreflightReport.get();
+        wslPreflightSummaryLabel.setText(report.passed()
+                ? "Ready for WSL execution"
+                : "WSL execution blocked");
+        wslPreflightDetailLabel.setText("Last checked " + report.executedAt()
+                + ". WSL runs stay blocked until every check passes.");
+        wslPreflightChecksLabel.setText(formatWslPreflightChecks(report));
+    }
+
     private String formatNativeWindowsPreflightChecks(NativeWindowsPreflightReport report) {
         return report.checks().stream()
                 .map(this::formatNativeWindowsPreflightCheck)
@@ -439,6 +514,23 @@ public class AppShellController {
     }
 
     private String formatNativeWindowsPreflightCheck(NativeWindowsPreflightReport.CheckResult checkResult) {
+        return checkResult.status().name()
+                + " | "
+                + checkResult.category().label()
+                + " | "
+                + checkResult.label()
+                + " | "
+                + checkResult.detail();
+    }
+
+    private String formatWslPreflightChecks(WslPreflightReport report) {
+        return report.checks().stream()
+                .map(this::formatWslPreflightCheck)
+                .reduce((left, right) -> left + System.lineSeparator() + right)
+                .orElse("");
+    }
+
+    private String formatWslPreflightCheck(WslPreflightReport.CheckResult checkResult) {
         return checkResult.status().name()
                 + " | "
                 + checkResult.category().label()
@@ -493,6 +585,12 @@ public class AppShellController {
         boolean hasMessage = message != null && !message.isBlank();
         nativePreflightMessageLabel.setText(hasMessage ? message : "");
         nativePreflightMessageLabel.setVisible(hasMessage);
+    }
+
+    private void setWslPreflightMessage(String message) {
+        boolean hasMessage = message != null && !message.isBlank();
+        wslPreflightMessageLabel.setText(hasMessage ? message : "");
+        wslPreflightMessageLabel.setVisible(hasMessage);
     }
 
     private record ShellSection(String title, String workspaceText, String statusText) {

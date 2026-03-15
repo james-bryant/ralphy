@@ -1,5 +1,7 @@
 package net.uberfoo.ai.ralphy;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -19,22 +21,47 @@ public class ActiveProjectService {
     private final NativeWindowsPreflightService nativeWindowsPreflightService;
     private final ProjectMetadataInitializer projectMetadataInitializer;
     private final ProjectStorageInitializer projectStorageInitializer;
+    private final WslPreflightService wslPreflightService;
+    private final boolean autoRunWslPreflight;
     private ActiveProject activeProject;
     private NativeWindowsPreflightReport latestNativeWindowsPreflightReport;
+    private WslPreflightReport latestWslPreflightReport;
     private String startupRecoveryMessage = "";
 
+    @Autowired
     public ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
                                 ProjectMetadataInitializer projectMetadataInitializer,
                                 ProjectStorageInitializer projectStorageInitializer,
                                 LocalMetadataStorage localMetadataStorage,
-                                NativeWindowsPreflightService nativeWindowsPreflightService) {
+                                NativeWindowsPreflightService nativeWindowsPreflightService,
+                                WslPreflightService wslPreflightService,
+                                @Value("${ralphy.preflight.wsl.auto-run:true}") boolean autoRunWslPreflight) {
         this.gitRepositoryInitializer = gitRepositoryInitializer;
         this.projectMetadataInitializer = projectMetadataInitializer;
         this.projectStorageInitializer = projectStorageInitializer;
         this.localMetadataStorage = localMetadataStorage;
         this.nativeWindowsPreflightService = nativeWindowsPreflightService;
+        this.wslPreflightService = wslPreflightService;
+        this.autoRunWslPreflight = autoRunWslPreflight;
         this.localMetadataStorage.startSession();
         restoreLastActiveProject();
+    }
+
+    ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
+                         ProjectMetadataInitializer projectMetadataInitializer,
+                         ProjectStorageInitializer projectStorageInitializer,
+                         LocalMetadataStorage localMetadataStorage,
+                         NativeWindowsPreflightService nativeWindowsPreflightService,
+                         WslPreflightService wslPreflightService) {
+        this(
+                gitRepositoryInitializer,
+                projectMetadataInitializer,
+                projectStorageInitializer,
+                localMetadataStorage,
+                nativeWindowsPreflightService,
+                wslPreflightService,
+                true
+        );
     }
 
     public synchronized Optional<ActiveProject> activeProject() {
@@ -67,6 +94,10 @@ public class ActiveProjectService {
         return Optional.ofNullable(latestNativeWindowsPreflightReport);
     }
 
+    public synchronized Optional<WslPreflightReport> latestWslPreflightReport() {
+        return Optional.ofNullable(latestWslPreflightReport);
+    }
+
     public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
         Objects.requireNonNull(executionProfile, "executionProfile must not be null");
         if (activeProject == null) {
@@ -92,6 +123,11 @@ public class ActiveProjectService {
                 localMetadataStorage.saveExecutionProfile(projectRecord.get().projectId(), executionProfile);
         if (savedProfile.type() == ExecutionProfile.ProfileType.POWERSHELL) {
             runNativeWindowsPreflightInternal();
+        } else {
+            clearWslPreflightState();
+            if (autoRunWslPreflight) {
+                runWslPreflightInternal();
+            }
         }
         return ExecutionProfileSaveResult.success(savedProfile);
     }
@@ -104,6 +140,21 @@ public class ActiveProjectService {
         }
 
         return runNativeWindowsPreflightInternal();
+    }
+
+    public synchronized WslPreflightRunResult runWslPreflight() {
+        if (activeProject == null) {
+            return WslPreflightRunResult.failure(
+                    "Open or create a repository before running WSL preflight."
+            );
+        }
+        if (executionProfile().orElse(ExecutionProfile.nativePowerShell()).type() != ExecutionProfile.ProfileType.WSL) {
+            return WslPreflightRunResult.failure(
+                    "Save a WSL execution profile before running WSL preflight."
+            );
+        }
+
+        return runWslPreflightInternal();
     }
 
     public synchronized ProjectActivationResult openRepository(Path selectedDirectory) {
@@ -188,7 +239,7 @@ public class ActiveProjectService {
 
         activeProject = candidateProject;
         localMetadataStorage.recordProjectActivation(candidateProject);
-        refreshNativeWindowsPreflightState();
+        refreshPreflightState();
         startupRecoveryMessage = "";
         return ProjectActivationResult.success(candidateProject);
     }
@@ -226,11 +277,14 @@ public class ActiveProjectService {
         return Files.isDirectory(repositoryDirectory) && Files.exists(repositoryDirectory.resolve(".git"));
     }
 
-    private void refreshNativeWindowsPreflightState() {
+    private void refreshPreflightState() {
         latestNativeWindowsPreflightReport = readStoredNativeWindowsPreflight().orElse(null);
-        if (executionProfile().orElse(ExecutionProfile.nativePowerShell()).type()
-                == ExecutionProfile.ProfileType.POWERSHELL) {
+        latestWslPreflightReport = readStoredWslPreflight().orElse(null);
+        ExecutionProfile executionProfile = executionProfile().orElse(ExecutionProfile.nativePowerShell());
+        if (executionProfile.type() == ExecutionProfile.ProfileType.POWERSHELL) {
             runNativeWindowsPreflightInternal();
+        } else if (autoRunWslPreflight && latestWslPreflightReport == null) {
+            runWslPreflightInternal();
         }
     }
 
@@ -241,6 +295,18 @@ public class ActiveProjectService {
 
         try {
             return projectMetadataInitializer.readNativeWindowsPreflight(activeProject);
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private Optional<WslPreflightReport> readStoredWslPreflight() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        try {
+            return projectMetadataInitializer.readWslPreflight(activeProject);
         } catch (IOException exception) {
             return Optional.empty();
         }
@@ -263,6 +329,46 @@ public class ActiveProjectService {
                     report,
                     "Unable to store the native Windows preflight result: " + exception.getMessage()
             );
+        }
+    }
+
+    private WslPreflightRunResult runWslPreflightInternal() {
+        if (activeProject == null) {
+            return WslPreflightRunResult.failure(
+                    "Open or create a repository before running WSL preflight."
+            );
+        }
+
+        ExecutionProfile executionProfile = executionProfile().orElse(null);
+        if (executionProfile == null || executionProfile.type() != ExecutionProfile.ProfileType.WSL) {
+            return WslPreflightRunResult.failure(
+                    "Save a WSL execution profile before running WSL preflight."
+            );
+        }
+
+        WslPreflightReport report = wslPreflightService.run(activeProject, executionProfile);
+        latestWslPreflightReport = report;
+        try {
+            projectMetadataInitializer.writeWslPreflight(activeProject, report);
+            return WslPreflightRunResult.success(report);
+        } catch (IOException exception) {
+            return WslPreflightRunResult.failure(
+                    report,
+                    "Unable to store the WSL preflight result: " + exception.getMessage()
+            );
+        }
+    }
+
+    private void clearWslPreflightState() {
+        latestWslPreflightReport = null;
+        if (activeProject == null) {
+            return;
+        }
+
+        try {
+            projectMetadataInitializer.writeWslPreflight(activeProject, null);
+        } catch (IOException ignored) {
+            // Ignore metadata-clear failures here because the execution profile itself was already saved.
         }
     }
 
@@ -418,6 +524,20 @@ public class ActiveProjectService {
 
         private static NativeWindowsPreflightRunResult failure(NativeWindowsPreflightReport report, String message) {
             return new NativeWindowsPreflightRunResult(false, report, message);
+        }
+    }
+
+    public record WslPreflightRunResult(boolean successful, WslPreflightReport report, String message) {
+        private static WslPreflightRunResult success(WslPreflightReport report) {
+            return new WslPreflightRunResult(true, report, "");
+        }
+
+        private static WslPreflightRunResult failure(String message) {
+            return new WslPreflightRunResult(false, null, message);
+        }
+
+        private static WslPreflightRunResult failure(WslPreflightReport report, String message) {
+            return new WslPreflightRunResult(false, report, message);
         }
     }
 

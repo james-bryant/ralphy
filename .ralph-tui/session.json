@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "sessionId": "2b071c1d-d46d-451d-a0fb-67440ae4d3de",
+  "sessionId": "84b1d0e9-ace2-4aa1-9972-9492266724ca",
   "status": "running",
-  "startedAt": "2026-03-15T20:49:42.750Z",
-  "updatedAt": "2026-03-15T23:19:26.043Z",
-  "currentIteration": 12,
+  "startedAt": "2026-03-15T23:32:59.331Z",
+  "updatedAt": "2026-03-15T23:40:49.224Z",
+  "currentIteration": 0,
   "maxIterations": 40,
-  "tasksCompleted": 12,
+  "tasksCompleted": 0,
   "isPaused": false,
   "agentPlugin": "codex",
   "trackerState": {
@@ -14,128 +14,7 @@
     "totalTasks": 0,
     "tasks": []
   },
-  "iterations": [
-    {
-      "iteration": 1,
-      "status": "completed",
-      "taskId": "US-001",
-      "taskTitle": "Add Spring Boot Desktop Dependencies",
-      "taskCompleted": true,
-      "durationMs": 441584,
-      "startedAt": "2026-03-15T20:49:50.915Z",
-      "endedAt": "2026-03-15T20:57:12.499Z"
-    },
-    {
-      "iteration": 2,
-      "status": "completed",
-      "taskId": "US-002",
-      "taskTitle": "Bridge JavaFX Startup to Spring Context",
-      "taskCompleted": true,
-      "durationMs": 598471,
-      "startedAt": "2026-03-15T20:57:38.542Z",
-      "endedAt": "2026-03-15T21:07:37.013Z"
-    },
-    {
-      "iteration": 3,
-      "status": "completed",
-      "taskId": "US-003",
-      "taskTitle": "Replace the Hello Sample with an App Shell",
-      "taskCompleted": true,
-      "durationMs": 482943,
-      "startedAt": "2026-03-15T21:07:39.140Z",
-      "endedAt": "2026-03-15T21:15:42.083Z"
-    },
-    {
-      "iteration": 4,
-      "status": "completed",
-      "taskId": "US-004",
-      "taskTitle": "Apply a Dark Theme to the Shell",
-      "taskCompleted": true,
-      "durationMs": 595108,
-      "startedAt": "2026-03-15T21:15:45.071Z",
-      "endedAt": "2026-03-15T21:25:40.179Z"
-    },
-    {
-      "iteration": 5,
-      "status": "completed",
-      "taskId": "US-005",
-      "taskTitle": "Add a JavaFX UI Test Harness",
-      "taskCompleted": true,
-      "durationMs": 514607,
-      "startedAt": "2026-03-15T21:25:41.706Z",
-      "endedAt": "2026-03-15T21:34:16.313Z"
-    },
-    {
-      "iteration": 6,
-      "status": "completed",
-      "taskId": "US-006",
-      "taskTitle": "Add a Windows Smoke Checklist",
-      "taskCompleted": true,
-      "durationMs": 312976,
-      "startedAt": "2026-03-15T21:34:17.850Z",
-      "endedAt": "2026-03-15T21:39:30.826Z"
-    },
-    {
-      "iteration": 7,
-      "status": "completed",
-      "taskId": "US-007",
-      "taskTitle": "Open an Existing Git Repository",
-      "taskCompleted": true,
-      "durationMs": 613801,
-      "startedAt": "2026-03-15T21:39:32.335Z",
-      "endedAt": "2026-03-15T21:49:46.136Z"
-    },
-    {
-      "iteration": 8,
-      "status": "completed",
-      "taskId": "US-008",
-      "taskTitle": "Create a New Local Git Repository",
-      "taskCompleted": true,
-      "durationMs": 717702,
-      "startedAt": "2026-03-15T21:49:54.455Z",
-      "endedAt": "2026-03-15T22:01:52.157Z"
-    },
-    {
-      "iteration": 9,
-      "status": "completed",
-      "taskId": "US-009",
-      "taskTitle": "Persist Project and Session Metadata",
-      "taskCompleted": true,
-      "durationMs": 928238,
-      "startedAt": "2026-03-15T22:02:01.471Z",
-      "endedAt": "2026-03-15T22:17:29.709Z"
-    },
-    {
-      "iteration": 10,
-      "status": "completed",
-      "taskId": "US-010",
-      "taskTitle": "Store PRDs, Logs, and Artifacts on Disk",
-      "taskCompleted": true,
-      "durationMs": 817172,
-      "startedAt": "2026-03-15T22:17:36.981Z",
-      "endedAt": "2026-03-15T22:31:14.153Z"
-    },
-    {
-      "iteration": 11,
-      "status": "completed",
-      "taskId": "US-011",
-      "taskTitle": "Restore the Last Active Project",
-      "taskCompleted": true,
-      "durationMs": 1013615,
-      "startedAt": "2026-03-15T22:31:20.357Z",
-      "endedAt": "2026-03-15T22:48:13.972Z"
-    },
-    {
-      "iteration": 12,
-      "status": "completed",
-      "taskId": "US-012",
-      "taskTitle": "Save a Per-Project Execution Profile",
-      "taskCompleted": true,
-      "durationMs": 933585,
-      "startedAt": "2026-03-15T22:48:22.257Z",
-      "endedAt": "2026-03-15T23:03:55.842Z"
-    }
-  ],
+  "iterations": [],
   "skippedTaskIds": [],
   "cwd": "C:\\Users\\james\\IdeaProjects\\ralphy",
   "activeTaskIds": [],

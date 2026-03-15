@@ -232,6 +232,36 @@
                             <String fx:value="validation-text"/>
                         </styleClass>
                     </Label>
+                    <Separator/>
+                    <Label text="WSL Preflight">
+                        <styleClass>
+                            <String fx:value="card-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="wslPreflightSummaryLabel" fx:id="wslPreflightSummaryLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="section-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="wslPreflightDetailLabel" fx:id="wslPreflightDetailLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <Button id="runWslPreflightButton" fx:id="runWslPreflightButton"
+                            mnemonicParsing="false" onAction="#runWslPreflight"
+                            text="Run WSL Preflight"/>
+                    <Label id="wslPreflightChecksLabel" fx:id="wslPreflightChecksLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="wslPreflightMessageLabel" fx:id="wslPreflightMessageLabel" visible="false"
+                           wrapText="true">
+                        <styleClass>
+                            <String fx:value="validation-text"/>
+                        </styleClass>
+                    </Label>
                 </VBox>
             </HBox>
             <StackPane>
