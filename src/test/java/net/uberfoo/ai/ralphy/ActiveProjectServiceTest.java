@@ -288,27 +288,72 @@ class ActiveProjectServiceTest {
                 activeProjectService.executionProfile().orElseThrow().type());
     }
 
+    @Test
+    void openRepositoryRunsAndStoresNativeWindowsPreflightForPowerShellProjects() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path repository = createGitDirectoryRepository("preflight-repo");
+        Files.writeString(repository.resolve("mvnw.cmd"), "@echo off\r\n");
+        Files.writeString(repository.resolve("pom.xml"), "<project/>");
+
+        ActiveProjectService.ProjectActivationResult activationResult = activeProjectService.openRepository(repository);
+
+        assertTrue(activationResult.successful());
+        NativeWindowsPreflightReport report = activeProjectService.latestNativeWindowsPreflightReport().orElseThrow();
+        assertTrue(report.passed());
+        assertEquals(4, report.checks().size());
+        NativeWindowsPreflightReport storedReport = projectMetadataInitializer
+                .readNativeWindowsPreflight(new ActiveProject(repository))
+                .orElseThrow();
+        assertEquals(report.status(), storedReport.status());
+        assertTrue(Files.readString(new ActiveProject(repository).projectMetadataPath())
+                .contains("\"nativeWindowsPreflight\""));
+    }
+
     private Path createGitDirectoryRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
         return repository;
     }
 
-    private ActiveProjectService createService() {
+    private ActiveProjectService createService() throws IOException {
         return createService(createStorage());
     }
 
-    private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage) {
+    private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage) throws IOException {
         return new ActiveProjectService(
                 gitRepositoryInitializer,
                 projectMetadataInitializer,
                 projectStorageInitializer,
-                localMetadataStorage
+                localMetadataStorage,
+                createPreflightService()
         );
     }
 
     private LocalMetadataStorage createStorage() {
         return LocalMetadataStorage.forTest(tempDir.resolve("local-storage"));
+    }
+
+    private NativeWindowsPreflightService createPreflightService() throws IOException {
+        Path codexHome = tempDir.resolve("codex-home");
+        Files.createDirectories(codexHome);
+        Files.writeString(codexHome.resolve("auth.json"), """
+                {
+                  "OPENAI_API_KEY": null,
+                  "tokens": {
+                    "access_token": "token"
+                  }
+                }
+                """);
+
+        return new NativeWindowsPreflightService(
+                java.util.Map.of(),
+                codexHome,
+                (workingDirectory, command) -> switch (command.getFirst()) {
+                    case "codex" -> NativeWindowsPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
+                    case "git" -> NativeWindowsPreflightService.CommandResult.success(0, "true");
+                    default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
+                }
+        );
     }
 
     private void assertManagedProjectStorage(ActiveProject activeProject) {

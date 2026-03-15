@@ -25,6 +25,12 @@ public class AppShellController {
             "The active project has no resumable or reviewable run metadata yet.";
     private static final String NO_ACTIVE_PROFILE_SUMMARY =
             "Open or create a repository to configure its execution profile.";
+    private static final String NO_ACTIVE_NATIVE_PREFLIGHT_SUMMARY = "No active project";
+    private static final String NO_ACTIVE_NATIVE_PREFLIGHT_DETAIL =
+            "Open or create a repository to check native Windows Codex readiness.";
+    private static final String NO_NATIVE_PREFLIGHT_SUMMARY = "Native preflight not run";
+    private static final String NO_NATIVE_PREFLIGHT_DETAIL =
+            "Run native Windows preflight before starting a PowerShell loop.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -83,6 +89,18 @@ public class AppShellController {
     private RadioButton nativeExecutionProfileRadioButton;
 
     @FXML
+    private Label nativePreflightChecksLabel;
+
+    @FXML
+    private Label nativePreflightDetailLabel;
+
+    @FXML
+    private Label nativePreflightMessageLabel;
+
+    @FXML
+    private Label nativePreflightSummaryLabel;
+
+    @FXML
     private Button openRepositoryButton;
 
     @FXML
@@ -111,6 +129,9 @@ public class AppShellController {
 
     @FXML
     private Button saveExecutionProfileButton;
+
+    @FXML
+    private Button runNativePreflightButton;
 
     @FXML
     private TextField windowsPathPrefixField;
@@ -143,6 +164,7 @@ public class AppShellController {
         clearActiveNavigationButton();
         projectValidationMessageLabel.managedProperty().bind(projectValidationMessageLabel.visibleProperty());
         executionProfileMessageLabel.managedProperty().bind(executionProfileMessageLabel.visibleProperty());
+        nativePreflightMessageLabel.managedProperty().bind(nativePreflightMessageLabel.visibleProperty());
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
@@ -152,6 +174,7 @@ public class AppShellController {
         renderActiveProject(activeProjectService.activeProject().orElse(null));
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
         setExecutionProfileMessage("");
+        setNativePreflightMessage("");
     }
 
     @FXML
@@ -235,7 +258,15 @@ public class AppShellController {
         }
 
         renderExecutionProfile(saveResult.executionProfile());
+        renderNativeWindowsPreflight();
         setExecutionProfileMessage("");
+    }
+
+    @FXML
+    private void runNativeWindowsPreflight() {
+        ActiveProjectService.NativeWindowsPreflightRunResult runResult = activeProjectService.runNativeWindowsPreflight();
+        renderNativeWindowsPreflight();
+        setNativePreflightMessage(runResult.message());
     }
 
     private void activateSection(ShellSection section, Button activeButton) {
@@ -279,12 +310,14 @@ public class AppShellController {
     }
 
     private void renderActiveProject(ActiveProject activeProject) {
+        setNativePreflightMessage("");
         if (activeProject == null) {
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
             activeProjectStatusLabel.setText(NO_ACTIVE_PROJECT_STATUS);
             renderExecutionProfile(null);
             renderExecutionOverview(null);
+            renderNativeWindowsPreflight();
             return;
         }
 
@@ -293,6 +326,7 @@ public class AppShellController {
         activeProjectStatusLabel.setText(activeProject.displayName());
         renderExecutionProfile(activeProjectService.executionProfile().orElse(ExecutionProfile.nativePowerShell()));
         renderExecutionOverview(activeProject);
+        renderNativeWindowsPreflight();
     }
 
     private void renderExecutionProfile(ExecutionProfile executionProfile) {
@@ -368,6 +402,52 @@ public class AppShellController {
         return "The latest run";
     }
 
+    private void renderNativeWindowsPreflight() {
+        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
+        runNativePreflightButton.setDisable(!activeProjectPresent);
+
+        if (!activeProjectPresent) {
+            nativePreflightSummaryLabel.setText(NO_ACTIVE_NATIVE_PREFLIGHT_SUMMARY);
+            nativePreflightDetailLabel.setText(NO_ACTIVE_NATIVE_PREFLIGHT_DETAIL);
+            nativePreflightChecksLabel.setText("");
+            return;
+        }
+
+        Optional<NativeWindowsPreflightReport> nativePreflightReport =
+                activeProjectService.latestNativeWindowsPreflightReport();
+        if (nativePreflightReport.isEmpty()) {
+            nativePreflightSummaryLabel.setText(NO_NATIVE_PREFLIGHT_SUMMARY);
+            nativePreflightDetailLabel.setText(NO_NATIVE_PREFLIGHT_DETAIL);
+            nativePreflightChecksLabel.setText("");
+            return;
+        }
+
+        NativeWindowsPreflightReport report = nativePreflightReport.get();
+        nativePreflightSummaryLabel.setText(report.passed()
+                ? "Ready for native execution"
+                : "Native execution blocked");
+        nativePreflightDetailLabel.setText("Last checked " + report.executedAt()
+                + ". Native PowerShell runs stay blocked until every check passes.");
+        nativePreflightChecksLabel.setText(formatNativeWindowsPreflightChecks(report));
+    }
+
+    private String formatNativeWindowsPreflightChecks(NativeWindowsPreflightReport report) {
+        return report.checks().stream()
+                .map(this::formatNativeWindowsPreflightCheck)
+                .reduce((left, right) -> left + System.lineSeparator() + right)
+                .orElse("");
+    }
+
+    private String formatNativeWindowsPreflightCheck(NativeWindowsPreflightReport.CheckResult checkResult) {
+        return checkResult.status().name()
+                + " | "
+                + checkResult.category().label()
+                + " | "
+                + checkResult.label()
+                + " | "
+                + checkResult.detail();
+    }
+
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
     }
@@ -407,6 +487,12 @@ public class AppShellController {
         boolean hasMessage = message != null && !message.isBlank();
         executionProfileMessageLabel.setText(hasMessage ? message : "");
         executionProfileMessageLabel.setVisible(hasMessage);
+    }
+
+    private void setNativePreflightMessage(String message) {
+        boolean hasMessage = message != null && !message.isBlank();
+        nativePreflightMessageLabel.setText(hasMessage ? message : "");
+        nativePreflightMessageLabel.setVisible(hasMessage);
     }
 
     private record ShellSection(String title, String workspaceText, String statusText) {

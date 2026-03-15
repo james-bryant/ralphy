@@ -16,19 +16,23 @@ import java.util.stream.Stream;
 public class ActiveProjectService {
     private final GitRepositoryInitializer gitRepositoryInitializer;
     private final LocalMetadataStorage localMetadataStorage;
+    private final NativeWindowsPreflightService nativeWindowsPreflightService;
     private final ProjectMetadataInitializer projectMetadataInitializer;
     private final ProjectStorageInitializer projectStorageInitializer;
     private ActiveProject activeProject;
+    private NativeWindowsPreflightReport latestNativeWindowsPreflightReport;
     private String startupRecoveryMessage = "";
 
     public ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
                                 ProjectMetadataInitializer projectMetadataInitializer,
                                 ProjectStorageInitializer projectStorageInitializer,
-                                LocalMetadataStorage localMetadataStorage) {
+                                LocalMetadataStorage localMetadataStorage,
+                                NativeWindowsPreflightService nativeWindowsPreflightService) {
         this.gitRepositoryInitializer = gitRepositoryInitializer;
         this.projectMetadataInitializer = projectMetadataInitializer;
         this.projectStorageInitializer = projectStorageInitializer;
         this.localMetadataStorage = localMetadataStorage;
+        this.nativeWindowsPreflightService = nativeWindowsPreflightService;
         this.localMetadataStorage.startSession();
         restoreLastActiveProject();
     }
@@ -59,6 +63,10 @@ public class ActiveProjectService {
         return localMetadataStorage.executionProfileForRepository(activeProject.repositoryPath());
     }
 
+    public synchronized Optional<NativeWindowsPreflightReport> latestNativeWindowsPreflightReport() {
+        return Optional.ofNullable(latestNativeWindowsPreflightReport);
+    }
+
     public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
         Objects.requireNonNull(executionProfile, "executionProfile must not be null");
         if (activeProject == null) {
@@ -82,7 +90,20 @@ public class ActiveProjectService {
 
         ExecutionProfile savedProfile =
                 localMetadataStorage.saveExecutionProfile(projectRecord.get().projectId(), executionProfile);
+        if (savedProfile.type() == ExecutionProfile.ProfileType.POWERSHELL) {
+            runNativeWindowsPreflightInternal();
+        }
         return ExecutionProfileSaveResult.success(savedProfile);
+    }
+
+    public synchronized NativeWindowsPreflightRunResult runNativeWindowsPreflight() {
+        if (activeProject == null) {
+            return NativeWindowsPreflightRunResult.failure(
+                    "Open or create a repository before running native Windows preflight."
+            );
+        }
+
+        return runNativeWindowsPreflightInternal();
     }
 
     public synchronized ProjectActivationResult openRepository(Path selectedDirectory) {
@@ -167,6 +188,7 @@ public class ActiveProjectService {
 
         activeProject = candidateProject;
         localMetadataStorage.recordProjectActivation(candidateProject);
+        refreshNativeWindowsPreflightState();
         startupRecoveryMessage = "";
         return ProjectActivationResult.success(candidateProject);
     }
@@ -202,6 +224,46 @@ public class ActiveProjectService {
 
     private boolean isGitRepository(Path repositoryDirectory) {
         return Files.isDirectory(repositoryDirectory) && Files.exists(repositoryDirectory.resolve(".git"));
+    }
+
+    private void refreshNativeWindowsPreflightState() {
+        latestNativeWindowsPreflightReport = readStoredNativeWindowsPreflight().orElse(null);
+        if (executionProfile().orElse(ExecutionProfile.nativePowerShell()).type()
+                == ExecutionProfile.ProfileType.POWERSHELL) {
+            runNativeWindowsPreflightInternal();
+        }
+    }
+
+    private Optional<NativeWindowsPreflightReport> readStoredNativeWindowsPreflight() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        try {
+            return projectMetadataInitializer.readNativeWindowsPreflight(activeProject);
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private NativeWindowsPreflightRunResult runNativeWindowsPreflightInternal() {
+        if (activeProject == null) {
+            return NativeWindowsPreflightRunResult.failure(
+                    "Open or create a repository before running native Windows preflight."
+            );
+        }
+
+        NativeWindowsPreflightReport report = nativeWindowsPreflightService.run(activeProject);
+        latestNativeWindowsPreflightReport = report;
+        try {
+            projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, report);
+            return NativeWindowsPreflightRunResult.success(report);
+        } catch (IOException exception) {
+            return NativeWindowsPreflightRunResult.failure(
+                    report,
+                    "Unable to store the native Windows preflight result: " + exception.getMessage()
+            );
+        }
     }
 
     private Optional<RunRecoveryCandidate> toRunRecoveryCandidate(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
@@ -340,6 +402,22 @@ public class ActiveProjectService {
 
         private static ExecutionProfileSaveResult failure(String message) {
             return new ExecutionProfileSaveResult(false, null, message);
+        }
+    }
+
+    public record NativeWindowsPreflightRunResult(boolean successful,
+                                                  NativeWindowsPreflightReport report,
+                                                  String message) {
+        private static NativeWindowsPreflightRunResult success(NativeWindowsPreflightReport report) {
+            return new NativeWindowsPreflightRunResult(true, report, "");
+        }
+
+        private static NativeWindowsPreflightRunResult failure(String message) {
+            return new NativeWindowsPreflightRunResult(false, null, message);
+        }
+
+        private static NativeWindowsPreflightRunResult failure(NativeWindowsPreflightReport report, String message) {
+            return new NativeWindowsPreflightRunResult(false, report, message);
         }
     }
 

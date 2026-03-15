@@ -19,6 +19,7 @@ after each iteration and it's included in prompts for context.
 - For repo-local PRD and run-artifact storage, compute the `.ralph-tui` layout from the active repository and re-run an idempotent directory bootstrap on every project activation so missing storage folders self-heal before metadata is persisted.
 - Restore startup project context by resolving the most recent session-backed project from local metadata and reactivating it through the same service path used for manual open/create flows; that keeps repository validation, storage bootstrapping, and metadata refresh aligned across cold start and interactive onboarding.
 - When a new per-project desktop setting is added to the versioned local metadata store, normalize and backfill it during load so older project records become immediately editable in the UI without a separate migration command.
+- Store project-specific desktop diagnostics in `.ralph-tui/project-metadata.json` and preserve them when activation refreshes repository metadata; that keeps the latest readiness state portable with the repository instead of duplicating it in the app-level store.
 
 ---
 
@@ -191,4 +192,18 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - The live JavaFX launch still ignored custom storage-location args in this environment, so the manual smoke had to seed and later restore the default app metadata file to verify startup restoration of a saved execution profile.
     - Long WSL summary text remained accessible through Windows UI Automation, which made it practical to verify the live desktop state without adding a dedicated debug surface.
+---
+
+## 2026-03-15 - US-013
+- Implemented native Windows preflight diagnostics that check `codex` CLI availability, Codex auth presence, Git readiness for the active repository, and availability of the native quality-gate command `.\mvnw.cmd clean verify jacoco:report`.
+- Wired PowerShell-profile projects to run native preflight on activation/save, persist the latest report in `.ralph-tui/project-metadata.json`, and render categorized pass/fail results plus rerun controls in the `Projects` workspace.
+- Added regression coverage for native preflight success/failure categorization, persistence through `ActiveProjectService`, and JavaFX rendering of stored native preflight failures; updated the Windows smoke checklist for the new diagnostics surface.
+- Files changed: `docs/windows-smoke-checklist.md`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`, `src/main/java/net/uberfoo/ai/ralphy/NativeWindowsPreflightReport.java`, `src/main/java/net/uberfoo/ai/ralphy/NativeWindowsPreflightService.java`, `src/main/java/net/uberfoo/ai/ralphy/ProjectMetadataInitializer.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/test/java/net/uberfoo/ai/ralphy\ActiveProjectServiceTest.java`, `src/test/java/net/uberfoo/ai/ralphy\AppShellUiTest.java`, `src/test/java/net/uberfoo/ai/ralphy\NativeWindowsPreflightServiceTest.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - Repository-local readiness data belongs in project metadata when the UI needs to restore and render the latest diagnostics even without rerunning every environment-specific check on startup.
+    - Modeling preflight as a full ordered report of categorized blocking checks makes it easy to reuse the same structure for persistence, service assertions, and JavaFX rendering.
+  - Gotchas encountered
+    - `codex login status` was not reliable in this sandbox because it failed on configuration access, so auth detection had to read `OPENAI_API_KEY` or the stored `~/.codex/auth.json` shape directly.
+    - PowerShell treats Maven comma-separated `-Dtest=` values as an expression unless the property is quoted, which broke the first targeted test run.
 ---

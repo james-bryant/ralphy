@@ -14,7 +14,7 @@ import java.time.Instant;
 
 @Component
 public class ProjectMetadataInitializer {
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     public void writeMetadata(ActiveProject activeProject) throws IOException {
@@ -29,12 +29,45 @@ public class ProjectMetadataInitializer {
                 activeProject.displayPath(),
                 metadataPath.toString(),
                 activeProject.storagePaths(),
+                existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
                 timestamp
         );
         persistMetadata(metadataPath, metadataDocument);
+    }
+
+    public void writeNativeWindowsPreflight(ActiveProject activeProject,
+                                            NativeWindowsPreflightReport nativeWindowsPreflight) throws IOException {
+        Files.createDirectories(activeProject.ralphyDirectoryPath());
+
+        Path metadataPath = activeProject.projectMetadataPath();
+        String timestamp = Instant.now().toString();
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
+        ProjectMetadataDocument metadataDocument = new ProjectMetadataDocument(
+                SCHEMA_VERSION,
+                activeProject.displayName(),
+                activeProject.displayPath(),
+                metadataPath.toString(),
+                activeProject.storagePaths(),
+                nativeWindowsPreflight,
+                existingMetadata == null || existingMetadata.createdAt() == null
+                        ? timestamp
+                        : existingMetadata.createdAt(),
+                timestamp
+        );
+        persistMetadata(metadataPath, metadataDocument);
+    }
+
+    public java.util.Optional<NativeWindowsPreflightReport> readNativeWindowsPreflight(ActiveProject activeProject)
+            throws IOException {
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(activeProject.projectMetadataPath());
+        if (existingMetadata == null) {
+            return java.util.Optional.empty();
+        }
+
+        return java.util.Optional.ofNullable(existingMetadata.nativeWindowsPreflight());
     }
 
     private ProjectMetadataDocument readExistingMetadata(Path metadataPath) throws IOException {
@@ -70,6 +103,7 @@ public class ProjectMetadataInitializer {
                                            String repositoryPath,
                                            String projectMetadataPath,
                                            ActiveProject.ProjectStoragePaths storage,
+                                           NativeWindowsPreflightReport nativeWindowsPreflight,
                                            String createdAt,
                                            String updatedAt) {
     }

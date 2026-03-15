@@ -202,6 +202,36 @@
                             <String fx:value="muted-text"/>
                         </styleClass>
                     </Label>
+                    <Separator/>
+                    <Label text="Native Windows Preflight">
+                        <styleClass>
+                            <String fx:value="card-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="nativePreflightSummaryLabel" fx:id="nativePreflightSummaryLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="section-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="nativePreflightDetailLabel" fx:id="nativePreflightDetailLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <Button id="runNativePreflightButton" fx:id="runNativePreflightButton"
+                            mnemonicParsing="false" onAction="#runNativeWindowsPreflight"
+                            text="Run Native Preflight"/>
+                    <Label id="nativePreflightChecksLabel" fx:id="nativePreflightChecksLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="nativePreflightMessageLabel" fx:id="nativePreflightMessageLabel" visible="false"
+                           wrapText="true">
+                        <styleClass>
+                            <String fx:value="validation-text"/>
+                        </styleClass>
+                    </Label>
                 </VBox>
             </HBox>
             <StackPane>

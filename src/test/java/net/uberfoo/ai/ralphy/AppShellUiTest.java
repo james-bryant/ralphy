@@ -243,6 +243,70 @@ class AppShellUiTest {
         assertEquals("", harness.text("#executionProfileMessageLabel"));
     }
 
+    @Test
+    void appShellShowsStoredNativePreflightFailuresWithCategories() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("preflight-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.saveExecutionProfile(projectId, new ExecutionProfile(
+                ExecutionProfile.ProfileType.WSL,
+                "Ubuntu-24.04",
+                "C:\\Users\\james\\workspaces",
+                "/mnt/c/Users/james/workspaces"
+        ));
+
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, new NativeWindowsPreflightReport(
+                "2026-03-15T22:30:00Z",
+                NativeWindowsPreflightReport.OverallStatus.FAIL,
+                List.of(
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "codex_cli",
+                                "Codex CLI",
+                                NativeWindowsPreflightReport.CheckCategory.TOOLING,
+                                NativeWindowsPreflightReport.CheckStatus.PASS,
+                                "Detected codex-cli 0.114.0."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "codex_auth",
+                                "Codex Auth",
+                                NativeWindowsPreflightReport.CheckCategory.AUTHENTICATION,
+                                NativeWindowsPreflightReport.CheckStatus.FAIL,
+                                "No stored Codex credentials were found in C:\\Users\\james\\.codex\\auth.json."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "git_ready",
+                                "Git Readiness",
+                                NativeWindowsPreflightReport.CheckCategory.GIT,
+                                NativeWindowsPreflightReport.CheckStatus.PASS,
+                                "Git can access the active repository at " + repository.toAbsolutePath().normalize() + "."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "quality_gate",
+                                "Quality Gate Command",
+                                NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
+                                NativeWindowsPreflightReport.CheckStatus.FAIL,
+                                "The quality-gate command .\\mvnw.cmd clean verify jacoco:report is unavailable because "
+                                        + repository.toAbsolutePath().normalize().resolve("mvnw.cmd") + " is missing."
+                        )
+                )
+        ));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertEquals("Native execution blocked", harness.text("#nativePreflightSummaryLabel"));
+        assertTrue(harness.text("#nativePreflightDetailLabel").contains("Native PowerShell runs stay blocked"));
+        String checks = harness.text("#nativePreflightChecksLabel");
+        assertTrue(checks.contains("PASS | Tooling | Codex CLI"));
+        assertTrue(checks.contains("FAIL | Authentication | Codex Auth"));
+        assertTrue(checks.contains("PASS | Git | Git Readiness"));
+        assertTrue(checks.contains("FAIL | Quality Gate | Quality Gate Command"));
+    }
+
     private Path createGitRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
