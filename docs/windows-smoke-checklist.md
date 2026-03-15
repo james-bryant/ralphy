@@ -29,9 +29,13 @@ Run this baseline even when later workflow stories are still incomplete. For any
 8. Confirm a validation message states the selected folder is not a Git repository and the previous active project remains unchanged.
 9. In the `Create New Repository` field, enter a new folder name and use `Create New Repository` to choose a parent folder.
 10. Confirm a new Git repository folder is created, the `Active Repository` card updates to that new repository, and `.ralph-tui/project-metadata.json` plus the `prds`, `prd-json`, `prompts`, `logs`, and `artifacts` directories exist inside the new folder.
-11. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
-12. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
-13. Close the app cleanly.
+11. Close the app cleanly.
+12. Relaunch the desktop shell with `.\mvnw.cmd -q -DskipTests javafx:run`.
+13. Confirm the last active repository is restored automatically, the `Active Repository` card shows the same repository from the previous launch, and the `Execution Overview` card shows either `No persisted run state` or a resumable/reviewable message when seeded run metadata exists.
+14. Using a disposable test repository, move the active repository or temporarily remove/rename its `.git` marker, relaunch the app, and confirm a clear recovery message explains that the last active repository could not be restored.
+15. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
+16. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
+17. Close the app cleanly.
 
 ## Scenario A: Native Windows Execution Profile
 

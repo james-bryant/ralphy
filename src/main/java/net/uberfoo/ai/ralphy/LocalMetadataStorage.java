@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -104,6 +105,36 @@ public class LocalMetadataStorage {
         persistState();
     }
 
+    public synchronized Optional<ProjectRecord> lastActiveProjectRecord() {
+        for (int index = state.sessions().size() - 1; index >= 0; index--) {
+            SessionRecord sessionRecord = state.sessions().get(index);
+            if (!isPopulated(sessionRecord.activeProjectId())) {
+                continue;
+            }
+
+            Optional<ProjectRecord> projectRecord = findProjectById(sessionRecord.activeProjectId());
+            if (projectRecord.isPresent()) {
+                return projectRecord;
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public synchronized Optional<ProjectRecord> projectRecordForRepository(Path repositoryPath) {
+        return findProjectByRepositoryPath(repositoryPath);
+    }
+
+    public synchronized Optional<RunMetadataRecord> latestRunMetadataForProject(String projectId) {
+        if (!isPopulated(projectId)) {
+            return Optional.empty();
+        }
+
+        return state.runMetadata().stream()
+                .filter(runMetadataRecord -> projectId.equals(runMetadataRecord.projectId()))
+                .max(Comparator.comparing(this::runSortKey));
+    }
+
     public synchronized LocalMetadataSnapshot snapshot() {
         return state;
     }
@@ -129,10 +160,27 @@ public class LocalMetadataStorage {
         currentSessionId = null;
     }
 
+    synchronized void replaceRunMetadataForTest(List<RunMetadataRecord> runMetadata) {
+        state = new LocalMetadataSnapshot(
+                SCHEMA_VERSION,
+                state.projects(),
+                state.sessions(),
+                state.profiles(),
+                List.copyOf(Objects.requireNonNull(runMetadata, "runMetadata must not be null"))
+        );
+        persistState();
+    }
+
     private Optional<ProjectRecord> findProjectByRepositoryPath(Path repositoryPath) {
         String normalizedRepositoryPath = repositoryPath.toAbsolutePath().normalize().toString();
         return state.projects().stream()
                 .filter(projectRecord -> projectRecord.repositoryPath().equals(normalizedRepositoryPath))
+                .findFirst();
+    }
+
+    private Optional<ProjectRecord> findProjectById(String projectId) {
+        return state.projects().stream()
+                .filter(projectRecord -> projectRecord.projectId().equals(projectId))
                 .findFirst();
     }
 
@@ -330,6 +378,18 @@ public class LocalMetadataStorage {
 
     private boolean isPopulated(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String runSortKey(RunMetadataRecord runMetadataRecord) {
+        if (isPopulated(runMetadataRecord.endedAt())) {
+            return runMetadataRecord.endedAt();
+        }
+
+        if (isPopulated(runMetadataRecord.startedAt())) {
+            return runMetadataRecord.startedAt();
+        }
+
+        return "";
     }
 
     private LocalMetadataSnapshot emptyState() {

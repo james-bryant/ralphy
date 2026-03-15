@@ -15,6 +15,12 @@ public class AppShellController {
     private static final String NO_ACTIVE_PROJECT_PATH =
             "Open an existing repository or create a new one to make it the active project.";
     private static final String NO_ACTIVE_PROJECT_STATUS = "No active project selected.";
+    private static final String NO_ACTIVE_PROJECT_RUN_TITLE = "No active project";
+    private static final String NO_ACTIVE_PROJECT_RUN_DETAIL =
+            "Choose or restore a project to view resumable or reviewable run state.";
+    private static final String NO_PERSISTED_RUN_STATE_TITLE = "No persisted run state";
+    private static final String NO_PERSISTED_RUN_STATE_DETAIL =
+            "The active project has no resumable or reviewable run metadata yet.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -52,6 +58,12 @@ public class AppShellController {
 
     @FXML
     private Button executionNavButton;
+
+    @FXML
+    private Label executionOverviewDetailLabel;
+
+    @FXML
+    private Label executionOverviewHeadlineLabel;
 
     @FXML
     private Label navigationPlaceholderLabel;
@@ -101,8 +113,8 @@ public class AppShellController {
         workspaceTitleLabel.setText("Workspace");
         clearActiveNavigationButton();
         projectValidationMessageLabel.managedProperty().bind(projectValidationMessageLabel.visibleProperty());
-        setProjectValidationMessage("");
         renderActiveProject(activeProjectService.activeProject().orElse(null));
+        setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
     }
 
     @FXML
@@ -221,12 +233,62 @@ public class AppShellController {
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
             activeProjectStatusLabel.setText(NO_ACTIVE_PROJECT_STATUS);
+            renderExecutionOverview(null);
             return;
         }
 
         activeProjectNameLabel.setText(activeProject.displayName());
         activeProjectPathLabel.setText(activeProject.displayPath());
         activeProjectStatusLabel.setText(activeProject.displayName());
+        renderExecutionOverview(activeProject);
+    }
+
+    private void renderExecutionOverview(ActiveProject activeProject) {
+        if (activeProject == null) {
+            executionOverviewHeadlineLabel.setText(NO_ACTIVE_PROJECT_RUN_TITLE);
+            executionOverviewDetailLabel.setText(NO_ACTIVE_PROJECT_RUN_DETAIL);
+            return;
+        }
+
+        Optional<ActiveProjectService.RunRecoveryCandidate> runRecoveryCandidate =
+                activeProjectService.latestRunRecoveryState();
+        if (runRecoveryCandidate.isEmpty()) {
+            executionOverviewHeadlineLabel.setText(NO_PERSISTED_RUN_STATE_TITLE);
+            executionOverviewDetailLabel.setText(NO_PERSISTED_RUN_STATE_DETAIL);
+            return;
+        }
+
+        ActiveProjectService.RunRecoveryCandidate candidate = runRecoveryCandidate.get();
+        executionOverviewHeadlineLabel.setText(candidate.action().label() + " run available");
+        executionOverviewDetailLabel.setText(describeRunRecovery(candidate));
+    }
+
+    private String describeRunRecovery(ActiveProjectService.RunRecoveryCandidate candidate) {
+        String runSubject = formatRunSubject(candidate);
+        if (candidate.action() == ActiveProjectService.RunRecoveryAction.RESUMABLE) {
+            return runSubject + " is in " + candidate.status() + " state and can be resumed.";
+        }
+
+        return runSubject + " ended in " + candidate.status() + " state and can be reviewed.";
+    }
+
+    private String formatRunSubject(ActiveProjectService.RunRecoveryCandidate candidate) {
+        boolean hasStoryId = hasText(candidate.storyId());
+        boolean hasRunId = hasText(candidate.runId());
+        if (hasStoryId && hasRunId) {
+            return "Story " + candidate.storyId() + " from run " + candidate.runId();
+        }
+        if (hasStoryId) {
+            return "Story " + candidate.storyId();
+        }
+        if (hasRunId) {
+            return "Run " + candidate.runId();
+        }
+        return "The latest run";
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void setProjectValidationMessage(String message) {

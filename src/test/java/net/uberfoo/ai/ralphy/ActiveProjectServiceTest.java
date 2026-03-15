@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -135,6 +136,90 @@ class ActiveProjectServiceTest {
         assertTrue(Files.isDirectory(activeProject.logsDirectoryPath()));
     }
 
+    @Test
+    void startupRestoresTheLastActiveRepositoryWhenItStillExists() throws IOException {
+        Path repository = createGitDirectoryRepository("restored-repo");
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
+        localMetadataStorage.finishSession();
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+
+        ActiveProject restoredProject = activeProjectService.activeProject().orElseThrow();
+        assertEquals(repository.toAbsolutePath().normalize(), restoredProject.repositoryPath());
+        assertEquals("", activeProjectService.startupRecoveryMessage());
+        assertManagedProjectStorage(restoredProject);
+    }
+
+    @Test
+    void startupShowsRecoveryMessageWhenTheLastActiveRepositoryCannotBeRestored() throws IOException {
+        Path repository = createGitDirectoryRepository("missing-repo");
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
+        localMetadataStorage.finishSession();
+        Files.delete(repository.resolve(".git"));
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+
+        assertTrue(activeProjectService.activeProject().isEmpty());
+        assertEquals("Last active repository could not be restored because it is missing or no longer "
+                        + "a Git repository: " + repository.toAbsolutePath().normalize()
+                        + ". Open an existing repository or create a new one to continue.",
+                activeProjectService.startupRecoveryMessage());
+    }
+
+    @Test
+    void latestRunRecoveryStateMarksActiveRunsAsResumable() throws IOException {
+        Path repository = createGitDirectoryRepository("resumable-repo");
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
+        localMetadataStorage.finishSession();
+
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(new LocalMetadataStorage.RunMetadataRecord(
+                "run-123",
+                projectId,
+                "US-011",
+                "RUNNING",
+                "2026-03-15T19:10:00Z",
+                null
+        )));
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+
+        ActiveProjectService.RunRecoveryCandidate candidate =
+                activeProjectService.latestRunRecoveryState().orElseThrow();
+        assertEquals(ActiveProjectService.RunRecoveryAction.RESUMABLE, candidate.action());
+        assertEquals("RUNNING", candidate.status());
+        assertEquals("US-011", candidate.storyId());
+    }
+
+    @Test
+    void latestRunRecoveryStateMarksEndedIncompleteRunsAsReviewable() throws IOException {
+        Path repository = createGitDirectoryRepository("reviewable-repo");
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
+        localMetadataStorage.finishSession();
+
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(new LocalMetadataStorage.RunMetadataRecord(
+                "run-456",
+                projectId,
+                "US-011",
+                "FAILED",
+                "2026-03-15T19:10:00Z",
+                "2026-03-15T19:15:00Z"
+        )));
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+
+        ActiveProjectService.RunRecoveryCandidate candidate =
+                activeProjectService.latestRunRecoveryState().orElseThrow();
+        assertEquals(ActiveProjectService.RunRecoveryAction.REVIEWABLE, candidate.action());
+        assertEquals("FAILED", candidate.status());
+        assertEquals("US-011", candidate.storyId());
+    }
+
     private Path createGitDirectoryRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
@@ -142,11 +227,15 @@ class ActiveProjectServiceTest {
     }
 
     private ActiveProjectService createService() {
+        return createService(createStorage());
+    }
+
+    private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage) {
         return new ActiveProjectService(
                 gitRepositoryInitializer,
                 projectMetadataInitializer,
                 projectStorageInitializer,
-                createStorage()
+                localMetadataStorage
         );
     }
 

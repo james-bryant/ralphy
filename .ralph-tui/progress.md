@@ -17,6 +17,7 @@ after each iteration and it's included in prompts for context.
 - When a JavaFX workflow must create a new filesystem folder, pair a text field for the new leaf directory name with a chooser for the existing parent folder; JavaFX `DirectoryChooser` cannot target a path that does not exist yet.
 - Keep app-level desktop metadata in a versioned local store outside the repository, and persist updates by writing a temporary JSON file and atomically moving it into place so project/session records survive restarts without partial writes.
 - For repo-local PRD and run-artifact storage, compute the `.ralph-tui` layout from the active repository and re-run an idempotent directory bootstrap on every project activation so missing storage folders self-heal before metadata is persisted.
+- Restore startup project context by resolving the most recent session-backed project from local metadata and reactivating it through the same service path used for manual open/create flows; that keeps repository validation, storage bootstrapping, and metadata refresh aligned across cold start and interactive onboarding.
 
 ---
 
@@ -163,4 +164,17 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - Legacy JSON fixtures that embed Windows paths must escape backslashes or Jackson treats sequences like `\U` as invalid escapes.
     - Jackson's pretty-printed output is stable for field names but not for exact spacing, so assertions against persisted JSON should key off semantic substrings rather than one exact formatting layout.
+---
+
+## 2026-03-15 - US-011
+- Implemented startup restoration of the last active repository by reading the latest session-backed project from local metadata, validating the repository still exists, and reactivating it through the existing project activation flow so `.ralph-tui` storage self-heals on launch.
+- Added persisted run-state lookup and shell messaging so the Execution Overview card now shows resumable or reviewable state for the active project, while missing or moved repositories surface a clear recovery message in the project card.
+- Expanded regression coverage with service tests for restore success, missing-repository recovery, and resumable/reviewable run classification plus JavaFX UI tests for restored startup state and missing-repository messaging; updated the Windows smoke checklist and completed a Windows smoke on 2026-03-15 by seeding the default metadata store, launching `.\mvnw.cmd -q -DskipTests javafx:run`, and confirming via UI Automation that the live app restored the last project, showed the resumable run message, and displayed the recovery message after the repo lost its `.git` marker.
+- Files changed: `docs/windows-smoke-checklist.md`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`, `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - Restoring startup project state through the same activation path as interactive repository selection avoids a second code path for metadata refresh and `.ralph-tui` directory bootstrap.
+  - Gotchas encountered
+    - The JavaFX Maven plugin launch path did not honor the attempted custom storage arg in this environment, so the Windows smoke had to seed the app's default local metadata location to exercise the real startup restore flow.
+    - JavaFX labels in the live desktop window were readable through Windows UI Automation, which made it possible to verify restore and recovery copy during manual smoke without adding extra debug surfaces to the app.
 ---

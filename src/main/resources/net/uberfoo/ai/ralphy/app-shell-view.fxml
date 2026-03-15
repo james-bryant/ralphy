@@ -154,7 +154,16 @@
                             <String fx:value="card-title"/>
                         </styleClass>
                     </Label>
-                    <Label text="Run controls, current story state, and live execution output will appear here." wrapText="true"/>
+                    <Label id="executionOverviewHeadlineLabel" fx:id="executionOverviewHeadlineLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="section-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="executionOverviewDetailLabel" fx:id="executionOverviewDetailLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
                 </VBox>
             </HBox>
             <StackPane>

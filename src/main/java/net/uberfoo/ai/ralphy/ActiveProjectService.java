@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -17,6 +18,7 @@ public class ActiveProjectService {
     private final ProjectMetadataInitializer projectMetadataInitializer;
     private final ProjectStorageInitializer projectStorageInitializer;
     private ActiveProject activeProject;
+    private String startupRecoveryMessage = "";
 
     public ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
                                 ProjectMetadataInitializer projectMetadataInitializer,
@@ -27,10 +29,25 @@ public class ActiveProjectService {
         this.projectStorageInitializer = projectStorageInitializer;
         this.localMetadataStorage = localMetadataStorage;
         this.localMetadataStorage.startSession();
+        restoreLastActiveProject();
     }
 
     public synchronized Optional<ActiveProject> activeProject() {
         return Optional.ofNullable(activeProject);
+    }
+
+    public synchronized String startupRecoveryMessage() {
+        return startupRecoveryMessage;
+    }
+
+    public synchronized Optional<RunRecoveryCandidate> latestRunRecoveryState() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        return localMetadataStorage.projectRecordForRepository(activeProject.repositoryPath())
+                .flatMap(projectRecord -> localMetadataStorage.latestRunMetadataForProject(projectRecord.projectId()))
+                .flatMap(this::toRunRecoveryCandidate);
     }
 
     public synchronized ProjectActivationResult openRepository(Path selectedDirectory) {
@@ -39,7 +56,7 @@ public class ActiveProjectService {
             return ProjectActivationResult.failure("Selected path is not a folder: " + normalizedDirectory);
         }
 
-        if (!Files.exists(normalizedDirectory.resolve(".git"))) {
+        if (!isGitRepository(normalizedDirectory)) {
             return ProjectActivationResult.failure("Selected folder is not a Git repository: " + normalizedDirectory);
         }
 
@@ -115,7 +132,78 @@ public class ActiveProjectService {
 
         activeProject = candidateProject;
         localMetadataStorage.recordProjectActivation(candidateProject);
+        startupRecoveryMessage = "";
         return ProjectActivationResult.success(candidateProject);
+    }
+
+    private void restoreLastActiveProject() {
+        Optional<LocalMetadataStorage.ProjectRecord> lastActiveProjectRecord =
+                localMetadataStorage.lastActiveProjectRecord();
+        if (lastActiveProjectRecord.isEmpty()) {
+            return;
+        }
+
+        String repositoryPathText = lastActiveProjectRecord.get().repositoryPath();
+        Path repositoryPath;
+        try {
+            repositoryPath = Path.of(repositoryPathText).toAbsolutePath().normalize();
+        } catch (InvalidPathException exception) {
+            startupRecoveryMessage = "Last active repository path is invalid: " + repositoryPathText;
+            return;
+        }
+
+        if (!isGitRepository(repositoryPath)) {
+            startupRecoveryMessage = "Last active repository could not be restored because it is missing or no longer "
+                    + "a Git repository: " + repositoryPath
+                    + ". Open an existing repository or create a new one to continue.";
+            return;
+        }
+
+        ProjectActivationResult restoreResult = activateProject(repositoryPath);
+        if (!restoreResult.successful()) {
+            startupRecoveryMessage = "Last active repository could not be restored: " + restoreResult.message();
+        }
+    }
+
+    private boolean isGitRepository(Path repositoryDirectory) {
+        return Files.isDirectory(repositoryDirectory) && Files.exists(repositoryDirectory.resolve(".git"));
+    }
+
+    private Optional<RunRecoveryCandidate> toRunRecoveryCandidate(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        RunRecoveryAction recoveryAction = determineRunRecoveryAction(runMetadataRecord);
+        if (recoveryAction == null) {
+            return Optional.empty();
+        }
+
+        return Optional.of(new RunRecoveryCandidate(
+                runMetadataRecord.runId(),
+                runMetadataRecord.storyId(),
+                displayStatus(runMetadataRecord.status()),
+                recoveryAction
+        ));
+    }
+
+    private RunRecoveryAction determineRunRecoveryAction(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        String normalizedStatus = normalizeStatus(runMetadataRecord.status());
+        return switch (normalizedStatus) {
+            case "COMPLETED", "DONE", "SUCCESS", "SUCCEEDED" -> null;
+            case "ABORTED", "CANCELED", "CANCELLED", "ERROR", "FAILED", "NEEDS_REVIEW", "REVIEWABLE" ->
+                    RunRecoveryAction.REVIEWABLE;
+            default -> hasEnded(runMetadataRecord) ? RunRecoveryAction.REVIEWABLE : RunRecoveryAction.RESUMABLE;
+        };
+    }
+
+    private boolean hasEnded(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        return runMetadataRecord.endedAt() != null && !runMetadataRecord.endedAt().isBlank();
+    }
+
+    private String displayStatus(String status) {
+        String normalizedStatus = normalizeStatus(status);
+        return normalizedStatus.isBlank() ? "UNKNOWN" : normalizedStatus;
+    }
+
+    private String normalizeStatus(String status) {
+        return status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
     }
 
     private boolean isSingleDirectoryName(String projectDirectoryName) {
@@ -182,6 +270,24 @@ public class ActiveProjectService {
 
         private IOException ioException() {
             return ioException;
+        }
+    }
+
+    public record RunRecoveryCandidate(String runId, String storyId, String status, RunRecoveryAction action) {
+    }
+
+    public enum RunRecoveryAction {
+        RESUMABLE("Resumable"),
+        REVIEWABLE("Reviewable");
+
+        private final String label;
+
+        RunRecoveryAction(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
         }
     }
 }

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -145,9 +146,69 @@ class AppShellUiTest {
                 harness.getRequiredBean(ActiveProjectService.class).activeProject().orElseThrow().repositoryPath());
     }
 
+    @Test
+    void appShellRestoresTheLastActiveRepositoryAndShowsResumableRunStateOnStartup() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("restored-repo");
+        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(new LocalMetadataStorage.RunMetadataRecord(
+                "run-restore-1",
+                projectId,
+                "US-011",
+                "RUNNING",
+                "2026-03-15T20:00:00Z",
+                null
+        )));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        Path expectedRepositoryPath = repository.toAbsolutePath().normalize();
+        assertEquals("restored-repo", harness.text("#activeProjectNameLabel"));
+        assertEquals(expectedRepositoryPath.toString(), harness.text("#activeProjectPathLabel"));
+        assertEquals("restored-repo", harness.text("#activeProjectStatusLabel"));
+        assertEquals("", harness.text("#projectValidationMessageLabel"));
+        assertEquals("Resumable run available", harness.text("#executionOverviewHeadlineLabel"));
+        assertEquals("Story US-011 from run run-restore-1 is in RUNNING state and can be resumed.",
+                harness.text("#executionOverviewDetailLabel"));
+        assertEquals(expectedRepositoryPath,
+                harness.getRequiredBean(ActiveProjectService.class).activeProject().orElseThrow().repositoryPath());
+    }
+
+    @Test
+    void appShellShowsClearRecoveryMessageWhenStoredRepositoryIsMissingOnStartup() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("missing-repo");
+        seedStoredProject(storageDirectory, repository);
+        Files.delete(repository.resolve(".git"));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        Path expectedRepositoryPath = repository.toAbsolutePath().normalize();
+        assertEquals("No active repository selected.", harness.text("#activeProjectNameLabel"));
+        assertEquals("No active project selected.", harness.text("#activeProjectStatusLabel"));
+        assertEquals("Last active repository could not be restored because it is missing or no longer "
+                        + "a Git repository: " + expectedRepositoryPath
+                        + ". Open an existing repository or create a new one to continue.",
+                harness.text("#projectValidationMessageLabel"));
+        assertEquals("No active project", harness.text("#executionOverviewHeadlineLabel"));
+        assertEquals("Choose or restore a project to view resumable or reviewable run state.",
+                harness.text("#executionOverviewDetailLabel"));
+        assertTrue(harness.getRequiredBean(ActiveProjectService.class).activeProject().isEmpty());
+    }
+
     private Path createGitRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
         return repository;
+    }
+
+    private LocalMetadataStorage seedStoredProject(Path storageDirectory, Path repository) {
+        LocalMetadataStorage localMetadataStorage = LocalMetadataStorage.forTest(storageDirectory);
+        localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
+        localMetadataStorage.finishSession();
+        return localMetadataStorage;
     }
 }
