@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "sessionId": "2b071c1d-d46d-451d-a0fb-67440ae4d3de",
+  "status": "running",
+  "startedAt": "2026-03-15T20:49:42.750Z",
+  "updatedAt": "2026-03-15T20:57:12.501Z",
+  "currentIteration": 0,
+  "maxIterations": 40,
+  "tasksCompleted": 0,
+  "isPaused": false,
+  "agentPlugin": "codex",
+  "trackerState": {
+    "plugin": "json",
+    "totalTasks": 0,
+    "tasks": []
+  },
+  "iterations": [],
+  "skippedTaskIds": [],
+  "cwd": "C:\\Users\\james\\IdeaProjects\\ralphy",
+  "activeTaskIds": [],
+  "subagentPanelVisible": false
+}

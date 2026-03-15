@@ -1,0 +1,629 @@
+{
+  "name": "Ralphy Desktop for Codex-Driven Ralph Loops",
+  "branchName": "feature/ralphy-desktop-for-codex-driven-ralph-loops",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add Spring Boot Desktop Dependencies",
+      "description": "As a developer, I want Spring Boot dependencies added to the JavaFX project so that non-UI services can use dependency injection and typed configuration.",
+      "acceptanceCriteria": [
+        "pom.xml includes Spring Boot dependencies needed for DI, configuration, and logging without adding a web server.",
+        "src/main/java/module-info.java compiles with the added modules.",
+        "The existing launcher still starts after the dependency change.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-002",
+      "title": "Bridge JavaFX Startup to Spring Context",
+      "description": "As a developer, I want the JavaFX launcher to bootstrap a Spring context so that controllers and services can use Spring-managed beans.",
+      "acceptanceCriteria": [
+        "The primary application startup creates a Spring context before loading the main UI.",
+        "JavaFX controllers or view-models can resolve Spring-managed dependencies through a documented integration point.",
+        "Application shutdown closes the Spring context and background executors cleanly.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "dependsOn": [
+        "US-001"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Replace the Hello Sample with an App Shell",
+      "description": "As a user, I want the sample hello screen replaced with a real application shell so that the app can host project, editor, and execution workflows.",
+      "acceptanceCriteria": [
+        "The primary launch path no longer uses the sample hello screen as the main experience.",
+        "The main window includes placeholders for navigation, workspace content, and status.",
+        "Window title and branding reflect Ralphy rather than the sample scaffold.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 3,
+      "passes": false,
+      "dependsOn": [
+        "US-002"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Apply a Dark Theme to the Shell",
+      "description": "As a user, I want the app shell to use a dark theme so that the desktop experience matches the product direction.",
+      "acceptanceCriteria": [
+        "Shared theme styles or tokens exist for core surfaces and text.",
+        "The main shell renders with a readable dark palette by default.",
+        "New shell views inherit the dark theme without per-view duplication.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 4,
+      "passes": false,
+      "dependsOn": [
+        "US-003"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Add a JavaFX UI Test Harness",
+      "description": "As a developer, I want automated UI test support so that major JavaFX regressions are caught early.",
+      "acceptanceCriteria": [
+        "Automated UI tests can launch the primary shell.",
+        "The build fails when the shell smoke UI test fails.",
+        "The test harness can interact with top-level navigation or main regions.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 5,
+      "passes": false,
+      "dependsOn": [
+        "US-003"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Add a Windows Smoke Checklist",
+      "description": "As a developer, I want a manual smoke checklist so that native Windows and WSL workflows can be verified consistently.",
+      "acceptanceCriteria": [
+        "The repository contains a Windows smoke checklist covering onboarding, PRD editing, loop start, pause, and log viewing.",
+        "The checklist includes both native Windows and WSL execution-profile scenarios.",
+        "The checklist is maintained as a repository artifact rather than tribal knowledge.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 6,
+      "passes": false,
+      "dependsOn": [
+        "US-005"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Open an Existing Git Repository",
+      "description": "As a user, I want to open an existing local Git repository so that I can run Ralphy against a repo I already use.",
+      "acceptanceCriteria": [
+        "The app can browse for and select a local Git repository.",
+        "Non-Git folders are rejected with a clear validation message.",
+        "The selected repository becomes the active project.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 7,
+      "passes": false,
+      "dependsOn": [
+        "US-003"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Create a New Local Git Repository",
+      "description": "As a user, I want to create a new local project folder and initialize Git so that I can start a Ralphy project from scratch.",
+      "acceptanceCriteria": [
+        "The app can create a new local folder and initialize Git within it.",
+        "The new repository is registered as the active project after creation.",
+        "Initial project metadata is created for the new project.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 8,
+      "passes": false,
+      "dependsOn": [
+        "US-007"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Persist Project and Session Metadata",
+      "description": "As a user, I want project metadata and session state persisted locally so that I can close and reopen the app without losing context.",
+      "acceptanceCriteria": [
+        "Embedded local storage tracks projects, sessions, profiles, and run metadata.",
+        "The storage schema is versioned for future migrations.",
+        "Persisted records are readable after an app restart.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "dependsOn": [
+        "US-007",
+        "US-008"
+      ]
+    },
+    {
+      "id": "US-010",
+      "title": "Store PRDs, Logs, and Artifacts on Disk",
+      "description": "As a user, I want PRDs and run artifacts stored as files so that I can inspect and back them up outside the app.",
+      "acceptanceCriteria": [
+        "Each project has directories for PRDs, `prd.json`, prompts, logs, and execution artifacts.",
+        "Missing directories are recreated automatically when needed.",
+        "Stored file paths are linked from the persisted project/session metadata.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "dependsOn": [
+        "US-009"
+      ]
+    },
+    {
+      "id": "US-011",
+      "title": "Restore the Last Active Project",
+      "description": "As a user, I want the last active project restored on startup so that I can continue where I left off.",
+      "acceptanceCriteria": [
+        "On startup, the app can reopen the last active project when it still exists.",
+        "Incomplete run state is shown as resumable or reviewable.",
+        "Missing or moved repositories are handled with a clear recovery message.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 11,
+      "passes": false,
+      "dependsOn": [
+        "US-009",
+        "US-010"
+      ]
+    },
+    {
+      "id": "US-012",
+      "title": "Save a Per-Project Execution Profile",
+      "description": "As a user, I want each project to store its Codex execution mode so that native Windows and WSL runs are configured explicitly.",
+      "acceptanceCriteria": [
+        "A project can store either a native PowerShell profile or a WSL profile.",
+        "WSL profiles include the selected distribution and any required path-mapping metadata.",
+        "Profiles can be edited and saved from the UI.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 12,
+      "passes": false,
+      "dependsOn": [
+        "US-009"
+      ]
+    },
+    {
+      "id": "US-013",
+      "title": "Run Native Windows Codex Preflight Checks",
+      "description": "As a user, I want native Windows preflight diagnostics so that I know whether Codex is runnable before starting a loop.",
+      "acceptanceCriteria": [
+        "Native preflight checks verify `codex` availability, auth presence, Git readiness, and quality-gate command availability.",
+        "Failures are categorized and shown before a run can start.",
+        "The latest native preflight result is stored with the project.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "dependsOn": [
+        "US-012"
+      ]
+    },
+    {
+      "id": "US-014",
+      "title": "Run WSL Codex Preflight Checks",
+      "description": "As a user, I want WSL preflight diagnostics so that I know whether the selected WSL environment is runnable before starting a loop.",
+      "acceptanceCriteria": [
+        "WSL preflight checks verify distro availability and Codex/Git/auth readiness inside WSL.",
+        "Windows-to-WSL repository path mapping is validated.",
+        "The latest WSL preflight result is stored with the project.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "dependsOn": [
+        "US-012"
+      ]
+    },
+    {
+      "id": "US-015",
+      "title": "Show Guided Remediation for Failed Preflight",
+      "description": "As a user, I want guided remediation steps when diagnostics fail so that I can fix setup issues quickly.",
+      "acceptanceCriteria": [
+        "The UI shows copyable remediation commands for each failed preflight check.",
+        "The app does not attempt to install or authenticate Codex automatically.",
+        "The user can rerun preflight directly from the remediation view.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 15,
+      "passes": false,
+      "dependsOn": [
+        "US-013",
+        "US-014"
+      ]
+    },
+    {
+      "id": "US-016",
+      "title": "Add a Built-In Preset Catalog",
+      "description": "As a user, I want built-in Ralph/Codex presets so that I can use the workflow without authoring prompts manually.",
+      "acceptanceCriteria": [
+        "Versioned presets exist for PRD creation, story implementation, retry/fix, and run summary.",
+        "Preset metadata can record required skills or operating assumptions.",
+        "v1 exposes preset selection and preview only, not arbitrary prompt editing.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 16,
+      "passes": false,
+      "dependsOn": [
+        "US-002"
+      ]
+    },
+    {
+      "id": "US-017",
+      "title": "Build the PRD Interview Engine",
+      "description": "As a user, I want a guided interview flow for PRD creation so that I can define requirements interactively inside the app.",
+      "acceptanceCriteria": [
+        "The app can ask sequenced clarification questions and store answers in draft state.",
+        "The interview supports overview, goals, quality gates, user stories, and scope boundaries.",
+        "Draft answers can be revisited before final generation.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 17,
+      "passes": false,
+      "dependsOn": [
+        "US-016",
+        "US-009"
+      ]
+    },
+    {
+      "id": "US-018",
+      "title": "Generate Markdown PRD from Interview Answers",
+      "description": "As a user, I want the interview answers turned into a Markdown PRD so that I can review a concrete document before execution.",
+      "acceptanceCriteria": [
+        "The generator creates Markdown with required sections and ordered `US-XXX` story IDs.",
+        "The generated PRD is saved to the active project.",
+        "The generator can regenerate the PRD from the latest draft answers.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 18,
+      "passes": false,
+      "dependsOn": [
+        "US-017",
+        "US-010"
+      ]
+    },
+    {
+      "id": "US-019",
+      "title": "Add an In-App Markdown Editor",
+      "description": "As a user, I want to edit the PRD directly in the app so that I can refine the plan before running loops.",
+      "acceptanceCriteria": [
+        "The active PRD opens in an editable Markdown surface after generation or import.",
+        "The editor supports save and dirty-state tracking.",
+        "User edits are preserved without destructive reformatting.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 19,
+      "passes": false,
+      "dependsOn": [
+        "US-018"
+      ]
+    },
+    {
+      "id": "US-020",
+      "title": "Validate PRD Structure Before Execution",
+      "description": "As a user, I want structural validation of the PRD so that malformed task definitions do not reach the execution loop.",
+      "acceptanceCriteria": [
+        "Validation checks required sections, story header format, and a Quality Gates section.",
+        "Validation errors identify the specific section or story that failed.",
+        "Execution is blocked while validation errors remain.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 20,
+      "passes": false,
+      "dependsOn": [
+        "US-019"
+      ]
+    },
+    {
+      "id": "US-021",
+      "title": "Import and Export Markdown PRDs",
+      "description": "As a user, I want Markdown PRD import/export so that I can move PRDs between Ralphy and external tools.",
+      "acceptanceCriteria": [
+        "The app can import an existing Markdown PRD into the active project.",
+        "The app can export the active Markdown PRD to a user-selected location.",
+        "Imported and exported file locations are tracked in project metadata.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 21,
+      "passes": false,
+      "dependsOn": [
+        "US-019",
+        "US-010"
+      ]
+    },
+    {
+      "id": "US-022",
+      "title": "Sync PRD Stories into Internal Task State",
+      "description": "As a user, I want valid PRD stories converted into internal task records so that the execution engine can track progress reliably.",
+      "acceptanceCriteria": [
+        "Valid `US-XXX` stories are parsed into internal task records with stable IDs and statuses.",
+        "Re-sync preserves status and history when story IDs remain unchanged.",
+        "Destructive remaps require explicit user confirmation.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "dependsOn": [
+        "US-020",
+        "US-009"
+      ]
+    },
+    {
+      "id": "US-023",
+      "title": "Export Ralph-Compatible `prd.json`",
+      "description": "As a user, I want to export `prd.json` so that my PRD can interoperate with Ralph-style trackers.",
+      "acceptanceCriteria": [
+        "The app can export the active PRD/task state as compatible `prd.json`.",
+        "Exported JSON includes the story structure and quality-gate data needed by the tracker.",
+        "The exported file passes a compatibility validation step.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "dependsOn": [
+        "US-022"
+      ]
+    },
+    {
+      "id": "US-024",
+      "title": "Import `prd.json` and Reconcile It Safely",
+      "description": "As a user, I want to import compatible `prd.json` so that external tracker changes can be brought back into the app safely.",
+      "acceptanceCriteria": [
+        "The app can import compatible `prd.json` into the active project.",
+        "Conflicts between Markdown and JSON views are surfaced clearly.",
+        "Completed history is preserved when reconciliation is non-destructive.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 24,
+      "passes": false,
+      "dependsOn": [
+        "US-022",
+        "US-023"
+      ]
+    },
+    {
+      "id": "US-025",
+      "title": "Build a Native and WSL Codex Launcher",
+      "description": "As a developer, I want one launcher service that can invoke Codex in native Windows or WSL mode so that execution logic stays consistent.",
+      "acceptanceCriteria": [
+        "The launcher can build commands for both native PowerShell and WSL profiles.",
+        "Prompts and preset inputs are passed non-interactively.",
+        "Exit code and process metadata are captured for each launch.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "dependsOn": [
+        "US-012"
+      ]
+    },
+    {
+      "id": "US-026",
+      "title": "Capture Structured Events and Raw Logs",
+      "description": "As a user, I want structured Codex events and raw logs captured so that each run can be inspected and audited later.",
+      "acceptanceCriteria": [
+        "Structured event output is persisted when available from Codex.",
+        "Raw stdout, stderr, prompt text, and summary artifacts are stored per story attempt.",
+        "Stored logs remain viewable after app restart.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "dependsOn": [
+        "US-025",
+        "US-010"
+      ]
+    },
+    {
+      "id": "US-027",
+      "title": "Execute a Single Story Session",
+      "description": "As a user, I want to run one story at a time so that each loop step is isolated and recoverable.",
+      "acceptanceCriteria": [
+        "The app can start an eligible single story against the active repository.",
+        "Story state transitions are persisted through queued, running, passed, or failed states.",
+        "Each attempt records timestamps, preset used, and outcome.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 27,
+      "passes": false,
+      "dependsOn": [
+        "US-022",
+        "US-025",
+        "US-026"
+      ]
+    },
+    {
+      "id": "US-028",
+      "title": "Show Story Progress in a Dashboard",
+      "description": "As a user, I want a dashboard of story states so that I can see what is pending, running, blocked, or done.",
+      "acceptanceCriteria": [
+        "The dashboard shows pending, blocked, running, passed, failed, and paused states.",
+        "The current story and overall counts are visible during execution.",
+        "Dashboard state can be restored from persisted metadata after restart.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 28,
+      "passes": false,
+      "dependsOn": [
+        "US-027"
+      ]
+    },
+    {
+      "id": "US-029",
+      "title": "Stream Live Output and Display a Final Summary",
+      "description": "As a user, I want to see live Codex output and the final assistant summary so that I can follow the run without opening raw log files.",
+      "acceptanceCriteria": [
+        "The run view streams live output during execution.",
+        "The final assistant summary is stored and displayed separately from raw logs.",
+        "The user can switch between summary and raw output views.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 29,
+      "passes": false,
+      "dependsOn": [
+        "US-027",
+        "US-026"
+      ]
+    },
+    {
+      "id": "US-030",
+      "title": "Pause After the Current Step Completes",
+      "description": "As a user, I want pause behavior that waits for the current step to finish so that the repo is not interrupted mid-step.",
+      "acceptanceCriteria": [
+        "`Pause` prevents the next story from starting after the current step completes.",
+        "The UI distinguishes between pause requested and fully paused.",
+        "Pausing does not kill the active process mid-step by default.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 30,
+      "passes": false,
+      "dependsOn": [
+        "US-027"
+      ]
+    },
+    {
+      "id": "US-031",
+      "title": "Auto-Advance Across Ready Stories",
+      "description": "As a user, I want the loop to continue automatically across ready stories so that I do not need to restart each one manually.",
+      "acceptanceCriteria": [
+        "`Play` starts from the next eligible story and continues automatically.",
+        "Blocked or invalid stories are skipped with a visible reason.",
+        "Execution stops when paused, failed after retry, or complete.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 31,
+      "passes": false,
+      "dependsOn": [
+        "US-027",
+        "US-030"
+      ]
+    },
+    {
+      "id": "US-032",
+      "title": "Retry Once and Support Resume",
+      "description": "As a user, I want failed stories retried once automatically and then left resumable so that transient failures are handled but control returns to me when needed.",
+      "acceptanceCriteria": [
+        "The runner retries a failed story once automatically.",
+        "A second failure stops the run and marks the story failed.",
+        "The failed story can be resumed later without rebuilding project state.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 32,
+      "passes": false,
+      "dependsOn": [
+        "US-027",
+        "US-031"
+      ]
+    },
+    {
+      "id": "US-033",
+      "title": "Create or Switch to a Feature Branch",
+      "description": "As a user, I want the run to execute on a feature branch so that automated changes stay isolated from my main branch.",
+      "acceptanceCriteria": [
+        "Starting a run creates or switches to a branch for the active PRD session.",
+        "Branch naming follows a deterministic convention.",
+        "The branch action is recorded in run metadata.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 33,
+      "passes": false,
+      "dependsOn": [
+        "US-007",
+        "US-025"
+      ]
+    },
+    {
+      "id": "US-034",
+      "title": "Commit Each Completed Story",
+      "description": "As a user, I want each completed story committed automatically so that implementation history is traceable story by story.",
+      "acceptanceCriteria": [
+        "A story is marked complete only after validation passes and a commit exists.",
+        "Commit messages begin with the story ID.",
+        "The commit hash is stored with the story result.",
+        ".\\mvnw.cmd clean verify jacoco:report passes"
+      ],
+      "priority": 34,
+      "passes": false,
+      "dependsOn": [
+        "US-027",
+        "US-033"
+      ]
+    },
+    {
+      "id": "US-035",
+      "title": "View Run History and Artifacts",
+      "description": "As a user, I want a run-history view so that I can inspect prior attempts, commits, and stored artifacts from the UI.",
+      "acceptanceCriteria": [
+        "The history view lists story attempts with timestamps, branch, commit, preset, and result.",
+        "Stored prompts, logs, summaries, and exported artifacts can be opened from the UI.",
+        "Run history persists across restarts and across multiple runs of the same project.",
+        ".\\mvnw.cmd clean verify jacoco:report passes",
+        "Automated JavaFX UI tests pass",
+        "Manual smoke verification on Windows completed"
+      ],
+      "priority": 35,
+      "passes": false,
+      "dependsOn": [
+        "US-026",
+        "US-028",
+        "US-029",
+        "US-034"
+      ]
+    }
+  ],
+  "metadata": {
+    "updatedAt": "2026-03-15T20:57:12.501Z"
+  }
+}

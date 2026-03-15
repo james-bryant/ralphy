@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "skills": {
+    "java-springboot": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "computedHash": "f1b9c6b1277178fc33e5a612761c1cd1cf6ab5f946d05d69d52026d142c0a0c1"
+    },
+    "ralph-tui-create-beads": {
+      "source": "subsy/ralph-tui",
+      "sourceType": "github",
+      "computedHash": "12b148cc8a623a95ad8a7681d542850a06ba4735a3b2532db5864edfd8aa73ec"
+    },
+    "ralph-tui-create-beads-rust": {
+      "source": "subsy/ralph-tui",
+      "sourceType": "github",
+      "computedHash": "6975b63df8255333718ab719019e454db9d6d17e52fe02079c6ae0414a81b67c"
+    },
+    "ralph-tui-create-json": {
+      "source": "subsy/ralph-tui",
+      "sourceType": "github",
+      "computedHash": "8ca969385c89c5cbecbfef6429164971afa832fe3b6bb267225bbf4a4909005c"
+    },
+    "ralph-tui-prd": {
+      "source": "subsy/ralph-tui",
+      "sourceType": "github",
+      "computedHash": "4fcfdc2a8ec3c15b60ac73891e90667debf35fa520c691720cbb424cc45dd608"
+    },
+    "springboot-patterns": {
+      "source": "affaan-m/everything-claude-code",
+      "sourceType": "github",
+      "computedHash": "15fe91e6fdca18ec9a4322c78010fc6788ee2df0f6828b5fd07a05c869c8b79f"
+    },
+    "springboot-security": {
+      "source": "affaan-m/everything-claude-code",
+      "sourceType": "github",
+      "computedHash": "974845d84516b792408e7e9bccfe861e3b678423f90eea9b479d219c36f64cdd"
+    },
+    "springboot-tdd": {
+      "source": "affaan-m/everything-claude-code",
+      "sourceType": "github",
+      "computedHash": "ff44f4d2e2044957ec39f7f28b87fe4eda18531cbed47c9e9360f82fba676258"
+    },
+    "springboot-verification": {
+      "source": "affaan-m/everything-claude-code",
+      "sourceType": "github",
+      "computedHash": "4d3b3ad668a5f0a2806f65b345df6f7bb646e3a2d33c16309d13b8af88aa0345"
+    }
+  }
+}
