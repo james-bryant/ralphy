@@ -24,11 +24,11 @@ Run this baseline even when later workflow stories are still incomplete. For any
 3. Confirm the shell renders the expected dark theme and the left navigation shows `Projects`, `PRD Editor`, and `Execution`.
 4. Open `Projects` and confirm the workspace title becomes `Projects` and the status bar reads `Projects workspace ready.`
 5. Use `Open Existing Repository` to choose a known local Git repository.
-6. Confirm the `Active Repository` card shows the selected repository name and full path, and the status bar `Active Project` value updates.
+6. Confirm the `Active Repository` card shows the selected repository name and full path, the status bar `Active Project` value updates, and `.ralph-tui/project-metadata.json` plus the `prds`, `prd-json`, `prompts`, `logs`, and `artifacts` directories exist inside the repository.
 7. Use `Open Existing Repository` again and choose a non-Git folder.
 8. Confirm a validation message states the selected folder is not a Git repository and the previous active project remains unchanged.
 9. In the `Create New Repository` field, enter a new folder name and use `Create New Repository` to choose a parent folder.
-10. Confirm a new Git repository folder is created, the `Active Repository` card updates to that new repository, and `.ralph-tui/project-metadata.json` exists inside the new folder.
+10. Confirm a new Git repository folder is created, the `Active Repository` card updates to that new repository, and `.ralph-tui/project-metadata.json` plus the `prds`, `prd-json`, `prompts`, `logs`, and `artifacts` directories exist inside the new folder.
 11. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
 12. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
 13. Close the app cleanly.

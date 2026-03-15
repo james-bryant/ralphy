@@ -15,13 +15,16 @@ public class ActiveProjectService {
     private final GitRepositoryInitializer gitRepositoryInitializer;
     private final LocalMetadataStorage localMetadataStorage;
     private final ProjectMetadataInitializer projectMetadataInitializer;
+    private final ProjectStorageInitializer projectStorageInitializer;
     private ActiveProject activeProject;
 
     public ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
                                 ProjectMetadataInitializer projectMetadataInitializer,
+                                ProjectStorageInitializer projectStorageInitializer,
                                 LocalMetadataStorage localMetadataStorage) {
         this.gitRepositoryInitializer = gitRepositoryInitializer;
         this.projectMetadataInitializer = projectMetadataInitializer;
+        this.projectStorageInitializer = projectStorageInitializer;
         this.localMetadataStorage = localMetadataStorage;
         this.localMetadataStorage.startSession();
     }
@@ -87,25 +90,32 @@ public class ActiveProjectService {
             ));
         }
 
-        ActiveProject createdProject = new ActiveProject(repositoryDirectory);
-        try {
-            projectMetadataInitializer.initializeMetadata(createdProject);
-        } catch (IOException exception) {
+        ProjectActivationResult activationResult = activateProject(new ActiveProject(repositoryDirectory));
+        if (!activationResult.successful()) {
             return ProjectActivationResult.failure(rollbackNewRepository(
                     repositoryDirectory,
-                    "Unable to create initial project metadata: " + exception.getMessage()
+                    activationResult.message()
             ));
         }
 
-        activeProject = createdProject;
-        localMetadataStorage.recordProjectActivation(createdProject);
-        return ProjectActivationResult.success(createdProject);
+        return activationResult;
     }
 
     private ProjectActivationResult activateProject(Path repositoryDirectory) {
-        activeProject = new ActiveProject(repositoryDirectory);
-        localMetadataStorage.recordProjectActivation(activeProject);
-        return ProjectActivationResult.success(activeProject);
+        return activateProject(new ActiveProject(repositoryDirectory));
+    }
+
+    private ProjectActivationResult activateProject(ActiveProject candidateProject) {
+        try {
+            projectStorageInitializer.ensureStorageDirectories(candidateProject);
+            projectMetadataInitializer.writeMetadata(candidateProject);
+        } catch (IOException exception) {
+            return ProjectActivationResult.failure("Unable to prepare project storage: " + exception.getMessage());
+        }
+
+        activeProject = candidateProject;
+        localMetadataStorage.recordProjectActivation(candidateProject);
+        return ProjectActivationResult.success(candidateProject);
     }
 
     private boolean isSingleDirectoryName(String projectDirectoryName) {

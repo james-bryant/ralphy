@@ -16,6 +16,7 @@ after each iteration and it's included in prompts for context.
 - Validate local Git repositories by checking for `.git` metadata existence, not just a `.git` directory, because worktrees expose `.git` as a file.
 - When a JavaFX workflow must create a new filesystem folder, pair a text field for the new leaf directory name with a chooser for the existing parent folder; JavaFX `DirectoryChooser` cannot target a path that does not exist yet.
 - Keep app-level desktop metadata in a versioned local store outside the repository, and persist updates by writing a temporary JSON file and atomically moving it into place so project/session records survive restarts without partial writes.
+- For repo-local PRD and run-artifact storage, compute the `.ralph-tui` layout from the active repository and re-run an idempotent directory bootstrap on every project activation so missing storage folders self-heal before metadata is persisted.
 
 ---
 
@@ -147,4 +148,19 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - A `@Component` with both a runtime constructor and a test-only construction path needs explicit constructor selection or Spring falls back to default instantiation and fails bean creation.
     - Letting Spring infer a singleton bean destroy method from a public `close()` method can introduce shutdown-only defects; keeping explicit test-only session finalization avoids noisy lifecycle warnings until shutdown persistence is a real requirement.
+---
+
+## 2026-03-15 - US-010
+- Implemented a managed `.ralph-tui` project storage layout with `prds`, `prd-json`, `prompts`, `logs`, and `artifacts` directories that are created for both newly created and newly opened repositories.
+- Upgraded repo-local `project-metadata.json` into a versioned storage manifest and extended the app-level metadata store so project and session records persist the relevant storage paths.
+- Added regression coverage for directory recreation, metadata-path persistence, and migration of v1 app metadata into the new storage-path-aware schema; updated the Windows smoke checklist to check the new on-disk layout.
+- Verified `.\mvnw.cmd clean verify jacoco:report` passes on 2026-03-15.
+- Files changed: `docs/windows-smoke-checklist.md`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProject.java`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`, `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`, `src/main/java/net/uberfoo/ai/ralphy/ProjectMetadataInitializer.java`, `src/main/java/net/uberfoo/ai/ralphy/ProjectStorageInitializer.java`, `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `src/test/java/net/uberfoo/ai/ralphy/LocalMetadataStorageTest.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - Recomputing repository-local storage paths from `ActiveProject` avoids duplicating path rules across services and keeps both metadata documents and directory bootstrap logic aligned.
+    - Backward-compatible metadata upgrades are straightforward when new path fields can be deterministically derived from persisted repository paths during normalization.
+  - Gotchas encountered
+    - Legacy JSON fixtures that embed Windows paths must escape backslashes or Jackson treats sequences like `\U` as invalid escapes.
+    - Jackson's pretty-printed output is stable for field names but not for exact spacing, so assertions against persisted JSON should key off semantic substrings rather than one exact formatting layout.
 ---

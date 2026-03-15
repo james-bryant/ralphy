@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ActiveProjectServiceTest {
     private final GitRepositoryInitializer gitRepositoryInitializer = new GitRepositoryInitializer();
     private final ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+    private final ProjectStorageInitializer projectStorageInitializer = new ProjectStorageInitializer();
 
     @TempDir
     Path tempDir;
@@ -28,6 +29,9 @@ class ActiveProjectServiceTest {
 
         assertTrue(gitDirectoryResult.successful());
         assertEquals(gitDirectoryRepository.toAbsolutePath().normalize(), gitDirectoryResult.activeProject().repositoryPath());
+        assertManagedProjectStorage(gitDirectoryResult.activeProject());
+        assertTrue(Files.readString(gitDirectoryResult.activeProject().projectMetadataPath())
+                .contains("\"prdsDirectoryPath\""));
 
         Path gitFileRepository = Files.createDirectory(tempDir.resolve("git-file-repo"));
         Files.writeString(gitFileRepository.resolve(".git"), "gitdir: C:/tmp/worktree");
@@ -37,6 +41,7 @@ class ActiveProjectServiceTest {
 
         assertTrue(gitFileResult.successful());
         assertEquals(gitFileRepository.toAbsolutePath().normalize(), gitFileResult.activeProject().repositoryPath());
+        assertManagedProjectStorage(gitFileResult.activeProject());
     }
 
     @Test
@@ -72,8 +77,11 @@ class ActiveProjectServiceTest {
         assertTrue(creationResult.successful());
         assertEquals(createdRepository, activeProject.repositoryPath());
         assertTrue(Files.isDirectory(createdRepository.resolve(".git")));
-        assertTrue(Files.exists(activeProject.projectMetadataPath()));
-        assertTrue(Files.readString(activeProject.projectMetadataPath()).contains("\"projectName\": \"starter-repo\""));
+        assertManagedProjectStorage(activeProject);
+        String projectMetadataDocument = Files.readString(activeProject.projectMetadataPath());
+        assertTrue(projectMetadataDocument.contains("\"projectName\""));
+        assertTrue(projectMetadataDocument.contains("starter-repo"));
+        assertTrue(projectMetadataDocument.contains("\"activePrdJsonPath\""));
         assertEquals(createdRepository, activeProjectService.activeProject().orElseThrow().repositoryPath());
 
         LocalMetadataStorage.LocalMetadataSnapshot metadataSnapshot = createStorage().snapshot();
@@ -82,6 +90,10 @@ class ActiveProjectServiceTest {
         assertEquals(1, metadataSnapshot.profiles().size());
         assertTrue(metadataSnapshot.runMetadata().isEmpty());
         assertEquals(createdRepository.toString(), metadataSnapshot.projects().getFirst().repositoryPath());
+        assertEquals(activeProject.prdsDirectoryPath().toString(),
+                metadataSnapshot.projects().getFirst().storagePaths().prdsDirectoryPath());
+        assertEquals(activeProject.logsDirectoryPath().toString(),
+                metadataSnapshot.sessions().getFirst().storagePaths().logsDirectoryPath());
     }
 
     @Test
@@ -104,6 +116,25 @@ class ActiveProjectServiceTest {
                 activeProjectService.activeProject().orElseThrow().repositoryPath());
     }
 
+    @Test
+    void openRepositoryRecreatesMissingManagedStorageDirectories() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path repository = createGitDirectoryRepository("existing-repo");
+
+        ActiveProjectService.ProjectActivationResult firstOpenResult = activeProjectService.openRepository(repository);
+        assertTrue(firstOpenResult.successful());
+
+        ActiveProject activeProject = firstOpenResult.activeProject();
+        Files.delete(activeProject.prdJsonDirectoryPath());
+        Files.delete(activeProject.logsDirectoryPath());
+
+        ActiveProjectService.ProjectActivationResult secondOpenResult = activeProjectService.openRepository(repository);
+
+        assertTrue(secondOpenResult.successful());
+        assertTrue(Files.isDirectory(activeProject.prdJsonDirectoryPath()));
+        assertTrue(Files.isDirectory(activeProject.logsDirectoryPath()));
+    }
+
     private Path createGitDirectoryRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
@@ -114,11 +145,22 @@ class ActiveProjectServiceTest {
         return new ActiveProjectService(
                 gitRepositoryInitializer,
                 projectMetadataInitializer,
+                projectStorageInitializer,
                 createStorage()
         );
     }
 
     private LocalMetadataStorage createStorage() {
         return LocalMetadataStorage.forTest(tempDir.resolve("local-storage"));
+    }
+
+    private void assertManagedProjectStorage(ActiveProject activeProject) {
+        assertTrue(Files.exists(activeProject.projectMetadataPath()));
+        assertTrue(Files.isDirectory(activeProject.ralphyDirectoryPath()));
+        assertTrue(Files.isDirectory(activeProject.prdsDirectoryPath()));
+        assertTrue(Files.isDirectory(activeProject.prdJsonDirectoryPath()));
+        assertTrue(Files.isDirectory(activeProject.promptsDirectoryPath()));
+        assertTrue(Files.isDirectory(activeProject.logsDirectoryPath()));
+        assertTrue(Files.isDirectory(activeProject.artifactsDirectoryPath()));
     }
 }

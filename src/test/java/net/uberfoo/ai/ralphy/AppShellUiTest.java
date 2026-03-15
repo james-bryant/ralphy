@@ -136,6 +136,11 @@ class AppShellUiTest {
         assertEquals("", harness.text("#newProjectNameField"));
         assertTrue(Files.isDirectory(expectedRepositoryPath.resolve(".git")));
         assertTrue(Files.exists(expectedRepositoryPath.resolve(".ralph-tui").resolve("project-metadata.json")));
+        assertTrue(Files.isDirectory(expectedRepositoryPath.resolve(".ralph-tui").resolve("prds")));
+        assertTrue(Files.isDirectory(expectedRepositoryPath.resolve(".ralph-tui").resolve("prd-json")));
+        assertTrue(Files.isDirectory(expectedRepositoryPath.resolve(".ralph-tui").resolve("prompts")));
+        assertTrue(Files.isDirectory(expectedRepositoryPath.resolve(".ralph-tui").resolve("logs")));
+        assertTrue(Files.isDirectory(expectedRepositoryPath.resolve(".ralph-tui").resolve("artifacts")));
         assertEquals(expectedRepositoryPath,
                 harness.getRequiredBean(ActiveProjectService.class).activeProject().orElseThrow().repositoryPath());
     }

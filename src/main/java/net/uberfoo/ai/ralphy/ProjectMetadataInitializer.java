@@ -1,46 +1,76 @@
 package net.uberfoo.ai.ralphy;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 
 @Component
 public class ProjectMetadataInitializer {
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
+    private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
-    public void initializeMetadata(ActiveProject activeProject) throws IOException {
+    public void writeMetadata(ActiveProject activeProject) throws IOException {
         Files.createDirectories(activeProject.ralphyDirectoryPath());
-        Files.writeString(
-                activeProject.projectMetadataPath(),
-                metadataDocument(activeProject),
-                StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE_NEW
-        );
-    }
 
-    private String metadataDocument(ActiveProject activeProject) {
-        return """
-                {
-                  "schemaVersion": %d,
-                  "projectName": "%s",
-                  "repositoryPath": "%s",
-                  "createdAt": "%s"
-                }
-                """.formatted(
+        Path metadataPath = activeProject.projectMetadataPath();
+        String timestamp = Instant.now().toString();
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
+        ProjectMetadataDocument metadataDocument = new ProjectMetadataDocument(
                 SCHEMA_VERSION,
-                escapeJson(activeProject.displayName()),
-                escapeJson(activeProject.displayPath()),
-                Instant.now().toString()
+                activeProject.displayName(),
+                activeProject.displayPath(),
+                metadataPath.toString(),
+                activeProject.storagePaths(),
+                existingMetadata == null || existingMetadata.createdAt() == null
+                        ? timestamp
+                        : existingMetadata.createdAt(),
+                timestamp
         );
+        persistMetadata(metadataPath, metadataDocument);
     }
 
-    private String escapeJson(String value) {
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"");
+    private ProjectMetadataDocument readExistingMetadata(Path metadataPath) throws IOException {
+        if (!Files.exists(metadataPath)) {
+            return null;
+        }
+
+        return objectMapper.readValue(metadataPath.toFile(), ProjectMetadataDocument.class);
+    }
+
+    private void persistMetadata(Path metadataPath, ProjectMetadataDocument metadataDocument) throws IOException {
+        Path temporaryMetadataPath = metadataPath.resolveSibling(metadataPath.getFileName() + ".tmp");
+        objectMapper.writeValue(temporaryMetadataPath.toFile(), metadataDocument);
+        moveIntoPlace(temporaryMetadataPath, metadataPath);
+    }
+
+    private void moveIntoPlace(Path temporaryMetadataPath, Path metadataPath) throws IOException {
+        try {
+            Files.move(
+                    temporaryMetadataPath,
+                    metadataPath,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE
+            );
+        } catch (AtomicMoveNotSupportedException exception) {
+            Files.move(temporaryMetadataPath, metadataPath, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record ProjectMetadataDocument(int schemaVersion,
+                                           String projectName,
+                                           String repositoryPath,
+                                           String projectMetadataPath,
+                                           ActiveProject.ProjectStoragePaths storage,
+                                           String createdAt,
+                                           String updatedAt) {
     }
 }

@@ -21,7 +21,7 @@ import java.util.UUID;
 
 @Component
 public class LocalMetadataStorage {
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
     private static final String STORAGE_FILE_NAME = "metadata-store.json";
     private static final String DEFAULT_PROFILE_TYPE = "UNCONFIGURED";
 
@@ -56,6 +56,7 @@ public class LocalMetadataStorage {
                 currentSessionId,
                 "OPEN",
                 null,
+                null,
                 timestamp,
                 timestamp,
                 null
@@ -82,6 +83,7 @@ public class LocalMetadataStorage {
                 activeProject.displayName(),
                 activeProject.displayPath(),
                 activeProject.projectMetadataPath().toString(),
+                activeProject.storagePaths(),
                 existingProject == null ? timestamp : existingProject.createdAt(),
                 timestamp
         );
@@ -89,7 +91,13 @@ public class LocalMetadataStorage {
         state = new LocalMetadataSnapshot(
                 SCHEMA_VERSION,
                 upsertProjectRecord(state.projects(), projectRecord),
-                updateCurrentSession(state.sessions(), projectId, timestamp, false),
+                updateCurrentSession(
+                        state.sessions(),
+                        projectId,
+                        SessionStoragePaths.from(activeProject),
+                        timestamp,
+                        false
+                ),
                 ensureProfileRecord(state.profiles(), projectId, timestamp),
                 state.runMetadata()
         );
@@ -113,7 +121,7 @@ public class LocalMetadataStorage {
         state = new LocalMetadataSnapshot(
                 SCHEMA_VERSION,
                 state.projects(),
-                updateCurrentSession(state.sessions(), currentActiveProjectId(), timestamp, true),
+                updateCurrentSession(state.sessions(), currentActiveProjectId(), null, timestamp, true),
                 state.profiles(),
                 state.runMetadata()
         );
@@ -169,6 +177,7 @@ public class LocalMetadataStorage {
 
     private List<SessionRecord> updateCurrentSession(List<SessionRecord> sessionRecords,
                                                      String activeProjectId,
+                                                     SessionStoragePaths sessionStoragePaths,
                                                      String timestamp,
                                                      boolean closingSession) {
         if (sessionRecords == null) {
@@ -186,6 +195,7 @@ public class LocalMetadataStorage {
                     sessionRecord.sessionId(),
                     closingSession ? "CLOSED" : sessionRecord.status(),
                     activeProjectId,
+                    sessionStoragePaths == null ? sessionRecord.storagePaths() : sessionStoragePaths,
                     sessionRecord.startedAt(),
                     timestamp,
                     closingSession ? timestamp : sessionRecord.endedAt()
@@ -238,19 +248,88 @@ public class LocalMetadataStorage {
             return emptyState();
         }
 
-        if (loadedState.schemaVersion() != SCHEMA_VERSION) {
+        if (loadedState.schemaVersion() < 1 || loadedState.schemaVersion() > SCHEMA_VERSION) {
             throw new IllegalStateException(
                     "Unsupported local metadata schema version: " + loadedState.schemaVersion()
             );
         }
 
+        List<ProjectRecord> normalizedProjects = List.copyOf((loadedState.projects() == null ? List.<ProjectRecord>of()
+                : loadedState.projects()).stream().map(this::normalizeProjectRecord).toList());
+        List<SessionRecord> normalizedSessions = List.copyOf((loadedState.sessions() == null ? List.<SessionRecord>of()
+                : loadedState.sessions()).stream()
+                .map(sessionRecord -> normalizeSessionRecord(sessionRecord, normalizedProjects))
+                .toList());
+
         return new LocalMetadataSnapshot(
                 SCHEMA_VERSION,
-                List.copyOf(loadedState.projects() == null ? List.of() : loadedState.projects()),
-                List.copyOf(loadedState.sessions() == null ? List.of() : loadedState.sessions()),
+                normalizedProjects,
+                normalizedSessions,
                 List.copyOf(loadedState.profiles() == null ? List.of() : loadedState.profiles()),
                 List.copyOf(loadedState.runMetadata() == null ? List.of() : loadedState.runMetadata())
         );
+    }
+
+    private ProjectRecord normalizeProjectRecord(ProjectRecord projectRecord) {
+        ActiveProject activeProject = new ActiveProject(Path.of(projectRecord.repositoryPath()));
+        ActiveProject.ProjectStoragePaths storagePaths = hasCompleteProjectStoragePaths(projectRecord.storagePaths())
+                ? projectRecord.storagePaths()
+                : activeProject.storagePaths();
+
+        return new ProjectRecord(
+                projectRecord.projectId(),
+                projectRecord.displayName(),
+                projectRecord.repositoryPath(),
+                projectRecord.projectMetadataPath(),
+                storagePaths,
+                projectRecord.createdAt(),
+                projectRecord.lastOpenedAt()
+        );
+    }
+
+    private SessionRecord normalizeSessionRecord(SessionRecord sessionRecord, List<ProjectRecord> projectRecords) {
+        SessionStoragePaths sessionStoragePaths = sessionRecord.storagePaths();
+        if (!hasCompleteSessionStoragePaths(sessionStoragePaths)) {
+            sessionStoragePaths = projectRecords.stream()
+                    .filter(projectRecord -> projectRecord.projectId().equals(sessionRecord.activeProjectId()))
+                    .findFirst()
+                    .map(ProjectRecord::storagePaths)
+                    .map(SessionStoragePaths::from)
+                    .orElse(sessionStoragePaths);
+        }
+
+        return new SessionRecord(
+                sessionRecord.sessionId(),
+                sessionRecord.status(),
+                sessionRecord.activeProjectId(),
+                sessionStoragePaths,
+                sessionRecord.startedAt(),
+                sessionRecord.updatedAt(),
+                sessionRecord.endedAt()
+        );
+    }
+
+    private boolean hasCompleteProjectStoragePaths(ActiveProject.ProjectStoragePaths storagePaths) {
+        return storagePaths != null
+                && isPopulated(storagePaths.ralphyDirectoryPath())
+                && isPopulated(storagePaths.prdsDirectoryPath())
+                && isPopulated(storagePaths.activePrdPath())
+                && isPopulated(storagePaths.prdJsonDirectoryPath())
+                && isPopulated(storagePaths.activePrdJsonPath())
+                && isPopulated(storagePaths.promptsDirectoryPath())
+                && isPopulated(storagePaths.logsDirectoryPath())
+                && isPopulated(storagePaths.artifactsDirectoryPath());
+    }
+
+    private boolean hasCompleteSessionStoragePaths(SessionStoragePaths storagePaths) {
+        return storagePaths != null
+                && isPopulated(storagePaths.promptsDirectoryPath())
+                && isPopulated(storagePaths.logsDirectoryPath())
+                && isPopulated(storagePaths.artifactsDirectoryPath());
+    }
+
+    private boolean isPopulated(String value) {
+        return value != null && !value.isBlank();
     }
 
     private LocalMetadataSnapshot emptyState() {
@@ -315,6 +394,7 @@ public class LocalMetadataStorage {
                                 String displayName,
                                 String repositoryPath,
                                 String projectMetadataPath,
+                                ActiveProject.ProjectStoragePaths storagePaths,
                                 String createdAt,
                                 String lastOpenedAt) {
     }
@@ -323,9 +403,31 @@ public class LocalMetadataStorage {
     public record SessionRecord(String sessionId,
                                 String status,
                                 String activeProjectId,
+                                SessionStoragePaths storagePaths,
                                 String startedAt,
                                 String updatedAt,
                                 String endedAt) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SessionStoragePaths(String promptsDirectoryPath,
+                                      String logsDirectoryPath,
+                                      String artifactsDirectoryPath) {
+        private static SessionStoragePaths from(ActiveProject activeProject) {
+            return new SessionStoragePaths(
+                    activeProject.promptsDirectoryPath().toString(),
+                    activeProject.logsDirectoryPath().toString(),
+                    activeProject.artifactsDirectoryPath().toString()
+            );
+        }
+
+        private static SessionStoragePaths from(ActiveProject.ProjectStoragePaths projectStoragePaths) {
+            return new SessionStoragePaths(
+                    projectStoragePaths.promptsDirectoryPath(),
+                    projectStoragePaths.logsDirectoryPath(),
+                    projectStoragePaths.artifactsDirectoryPath()
+            );
+        }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
