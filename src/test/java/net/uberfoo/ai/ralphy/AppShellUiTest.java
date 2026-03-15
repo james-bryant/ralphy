@@ -199,6 +199,50 @@ class AppShellUiTest {
         assertTrue(harness.getRequiredBean(ActiveProjectService.class).activeProject().isEmpty());
     }
 
+    @Test
+    void appShellCanEditSaveAndReloadExecutionProfiles() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("profile-repo");
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+
+        assertEquals("Native Windows PowerShell", harness.text("#executionProfileSummaryLabel"));
+
+        harness.clickOn("#wslExecutionProfileRadioButton");
+        harness.enterText("#wslDistributionField", "Ubuntu-24.04");
+        harness.enterText("#windowsPathPrefixField", "C:\\Users\\james\\workspaces");
+        harness.enterText("#wslPathPrefixField", "/mnt/c/Users/james/workspaces");
+        harness.clickOn("#saveExecutionProfileButton");
+
+        assertEquals("WSL: Ubuntu-24.04 (C:\\Users\\james\\workspaces -> /mnt/c/Users/james/workspaces)",
+                harness.text("#executionProfileSummaryLabel"));
+        assertEquals("", harness.text("#executionProfileMessageLabel"));
+
+        harness.closeShell();
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertEquals("profile-repo", harness.text("#activeProjectNameLabel"));
+        assertEquals("WSL: Ubuntu-24.04 (C:\\Users\\james\\workspaces -> /mnt/c/Users/james/workspaces)",
+                harness.text("#executionProfileSummaryLabel"));
+        assertEquals("Ubuntu-24.04", harness.text("#wslDistributionField"));
+        assertEquals("C:\\Users\\james\\workspaces", harness.text("#windowsPathPrefixField"));
+        assertEquals("/mnt/c/Users/james/workspaces", harness.text("#wslPathPrefixField"));
+
+        harness.clickOn("#nativeExecutionProfileRadioButton");
+        harness.clickOn("#saveExecutionProfileButton");
+
+        assertEquals("Native Windows PowerShell", harness.text("#executionProfileSummaryLabel"));
+        assertEquals("", harness.text("#executionProfileMessageLabel"));
+    }
+
     private Path createGitRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));

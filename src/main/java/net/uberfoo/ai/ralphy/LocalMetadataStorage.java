@@ -15,16 +15,18 @@ import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
 public class LocalMetadataStorage {
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
     private static final String STORAGE_FILE_NAME = "metadata-store.json";
-    private static final String DEFAULT_PROFILE_TYPE = "UNCONFIGURED";
+    private static final String DEFAULT_PROFILE_TYPE = ExecutionProfile.ProfileType.POWERSHELL.storageValue();
 
     private final ObjectMapper objectMapper;
     private final Path storageFilePath;
@@ -125,6 +127,45 @@ public class LocalMetadataStorage {
         return findProjectByRepositoryPath(repositoryPath);
     }
 
+    public synchronized Optional<ExecutionProfile> executionProfileForRepository(Path repositoryPath) {
+        Optional<ProjectRecord> projectRecord = findProjectByRepositoryPath(repositoryPath);
+        if (projectRecord.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return findProfileByProjectId(projectRecord.get().projectId())
+                .map(this::toExecutionProfile)
+                .or(() -> Optional.of(ExecutionProfile.nativePowerShell()));
+    }
+
+    public synchronized ExecutionProfile saveExecutionProfile(String projectId, ExecutionProfile executionProfile) {
+        Objects.requireNonNull(projectId, "projectId must not be null");
+        Objects.requireNonNull(executionProfile, "executionProfile must not be null");
+
+        String timestamp = Instant.now().toString();
+        ProfileRecord existingProfileRecord = findProfileByProjectId(projectId).orElse(null);
+        ProfileRecord replacementRecord = new ProfileRecord(
+                existingProfileRecord == null ? UUID.randomUUID().toString() : existingProfileRecord.profileId(),
+                projectId,
+                executionProfile.type().storageValue(),
+                executionProfile.wslDistribution(),
+                executionProfile.windowsPathPrefix(),
+                executionProfile.wslPathPrefix(),
+                existingProfileRecord == null ? timestamp : existingProfileRecord.createdAt(),
+                timestamp
+        );
+
+        state = new LocalMetadataSnapshot(
+                SCHEMA_VERSION,
+                state.projects(),
+                state.sessions(),
+                upsertProfileRecord(state.profiles(), replacementRecord),
+                state.runMetadata()
+        );
+        persistState();
+        return executionProfile;
+    }
+
     public synchronized Optional<RunMetadataRecord> latestRunMetadataForProject(String projectId) {
         if (!isPopulated(projectId)) {
             return Optional.empty();
@@ -181,6 +222,12 @@ public class LocalMetadataStorage {
     private Optional<ProjectRecord> findProjectById(String projectId) {
         return state.projects().stream()
                 .filter(projectRecord -> projectRecord.projectId().equals(projectId))
+                .findFirst();
+    }
+
+    private Optional<ProfileRecord> findProfileByProjectId(String projectId) {
+        return state.profiles().stream()
+                .filter(profileRecord -> profileRecord.projectId().equals(projectId))
                 .findFirst();
     }
 
@@ -264,16 +311,27 @@ public class LocalMetadataStorage {
 
         List<ProfileRecord> updatedProfileRecords = new ArrayList<>(profileRecords.size() + 1);
         updatedProfileRecords.addAll(profileRecords);
-        updatedProfileRecords.add(new ProfileRecord(
-                UUID.randomUUID().toString(),
-                projectId,
-                DEFAULT_PROFILE_TYPE,
-                null,
-                null,
-                null,
-                timestamp,
-                timestamp
-        ));
+        updatedProfileRecords.add(defaultProfileRecord(projectId, timestamp));
+        return List.copyOf(updatedProfileRecords);
+    }
+
+    private List<ProfileRecord> upsertProfileRecord(List<ProfileRecord> profileRecords, ProfileRecord replacementRecord) {
+        List<ProfileRecord> updatedProfileRecords = new ArrayList<>(profileRecords.size() + 1);
+        boolean replaced = false;
+        for (ProfileRecord profileRecord : profileRecords) {
+            if (profileRecord.projectId().equals(replacementRecord.projectId())) {
+                updatedProfileRecords.add(replacementRecord);
+                replaced = true;
+                continue;
+            }
+
+            updatedProfileRecords.add(profileRecord);
+        }
+
+        if (!replaced) {
+            updatedProfileRecords.add(replacementRecord);
+        }
+
         return List.copyOf(updatedProfileRecords);
     }
 
@@ -308,12 +366,13 @@ public class LocalMetadataStorage {
                 : loadedState.sessions()).stream()
                 .map(sessionRecord -> normalizeSessionRecord(sessionRecord, normalizedProjects))
                 .toList());
+        List<ProfileRecord> normalizedProfiles = normalizeProfileRecords(loadedState.profiles(), normalizedProjects);
 
         return new LocalMetadataSnapshot(
                 SCHEMA_VERSION,
                 normalizedProjects,
                 normalizedSessions,
-                List.copyOf(loadedState.profiles() == null ? List.of() : loadedState.profiles()),
+                normalizedProfiles,
                 List.copyOf(loadedState.runMetadata() == null ? List.of() : loadedState.runMetadata())
         );
     }
@@ -354,6 +413,88 @@ public class LocalMetadataStorage {
                 sessionRecord.startedAt(),
                 sessionRecord.updatedAt(),
                 sessionRecord.endedAt()
+        );
+    }
+
+    private List<ProfileRecord> normalizeProfileRecords(List<ProfileRecord> profileRecords,
+                                                        List<ProjectRecord> projectRecords) {
+        Set<String> knownProjectIds = new LinkedHashSet<>();
+        for (ProjectRecord projectRecord : projectRecords) {
+            knownProjectIds.add(projectRecord.projectId());
+        }
+
+        List<ProfileRecord> normalizedProfiles = new ArrayList<>();
+        Set<String> seenProjectIds = new LinkedHashSet<>();
+        if (profileRecords != null) {
+            for (ProfileRecord profileRecord : profileRecords) {
+                if (!isPopulated(profileRecord.projectId())
+                        || !knownProjectIds.contains(profileRecord.projectId())
+                        || !seenProjectIds.add(profileRecord.projectId())) {
+                    continue;
+                }
+
+                normalizedProfiles.add(normalizeProfileRecord(profileRecord));
+            }
+        }
+
+        for (ProjectRecord projectRecord : projectRecords) {
+            if (seenProjectIds.add(projectRecord.projectId())) {
+                normalizedProfiles.add(defaultProfileRecord(projectRecord.projectId(), defaultProfileTimestamp(projectRecord)));
+            }
+        }
+
+        return List.copyOf(normalizedProfiles);
+    }
+
+    private ProfileRecord normalizeProfileRecord(ProfileRecord profileRecord) {
+        ExecutionProfile executionProfile = toExecutionProfile(profileRecord);
+        String createdAt = firstPopulated(profileRecord.createdAt(), profileRecord.updatedAt(), Instant.now().toString());
+        String updatedAt = firstPopulated(profileRecord.updatedAt(), createdAt);
+        return new ProfileRecord(
+                isPopulated(profileRecord.profileId()) ? profileRecord.profileId() : UUID.randomUUID().toString(),
+                profileRecord.projectId(),
+                executionProfile.type().storageValue(),
+                executionProfile.wslDistribution(),
+                executionProfile.windowsPathPrefix(),
+                executionProfile.wslPathPrefix(),
+                createdAt,
+                updatedAt
+        );
+    }
+
+    private ProfileRecord defaultProfileRecord(String projectId, String timestamp) {
+        return new ProfileRecord(
+                UUID.randomUUID().toString(),
+                projectId,
+                DEFAULT_PROFILE_TYPE,
+                null,
+                null,
+                null,
+                timestamp,
+                timestamp
+        );
+    }
+
+    private String defaultProfileTimestamp(ProjectRecord projectRecord) {
+        return firstPopulated(projectRecord.lastOpenedAt(), projectRecord.createdAt(), Instant.now().toString());
+    }
+
+    private String firstPopulated(String... values) {
+        for (String value : values) {
+            if (isPopulated(value)) {
+                return value;
+            }
+        }
+
+        return "";
+    }
+
+    private ExecutionProfile toExecutionProfile(ProfileRecord profileRecord) {
+        return new ExecutionProfile(
+                ExecutionProfile.ProfileType.fromStorageValue(profileRecord.profileType()),
+                profileRecord.wslDistribution(),
+                profileRecord.windowsPathPrefix(),
+                profileRecord.wslPathPrefix()
         );
     }
 

@@ -95,6 +95,7 @@ class ActiveProjectServiceTest {
                 metadataSnapshot.projects().getFirst().storagePaths().prdsDirectoryPath());
         assertEquals(activeProject.logsDirectoryPath().toString(),
                 metadataSnapshot.sessions().getFirst().storagePaths().logsDirectoryPath());
+        assertEquals("POWERSHELL", metadataSnapshot.profiles().getFirst().profileType());
     }
 
     @Test
@@ -218,6 +219,73 @@ class ActiveProjectServiceTest {
         assertEquals(ActiveProjectService.RunRecoveryAction.REVIEWABLE, candidate.action());
         assertEquals("FAILED", candidate.status());
         assertEquals("US-011", candidate.storyId());
+    }
+
+    @Test
+    void saveExecutionProfilePersistsWslSettingsAndReloadsThemPerProject() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+        Path repositoryOne = createGitDirectoryRepository("profile-one");
+        Path repositoryTwo = createGitDirectoryRepository("profile-two");
+
+        assertTrue(activeProjectService.openRepository(repositoryOne).successful());
+        assertEquals(ExecutionProfile.ProfileType.POWERSHELL,
+                activeProjectService.executionProfile().orElseThrow().type());
+
+        ActiveProjectService.ExecutionProfileSaveResult wslSaveResult = activeProjectService.saveExecutionProfile(
+                new ExecutionProfile(
+                        ExecutionProfile.ProfileType.WSL,
+                        "Ubuntu-24.04",
+                        "C:\\Users\\james\\workspaces",
+                        "/mnt/c/Users/james/workspaces"
+                )
+        );
+
+        assertTrue(wslSaveResult.successful());
+        assertEquals(ExecutionProfile.ProfileType.WSL, wslSaveResult.executionProfile().type());
+        assertEquals("Ubuntu-24.04", wslSaveResult.executionProfile().wslDistribution());
+        assertEquals("C:\\Users\\james\\workspaces", wslSaveResult.executionProfile().windowsPathPrefix());
+        assertEquals("/mnt/c/Users/james/workspaces", wslSaveResult.executionProfile().wslPathPrefix());
+
+        assertTrue(activeProjectService.openRepository(repositoryTwo).successful());
+        assertEquals(ExecutionProfile.ProfileType.POWERSHELL,
+                activeProjectService.executionProfile().orElseThrow().type());
+
+        assertTrue(activeProjectService.openRepository(repositoryOne).successful());
+        ExecutionProfile restoredProfile = activeProjectService.executionProfile().orElseThrow();
+        assertEquals(ExecutionProfile.ProfileType.WSL, restoredProfile.type());
+        assertEquals("Ubuntu-24.04", restoredProfile.wslDistribution());
+        assertEquals("C:\\Users\\james\\workspaces", restoredProfile.windowsPathPrefix());
+        assertEquals("/mnt/c/Users/james/workspaces", restoredProfile.wslPathPrefix());
+
+        LocalMetadataStorage.ProfileRecord persistedProfile = localMetadataStorage.snapshot().profiles().stream()
+                .filter(profileRecord -> profileRecord.projectId().equals(
+                        localMetadataStorage.projectRecordForRepository(repositoryOne).orElseThrow().projectId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("WSL", persistedProfile.profileType());
+        assertEquals("Ubuntu-24.04", persistedProfile.wslDistribution());
+    }
+
+    @Test
+    void saveExecutionProfileRejectsIncompleteWslSettingsWithoutOverwritingExistingProfile() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path repository = createGitDirectoryRepository("wsl-validation-repo");
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        ActiveProjectService.ExecutionProfileSaveResult saveResult = activeProjectService.saveExecutionProfile(
+                new ExecutionProfile(
+                        ExecutionProfile.ProfileType.WSL,
+                        "",
+                        "C:\\Users\\james\\workspaces",
+                        "/mnt/c/Users/james/workspaces"
+                )
+        );
+
+        assertFalse(saveResult.successful());
+        assertEquals("Enter a WSL distribution before saving the WSL execution profile.", saveResult.message());
+        assertEquals(ExecutionProfile.ProfileType.POWERSHELL,
+                activeProjectService.executionProfile().orElseThrow().type());
     }
 
     private Path createGitDirectoryRepository(String directoryName) throws IOException {

@@ -18,6 +18,7 @@ after each iteration and it's included in prompts for context.
 - Keep app-level desktop metadata in a versioned local store outside the repository, and persist updates by writing a temporary JSON file and atomically moving it into place so project/session records survive restarts without partial writes.
 - For repo-local PRD and run-artifact storage, compute the `.ralph-tui` layout from the active repository and re-run an idempotent directory bootstrap on every project activation so missing storage folders self-heal before metadata is persisted.
 - Restore startup project context by resolving the most recent session-backed project from local metadata and reactivating it through the same service path used for manual open/create flows; that keeps repository validation, storage bootstrapping, and metadata refresh aligned across cold start and interactive onboarding.
+- When a new per-project desktop setting is added to the versioned local metadata store, normalize and backfill it during load so older project records become immediately editable in the UI without a separate migration command.
 
 ---
 
@@ -177,4 +178,17 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - The JavaFX Maven plugin launch path did not honor the attempted custom storage arg in this environment, so the Windows smoke had to seed the app's default local metadata location to exercise the real startup restore flow.
     - JavaFX labels in the live desktop window were readable through Windows UI Automation, which made it possible to verify restore and recovery copy during manual smoke without adding extra debug surfaces to the app.
+---
+
+## 2026-03-15 - US-012
+- Implemented typed per-project execution profiles in local metadata with explicit `POWERSHELL` and `WSL` modes, migrated legacy `UNCONFIGURED` records to a native profile, and persisted WSL distro plus Windows-to-WSL path mapping details per project.
+- Added an `Execution Profile` editor to the `Projects` workspace so the active project can switch between native PowerShell and WSL, validate required WSL fields, save the profile, and restore the saved settings after project changes or app restart.
+- Expanded regression coverage across metadata migration, service-level profile persistence/validation, and JavaFX UI save-and-restore flows; updated the Windows smoke checklist and completed a Windows smoke on 2026-03-15 by seeding a saved WSL profile, launching `.\mvnw.cmd -q -DskipTests javafx:run`, and confirming through live UI Automation that the editor controls and restored WSL summary were visible in the running app.
+- Files changed: `docs/windows-smoke-checklist.md`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`, `src/main/java/net/uberfoo/ai/ralphy/ExecutionProfile.java`, `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`, `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `src/test/java/net/uberfoo/ai/ralphy/LocalMetadataStorageTest.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - Backfilling missing or legacy per-project settings during metadata normalization keeps the UI simple because every active project can assume a complete editable settings record.
+  - Gotchas encountered
+    - The live JavaFX launch still ignored custom storage-location args in this environment, so the manual smoke had to seed and later restore the default app metadata file to verify startup restoration of a saved execution profile.
+    - Long WSL summary text remained accessible through Windows UI Automation, which made it practical to verify the live desktop state without adding a dedicated debug surface.
 ---

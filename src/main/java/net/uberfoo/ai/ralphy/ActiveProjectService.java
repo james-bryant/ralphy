@@ -8,6 +8,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -48,6 +49,40 @@ public class ActiveProjectService {
         return localMetadataStorage.projectRecordForRepository(activeProject.repositoryPath())
                 .flatMap(projectRecord -> localMetadataStorage.latestRunMetadataForProject(projectRecord.projectId()))
                 .flatMap(this::toRunRecoveryCandidate);
+    }
+
+    public synchronized Optional<ExecutionProfile> executionProfile() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        return localMetadataStorage.executionProfileForRepository(activeProject.repositoryPath());
+    }
+
+    public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
+        Objects.requireNonNull(executionProfile, "executionProfile must not be null");
+        if (activeProject == null) {
+            return ExecutionProfileSaveResult.failure(
+                    "Open or create a repository before saving an execution profile."
+            );
+        }
+
+        String validationMessage = validateExecutionProfile(executionProfile);
+        if (!validationMessage.isBlank()) {
+            return ExecutionProfileSaveResult.failure(validationMessage);
+        }
+
+        Optional<LocalMetadataStorage.ProjectRecord> projectRecord =
+                localMetadataStorage.projectRecordForRepository(activeProject.repositoryPath());
+        if (projectRecord.isEmpty()) {
+            return ExecutionProfileSaveResult.failure(
+                    "The active repository is missing local metadata. Reopen the repository and try again."
+            );
+        }
+
+        ExecutionProfile savedProfile =
+                localMetadataStorage.saveExecutionProfile(projectRecord.get().projectId(), executionProfile);
+        return ExecutionProfileSaveResult.success(savedProfile);
     }
 
     public synchronized ProjectActivationResult openRepository(Path selectedDirectory) {
@@ -197,6 +232,28 @@ public class ActiveProjectService {
         return runMetadataRecord.endedAt() != null && !runMetadataRecord.endedAt().isBlank();
     }
 
+    private String validateExecutionProfile(ExecutionProfile executionProfile) {
+        if (executionProfile.type() != ExecutionProfile.ProfileType.WSL) {
+            return "";
+        }
+
+        if (!hasText(executionProfile.wslDistribution())) {
+            return "Enter a WSL distribution before saving the WSL execution profile.";
+        }
+        if (!hasText(executionProfile.windowsPathPrefix())) {
+            return "Enter the Windows path prefix before saving the WSL execution profile.";
+        }
+        if (!hasText(executionProfile.wslPathPrefix())) {
+            return "Enter the WSL path prefix before saving the WSL execution profile.";
+        }
+
+        return "";
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
     private String displayStatus(String status) {
         String normalizedStatus = normalizeStatus(status);
         return normalizedStatus.isBlank() ? "UNKNOWN" : normalizedStatus;
@@ -274,6 +331,16 @@ public class ActiveProjectService {
     }
 
     public record RunRecoveryCandidate(String runId, String storyId, String status, RunRecoveryAction action) {
+    }
+
+    public record ExecutionProfileSaveResult(boolean successful, ExecutionProfile executionProfile, String message) {
+        private static ExecutionProfileSaveResult success(ExecutionProfile executionProfile) {
+            return new ExecutionProfileSaveResult(true, executionProfile, "");
+        }
+
+        private static ExecutionProfileSaveResult failure(String message) {
+            return new ExecutionProfileSaveResult(false, null, message);
+        }
     }
 
     public enum RunRecoveryAction {

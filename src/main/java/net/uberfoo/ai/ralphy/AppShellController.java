@@ -3,7 +3,9 @@ package net.uberfoo.ai.ralphy;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ToggleGroup;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -21,6 +23,8 @@ public class AppShellController {
     private static final String NO_PERSISTED_RUN_STATE_TITLE = "No persisted run state";
     private static final String NO_PERSISTED_RUN_STATE_DETAIL =
             "The active project has no resumable or reviewable run metadata yet.";
+    private static final String NO_ACTIVE_PROFILE_SUMMARY =
+            "Open or create a repository to configure its execution profile.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -40,6 +44,7 @@ public class AppShellController {
     private final AppShellDescriptor shellDescriptor;
     private final ActiveProjectService activeProjectService;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
+    private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
 
     @FXML
     private Label activeProjectNameLabel;
@@ -66,7 +71,16 @@ public class AppShellController {
     private Label executionOverviewHeadlineLabel;
 
     @FXML
+    private Label executionProfileMessageLabel;
+
+    @FXML
+    private Label executionProfileSummaryLabel;
+
+    @FXML
     private Label navigationPlaceholderLabel;
+
+    @FXML
+    private RadioButton nativeExecutionProfileRadioButton;
 
     @FXML
     private Button openRepositoryButton;
@@ -95,6 +109,21 @@ public class AppShellController {
     @FXML
     private Label workspacePlaceholderLabel;
 
+    @FXML
+    private Button saveExecutionProfileButton;
+
+    @FXML
+    private TextField windowsPathPrefixField;
+
+    @FXML
+    private TextField wslDistributionField;
+
+    @FXML
+    private TextField wslPathPrefixField;
+
+    @FXML
+    private RadioButton wslExecutionProfileRadioButton;
+
     public AppShellController(AppShellDescriptor shellDescriptor,
                               ActiveProjectService activeProjectService,
                               RepositoryDirectoryChooser repositoryDirectoryChooser) {
@@ -113,8 +142,16 @@ public class AppShellController {
         workspaceTitleLabel.setText("Workspace");
         clearActiveNavigationButton();
         projectValidationMessageLabel.managedProperty().bind(projectValidationMessageLabel.visibleProperty());
+        executionProfileMessageLabel.managedProperty().bind(executionProfileMessageLabel.visibleProperty());
+        nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
+        wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
+        executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
+                updateExecutionProfileFieldState()
+        );
+        nativeExecutionProfileRadioButton.setSelected(true);
         renderActiveProject(activeProjectService.activeProject().orElse(null));
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
+        setExecutionProfileMessage("");
     }
 
     @FXML
@@ -188,6 +225,19 @@ public class AppShellController {
         setProjectValidationMessage(creationResult.message());
     }
 
+    @FXML
+    private void saveExecutionProfile() {
+        ActiveProjectService.ExecutionProfileSaveResult saveResult =
+                activeProjectService.saveExecutionProfile(buildExecutionProfileFromForm());
+        if (!saveResult.successful()) {
+            setExecutionProfileMessage(saveResult.message());
+            return;
+        }
+
+        renderExecutionProfile(saveResult.executionProfile());
+        setExecutionProfileMessage("");
+    }
+
     private void activateSection(ShellSection section, Button activeButton) {
         workspaceTitleLabel.setText(section.title());
         workspacePlaceholderLabel.setText(section.workspaceText());
@@ -233,6 +283,7 @@ public class AppShellController {
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
             activeProjectStatusLabel.setText(NO_ACTIVE_PROJECT_STATUS);
+            renderExecutionProfile(null);
             renderExecutionOverview(null);
             return;
         }
@@ -240,7 +291,37 @@ public class AppShellController {
         activeProjectNameLabel.setText(activeProject.displayName());
         activeProjectPathLabel.setText(activeProject.displayPath());
         activeProjectStatusLabel.setText(activeProject.displayName());
+        renderExecutionProfile(activeProjectService.executionProfile().orElse(ExecutionProfile.nativePowerShell()));
         renderExecutionOverview(activeProject);
+    }
+
+    private void renderExecutionProfile(ExecutionProfile executionProfile) {
+        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
+        setExecutionProfileMessage("");
+        nativeExecutionProfileRadioButton.setDisable(!activeProjectPresent);
+        wslExecutionProfileRadioButton.setDisable(!activeProjectPresent);
+        saveExecutionProfileButton.setDisable(!activeProjectPresent);
+
+        if (!activeProjectPresent || executionProfile == null) {
+            nativeExecutionProfileRadioButton.setSelected(true);
+            wslDistributionField.clear();
+            windowsPathPrefixField.clear();
+            wslPathPrefixField.clear();
+            executionProfileSummaryLabel.setText(NO_ACTIVE_PROFILE_SUMMARY);
+            updateExecutionProfileFieldState();
+            return;
+        }
+
+        if (executionProfile.type() == ExecutionProfile.ProfileType.WSL) {
+            wslExecutionProfileRadioButton.setSelected(true);
+        } else {
+            nativeExecutionProfileRadioButton.setSelected(true);
+        }
+        wslDistributionField.setText(valueOrEmpty(executionProfile.wslDistribution()));
+        windowsPathPrefixField.setText(valueOrEmpty(executionProfile.windowsPathPrefix()));
+        wslPathPrefixField.setText(valueOrEmpty(executionProfile.wslPathPrefix()));
+        executionProfileSummaryLabel.setText(executionProfile.summary());
+        updateExecutionProfileFieldState();
     }
 
     private void renderExecutionOverview(ActiveProject activeProject) {
@@ -291,10 +372,41 @@ public class AppShellController {
         return value != null && !value.isBlank();
     }
 
+    private void updateExecutionProfileFieldState() {
+        boolean enableWslFields = activeProjectService.activeProject().isPresent()
+                && wslExecutionProfileRadioButton.isSelected();
+        wslDistributionField.setDisable(!enableWslFields);
+        windowsPathPrefixField.setDisable(!enableWslFields);
+        wslPathPrefixField.setDisable(!enableWslFields);
+    }
+
+    private ExecutionProfile buildExecutionProfileFromForm() {
+        if (wslExecutionProfileRadioButton.isSelected()) {
+            return new ExecutionProfile(
+                    ExecutionProfile.ProfileType.WSL,
+                    wslDistributionField.getText(),
+                    windowsPathPrefixField.getText(),
+                    wslPathPrefixField.getText()
+            );
+        }
+
+        return ExecutionProfile.nativePowerShell();
+    }
+
+    private String valueOrEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
     private void setProjectValidationMessage(String message) {
         boolean hasMessage = message != null && !message.isBlank();
         projectValidationMessageLabel.setText(hasMessage ? message : "");
         projectValidationMessageLabel.setVisible(hasMessage);
+    }
+
+    private void setExecutionProfileMessage(String message) {
+        boolean hasMessage = message != null && !message.isBlank();
+        executionProfileMessageLabel.setText(hasMessage ? message : "");
+        executionProfileMessageLabel.setVisible(hasMessage);
     }
 
     private record ShellSection(String title, String workspaceText, String statusText) {

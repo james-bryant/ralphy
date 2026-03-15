@@ -4,6 +4,7 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.RadioButton?>
 <?import javafx.scene.control.Separator?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.BorderPane?>
@@ -149,6 +150,43 @@
                     <padding>
                         <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
                     </padding>
+                    <Label text="Execution Profile">
+                        <styleClass>
+                            <String fx:value="card-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label text="Save the Codex execution mode for the active project before starting native Windows or WSL runs."
+                           wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <Label id="executionProfileSummaryLabel" fx:id="executionProfileSummaryLabel" wrapText="true">
+                        <styleClass>
+                            <String fx:value="section-title"/>
+                        </styleClass>
+                    </Label>
+                    <HBox spacing="12.0">
+                        <RadioButton id="nativeExecutionProfileRadioButton" fx:id="nativeExecutionProfileRadioButton"
+                                     mnemonicParsing="false" text="Native PowerShell"/>
+                        <RadioButton id="wslExecutionProfileRadioButton" fx:id="wslExecutionProfileRadioButton"
+                                     mnemonicParsing="false" text="WSL"/>
+                    </HBox>
+                    <TextField id="wslDistributionField" fx:id="wslDistributionField"
+                               promptText="Ubuntu-24.04"/>
+                    <TextField id="windowsPathPrefixField" fx:id="windowsPathPrefixField"
+                               promptText="C:\Users\james\workspaces"/>
+                    <TextField id="wslPathPrefixField" fx:id="wslPathPrefixField"
+                               promptText="/mnt/c/Users/james/workspaces"/>
+                    <Button id="saveExecutionProfileButton" fx:id="saveExecutionProfileButton"
+                            mnemonicParsing="false" onAction="#saveExecutionProfile" text="Save Execution Profile"/>
+                    <Label id="executionProfileMessageLabel" fx:id="executionProfileMessageLabel" visible="false"
+                           wrapText="true">
+                        <styleClass>
+                            <String fx:value="validation-text"/>
+                        </styleClass>
+                    </Label>
+                    <Separator/>
                     <Label text="Execution Overview">
                         <styleClass>
                             <String fx:value="card-title"/>

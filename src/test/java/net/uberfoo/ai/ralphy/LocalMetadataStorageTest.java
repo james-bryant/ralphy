@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LocalMetadataStorageTest {
@@ -38,7 +39,7 @@ class LocalMetadataStorageTest {
         LocalMetadataStorage.ProfileRecord profileRecord = restartedSnapshot.profiles().getFirst();
         ActiveProject activeProject = new ActiveProject(repositoryPath);
 
-        assertEquals(2, restartedSnapshot.schemaVersion());
+        assertEquals(3, restartedSnapshot.schemaVersion());
         assertEquals(repositoryPath.toAbsolutePath().normalize().toString(), projectRecord.repositoryPath());
         assertEquals(activeProject.activePrdPath().toString(), projectRecord.storagePaths().activePrdPath());
         assertEquals(activeProject.prdJsonDirectoryPath().toString(), projectRecord.storagePaths().prdJsonDirectoryPath());
@@ -46,7 +47,10 @@ class LocalMetadataStorageTest {
         assertEquals(activeProject.promptsDirectoryPath().toString(), sessionRecord.storagePaths().promptsDirectoryPath());
         assertEquals(activeProject.logsDirectoryPath().toString(), sessionRecord.storagePaths().logsDirectoryPath());
         assertEquals(projectRecord.projectId(), profileRecord.projectId());
-        assertEquals("UNCONFIGURED", profileRecord.profileType());
+        assertEquals("POWERSHELL", profileRecord.profileType());
+        assertNull(profileRecord.wslDistribution());
+        assertNull(profileRecord.windowsPathPrefix());
+        assertNull(profileRecord.wslPathPrefix());
         assertEquals("CLOSED", sessionRecord.status());
     }
 
@@ -96,11 +100,86 @@ class LocalMetadataStorageTest {
                 LocalMetadataStorage.forTest(storageDirectory).snapshot();
         ActiveProject activeProject = new ActiveProject(repositoryPath);
 
-        assertEquals(2, migratedSnapshot.schemaVersion());
+        assertEquals(3, migratedSnapshot.schemaVersion());
         assertEquals(activeProject.artifactsDirectoryPath().toString(),
                 migratedSnapshot.projects().getFirst().storagePaths().artifactsDirectoryPath());
         assertEquals(activeProject.logsDirectoryPath().toString(),
                 migratedSnapshot.sessions().getFirst().storagePaths().logsDirectoryPath());
+        assertEquals(1, migratedSnapshot.profiles().size());
+        assertEquals("POWERSHELL", migratedSnapshot.profiles().getFirst().profileType());
+    }
+
+    @Test
+    void versionTwoMetadataStoreMigratesLegacyUnconfiguredProfilesToPowerShell() throws IOException {
+        Path storageDirectory = tempDir.resolve("schema-two-storage");
+        Files.createDirectories(storageDirectory);
+        Path repositoryPath = Files.createDirectory(tempDir.resolve("schema-two-repo"));
+        Path storageFile = storageDirectory.resolve("metadata-store.json");
+        String escapedRepositoryPath = escapeJson(repositoryPath.toAbsolutePath().normalize().toString());
+        String escapedProjectMetadataPath = escapeJson(
+                repositoryPath.resolve(".ralph-tui").resolve("project-metadata.json").toAbsolutePath().normalize().toString()
+        );
+
+        Files.writeString(storageFile, """
+                {
+                  "schemaVersion": 2,
+                  "projects": [
+                    {
+                      "projectId": "project-1",
+                      "displayName": "schema-two-repo",
+                      "repositoryPath": "%s",
+                      "projectMetadataPath": "%s",
+                      "storagePaths": {
+                        "ralphyDirectoryPath": "%s",
+                        "prdsDirectoryPath": "%s",
+                        "activePrdPath": "%s",
+                        "prdJsonDirectoryPath": "%s",
+                        "activePrdJsonPath": "%s",
+                        "promptsDirectoryPath": "%s",
+                        "logsDirectoryPath": "%s",
+                        "artifactsDirectoryPath": "%s"
+                      },
+                      "createdAt": "2026-03-15T00:00:00Z",
+                      "lastOpenedAt": "2026-03-15T00:00:00Z"
+                    }
+                  ],
+                  "sessions": [],
+                  "profiles": [
+                    {
+                      "profileId": "profile-1",
+                      "projectId": "project-1",
+                      "profileType": "UNCONFIGURED",
+                      "wslDistribution": "Ubuntu",
+                      "windowsPathPrefix": "C:\\\\Users\\\\james",
+                      "wslPathPrefix": "/mnt/c/Users/james",
+                      "createdAt": "2026-03-15T00:00:00Z",
+                      "updatedAt": "2026-03-15T00:00:00Z"
+                    }
+                  ],
+                  "runMetadata": []
+                }
+                """.formatted(
+                escapedRepositoryPath,
+                escapedProjectMetadataPath,
+                escapeJson(repositoryPath.resolve(".ralph-tui").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prds").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prds").resolve("active-prd.md")
+                        .toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prd-json").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prd-json").resolve("prd.json")
+                        .toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prompts").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("logs").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("artifacts").toAbsolutePath().normalize().toString())
+        ), StandardCharsets.UTF_8);
+
+        LocalMetadataStorage.ProfileRecord migratedProfile =
+                LocalMetadataStorage.forTest(storageDirectory).snapshot().profiles().getFirst();
+
+        assertEquals("POWERSHELL", migratedProfile.profileType());
+        assertNull(migratedProfile.wslDistribution());
+        assertNull(migratedProfile.windowsPathPrefix());
+        assertNull(migratedProfile.wslPathPrefix());
     }
 
     private String escapeJson(String value) {

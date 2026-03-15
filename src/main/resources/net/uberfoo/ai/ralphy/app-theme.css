@@ -45,6 +45,20 @@
     -fx-text-fill: -color-text-primary;
 }
 
+.ralphy-shell .radio-button {
+    -fx-text-fill: -color-text-primary;
+}
+
+.ralphy-shell .radio-button .radio {
+    -fx-background-color: -color-surface-primary;
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 999;
+}
+
+.ralphy-shell .radio-button:selected .dot {
+    -fx-background-color: -color-accent;
+}
+
 .ralphy-shell .separator *.line {
     -fx-border-color: -color-border-muted;
 }
