@@ -15,6 +15,7 @@ after each iteration and it's included in prompts for context.
 - For JavaFX flows that use native directory choosers in production, wrap the chooser in a Spring-managed adapter with queued test selections so UI harnesses can cover browse workflows without opening OS dialogs.
 - Validate local Git repositories by checking for `.git` metadata existence, not just a `.git` directory, because worktrees expose `.git` as a file.
 - When a JavaFX workflow must create a new filesystem folder, pair a text field for the new leaf directory name with a chooser for the existing parent folder; JavaFX `DirectoryChooser` cannot target a path that does not exist yet.
+- Keep app-level desktop metadata in a versioned local store outside the repository, and persist updates by writing a temporary JSON file and atomically moving it into place so project/session records survive restarts without partial writes.
 
 ---
 
@@ -131,4 +132,19 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - JavaFX `DirectoryChooser` can only select folders that already exist, so the create flow must choose a parent folder and collect the new repository name separately.
     - Repository creation needs best-effort rollback or failed `git init` and metadata writes leave behind half-created project folders that the next attempt collides with.
+---
+
+## 2026-03-15 - US-009
+- Implemented a versioned local metadata store that persists projects, sessions, default execution-profile records, and run-metadata buckets to `metadata-store.json` outside the repository so records survive app restarts.
+- Wired active-project open/create flows to upsert project records and session state into the store, while keeping repo-local `.ralph-tui/project-metadata.json` bootstrap behavior from US-008.
+- Added restart-readability coverage for the metadata store plus service-level assertions that project creation writes the expected persisted records, and isolated Spring/JavaFX UI tests to temp storage directories.
+- Verified `.\mvnw.cmd clean verify jacoco:report` passes on 2026-03-15.
+- Files changed: `.gitignore`, `pom.xml`, `src/main/java/module-info.java`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`, `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`, `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java`, `src/test/java/net/uberfoo/ai/ralphy/LocalMetadataStorageTest.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - A single versioned app-level JSON store is enough to cover desktop metadata/state early, as long as project flows upsert their records consistently and writes are atomic.
+    - JavaFX Spring harnesses should take app args for storage-root overrides so file-backed services stay test-isolated without special production code paths.
+  - Gotchas encountered
+    - A `@Component` with both a runtime constructor and a test-only construction path needs explicit constructor selection or Spring falls back to default instantiation and fails bean creation.
+    - Letting Spring infer a singleton bean destroy method from a public `close()` method can introduce shutdown-only defects; keeping explicit test-only session finalization avoids noisy lifecycle warnings until shutdown persistence is a real requirement.
 ---

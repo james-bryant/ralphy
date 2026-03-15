@@ -11,6 +11,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
+import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -65,8 +66,14 @@ final class JavaFxUiHarness {
     }
 
     void launchPrimaryShell() throws Exception {
+        launchPrimaryShell(null);
+    }
+
+    void launchPrimaryShell(Path storageDirectory) throws Exception {
         springBridge = new JavaFxSpringBridge(RalphySpringApplication.class);
-        springBridge.start(new String[0]);
+        springBridge.start(storageDirectory == null
+                ? new String[0]
+                : new String[]{"--ralphy.storage.directory=" + storageDirectory.toAbsolutePath().normalize()});
 
         AppShellStageConfigurer stageConfigurer = springBridge.getRequiredBean(AppShellStageConfigurer.class);
         stage = onFxThread(() -> {

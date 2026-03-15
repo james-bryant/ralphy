@@ -1,4 +1,6 @@
 module net.uberfoo.ai.ralphy {
+    requires com.fasterxml.jackson.annotation;
+    requires com.fasterxml.jackson.databind;
     requires javafx.controls;
     requires javafx.fxml;
 
@@ -10,6 +12,6 @@ module net.uberfoo.ai.ralphy {
     requires spring.context;
     requires spring.core;
 
-    opens net.uberfoo.ai.ralphy to javafx.fxml, spring.beans, spring.context, spring.core;
+    opens net.uberfoo.ai.ralphy to com.fasterxml.jackson.databind, javafx.fxml, spring.beans, spring.context, spring.core;
     exports net.uberfoo.ai.ralphy;
 }

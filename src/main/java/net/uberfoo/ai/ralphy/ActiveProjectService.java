@@ -13,13 +13,17 @@ import java.util.stream.Stream;
 @Component
 public class ActiveProjectService {
     private final GitRepositoryInitializer gitRepositoryInitializer;
+    private final LocalMetadataStorage localMetadataStorage;
     private final ProjectMetadataInitializer projectMetadataInitializer;
     private ActiveProject activeProject;
 
     public ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
-                                ProjectMetadataInitializer projectMetadataInitializer) {
+                                ProjectMetadataInitializer projectMetadataInitializer,
+                                LocalMetadataStorage localMetadataStorage) {
         this.gitRepositoryInitializer = gitRepositoryInitializer;
         this.projectMetadataInitializer = projectMetadataInitializer;
+        this.localMetadataStorage = localMetadataStorage;
+        this.localMetadataStorage.startSession();
     }
 
     public synchronized Optional<ActiveProject> activeProject() {
@@ -94,11 +98,13 @@ public class ActiveProjectService {
         }
 
         activeProject = createdProject;
+        localMetadataStorage.recordProjectActivation(createdProject);
         return ProjectActivationResult.success(createdProject);
     }
 
     private ProjectActivationResult activateProject(Path repositoryDirectory) {
         activeProject = new ActiveProject(repositoryDirectory);
+        localMetadataStorage.recordProjectActivation(activeProject);
         return ProjectActivationResult.success(activeProject);
     }
 

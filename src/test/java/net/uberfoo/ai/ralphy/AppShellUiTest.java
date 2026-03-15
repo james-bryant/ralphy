@@ -40,7 +40,7 @@ class AppShellUiTest {
     @Test
     void appShellLaunchHarnessShowsPrimaryStageAndSupportsNavigationInteractions() throws Exception {
         harness = new JavaFxUiHarness();
-        harness.launchPrimaryShell();
+        harness.launchPrimaryShell(tempDir.resolve("storage"));
 
         AppShellDescriptor shellDescriptor = harness.getRequiredBean(AppShellDescriptor.class);
 
@@ -84,7 +84,7 @@ class AppShellUiTest {
         Path gitRepository = createGitRepository("sample-repo");
 
         harness = new JavaFxUiHarness();
-        harness.launchPrimaryShell();
+        harness.launchPrimaryShell(tempDir.resolve("storage"));
 
         RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
 
@@ -114,7 +114,7 @@ class AppShellUiTest {
         Path parentDirectory = Files.createDirectory(tempDir.resolve("new-projects"));
 
         harness = new JavaFxUiHarness();
-        harness.launchPrimaryShell();
+        harness.launchPrimaryShell(tempDir.resolve("storage"));
 
         RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
         GitRepositoryInitializer gitRepositoryInitializer = harness.getRequiredBean(GitRepositoryInitializer.class);

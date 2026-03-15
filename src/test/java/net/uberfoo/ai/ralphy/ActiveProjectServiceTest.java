@@ -14,14 +14,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ActiveProjectServiceTest {
     private final GitRepositoryInitializer gitRepositoryInitializer = new GitRepositoryInitializer();
     private final ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
-    private final ActiveProjectService activeProjectService =
-            new ActiveProjectService(gitRepositoryInitializer, projectMetadataInitializer);
 
     @TempDir
     Path tempDir;
 
     @Test
     void openRepositoryAcceptsFoldersWithGitMetadataDirectoryOrFile() throws IOException {
+        ActiveProjectService activeProjectService = createService();
         Path gitDirectoryRepository = createGitDirectoryRepository("git-directory-repo");
 
         ActiveProjectService.ProjectActivationResult gitDirectoryResult =
@@ -42,6 +41,7 @@ class ActiveProjectServiceTest {
 
     @Test
     void openRepositoryRejectsNonGitFoldersWithoutClearingExistingActiveProject() throws IOException {
+        ActiveProjectService activeProjectService = createService();
         Path validRepository = createGitDirectoryRepository("valid-repo");
         activeProjectService.openRepository(validRepository);
 
@@ -59,6 +59,7 @@ class ActiveProjectServiceTest {
 
     @Test
     void createRepositoryInitializesGitMetadataProjectMetadataAndActiveProject() throws IOException {
+        ActiveProjectService activeProjectService = createService();
         Path parentDirectory = Files.createDirectory(tempDir.resolve("projects"));
         gitRepositoryInitializer.queueSuccessForTest();
 
@@ -74,10 +75,18 @@ class ActiveProjectServiceTest {
         assertTrue(Files.exists(activeProject.projectMetadataPath()));
         assertTrue(Files.readString(activeProject.projectMetadataPath()).contains("\"projectName\": \"starter-repo\""));
         assertEquals(createdRepository, activeProjectService.activeProject().orElseThrow().repositoryPath());
+
+        LocalMetadataStorage.LocalMetadataSnapshot metadataSnapshot = createStorage().snapshot();
+        assertEquals(1, metadataSnapshot.projects().size());
+        assertEquals(1, metadataSnapshot.sessions().size());
+        assertEquals(1, metadataSnapshot.profiles().size());
+        assertTrue(metadataSnapshot.runMetadata().isEmpty());
+        assertEquals(createdRepository.toString(), metadataSnapshot.projects().getFirst().repositoryPath());
     }
 
     @Test
     void createRepositoryRollsBackFailedInitializationAndKeepsExistingActiveProject() throws IOException {
+        ActiveProjectService activeProjectService = createService();
         Path validRepository = createGitDirectoryRepository("valid-repo");
         activeProjectService.openRepository(validRepository);
 
@@ -99,5 +108,17 @@ class ActiveProjectServiceTest {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));
         return repository;
+    }
+
+    private ActiveProjectService createService() {
+        return new ActiveProjectService(
+                gitRepositoryInitializer,
+                projectMetadataInitializer,
+                createStorage()
+        );
+    }
+
+    private LocalMetadataStorage createStorage() {
+        return LocalMetadataStorage.forTest(tempDir.resolve("local-storage"));
     }
 }
