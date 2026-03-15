@@ -3,10 +3,10 @@
   "sessionId": "2b071c1d-d46d-451d-a0fb-67440ae4d3de",
   "status": "running",
   "startedAt": "2026-03-15T20:49:42.750Z",
-  "updatedAt": "2026-03-15T21:07:37.015Z",
-  "currentIteration": 1,
+  "updatedAt": "2026-03-15T21:15:42.085Z",
+  "currentIteration": 2,
   "maxIterations": 40,
-  "tasksCompleted": 1,
+  "tasksCompleted": 2,
   "isPaused": false,
   "agentPlugin": "codex",
   "trackerState": {
@@ -24,6 +24,16 @@
       "durationMs": 441584,
       "startedAt": "2026-03-15T20:49:50.915Z",
       "endedAt": "2026-03-15T20:57:12.499Z"
+    },
+    {
+      "iteration": 2,
+      "status": "completed",
+      "taskId": "US-002",
+      "taskTitle": "Bridge JavaFX Startup to Spring Context",
+      "taskCompleted": true,
+      "durationMs": 598471,
+      "startedAt": "2026-03-15T20:57:38.542Z",
+      "endedAt": "2026-03-15T21:07:37.013Z"
     }
   ],
   "skippedTaskIds": [],

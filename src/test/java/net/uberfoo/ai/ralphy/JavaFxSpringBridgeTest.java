@@ -37,7 +37,7 @@ class JavaFxSpringBridgeTest {
         SpringBeanControllerFactory controllerFactory = springBridge.getRequiredBean(SpringBeanControllerFactory.class);
         InjectedController controller = (InjectedController) controllerFactory.call(InjectedController.class);
 
-        assertSame(springBridge.getRequiredBean(GreetingService.class), controller.greetingService());
+        assertSame(springBridge.getRequiredBean(AppShellDescriptor.class), controller.shellDescriptor());
     }
 
     @Test
@@ -55,14 +55,14 @@ class JavaFxSpringBridgeTest {
     }
 
     static final class InjectedController {
-        private final GreetingService greetingService;
+        private final AppShellDescriptor shellDescriptor;
 
-        InjectedController(GreetingService greetingService) {
-            this.greetingService = greetingService;
+        InjectedController(AppShellDescriptor shellDescriptor) {
+            this.shellDescriptor = shellDescriptor;
         }
 
-        GreetingService greetingService() {
-            return greetingService;
+        AppShellDescriptor shellDescriptor() {
+            return shellDescriptor;
         }
     }
 }

@@ -22,7 +22,7 @@ public class SpringFxmlLoader {
     }
 
     private URL resolveResource(String resourceName) {
-        URL resource = HelloApplication.class.getResource(resourceName);
+        URL resource = SpringFxmlLoader.class.getResource(resourceName);
         if (resource == null) {
             throw new IllegalArgumentException("FXML resource not found: " + resourceName);
         }

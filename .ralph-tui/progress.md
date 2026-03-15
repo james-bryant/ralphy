@@ -8,6 +8,7 @@ after each iteration and it's included in prompts for context.
 *Add reusable patterns discovered during development here.*
 - For JPMS with Spring on the JavaFX desktop app, explicitly `requires spring.beans` and `requires spring.core` when `module-info.java` opens packages to those modules; relying on `spring.context` alone leaves compiler warnings.
 - Bridge JavaFX FXML to Spring through a dedicated controller factory that calls `AutowireCapableBeanFactory#createBean(...)`; this gives each loaded view a fresh controller instance while still enabling constructor injection of Spring beans.
+- Keep the JavaFX `Application` class thin by delegating stage setup to a Spring-managed configurer; the launcher stays conventional while tests can load and inspect the primary scene on the FX thread without calling `Application.launch(...)`.
 
 ---
 
@@ -39,4 +40,19 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - Maven's default Surefire version in this project did not execute JUnit 5 tests, so the build needed an explicit `maven-surefire-plugin` upgrade before lifecycle tests would run.
     - Verifying executor shutdown is straightforward with `ThreadPoolTaskExecutor`, but the assertion must happen after the Spring context closes because the pool stays active for the full app lifetime.
+---
+
+## 2026-03-15 - US-003
+- Replaced the sample hello launch path with a Spring-backed Ralphy shell by introducing `RalphyApplication`, `AppShellStageConfigurer`, `AppShellController`, and `app-shell-view.fxml`.
+- The main window now exposes placeholder regions for navigation, workspace content, and status, and both the stage title and in-app branding now read `Ralphy`.
+- Added `AppShellDescriptor` for shell copy/title, updated the launcher and FXML loader to target the new shell resources, and removed the old hello sample classes and FXML.
+- Added `AppShellUiTest` to load the shell scene on the JavaFX thread and assert the branded navigation, workspace, and status regions; updated `JavaFxSpringBridgeTest` to validate controller injection against the new shell descriptor bean.
+- Completed Windows smoke verification by launching `.\mvnw.cmd -q -DskipTests javafx:run`, confirming a top-level window titled `Ralphy`, and shutting the app down cleanly.
+- Files changed: `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellDescriptor.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellStageConfigurer.java`, `src/main/java/net/uberfoo/ai/ralphy/Launcher.java`, `src/main/java/net/uberfoo/ai/ralphy/RalphyApplication.java`, `src/main/java/net/uberfoo/ai/ralphy/SpringFxmlLoader.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `src/test/java/net/uberfoo/ai/ralphy/JavaFxSpringBridgeTest.java`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - A Spring-managed stage configurer is a clean seam between JavaFX startup and UI smoke tests because it lets tests build the primary scene graph without invoking the one-shot `Application.launch(...)` lifecycle.
+  - Gotchas encountered
+    - CSS selector lookups in JavaFX tests are more reliable when important nodes have an explicit `id`; relying on `fx:id` alone is a weak test contract.
+    - A practical Windows smoke check for JavaFX in this environment is to launch `javafx:run` and poll the spawned `java` or `javaw` process for the expected `MainWindowTitle`.
 ---
