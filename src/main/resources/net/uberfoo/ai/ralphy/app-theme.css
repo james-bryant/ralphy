@@ -129,3 +129,15 @@
 .ralphy-shell .validation-text {
     -fx-text-fill: -color-status-danger;
 }
+
+.ralphy-shell .preflight-remediation-card {
+    -fx-background-color: -color-surface-primary;
+    -fx-background-radius: 10;
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 10;
+    -fx-padding: 12;
+}
+
+.ralphy-shell .preflight-command-field {
+    -fx-font-family: "Consolas";
+}

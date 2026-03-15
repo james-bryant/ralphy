@@ -8,6 +8,7 @@ after each iteration and it's included in prompts for context.
 *Add reusable patterns discovered during development here.*
 
 - Persist execution diagnostics in `.ralph-tui/project-metadata.json` and restore them through `ActiveProjectService`; when a stored report already exists, render that report on reopen and offer an explicit rerun action instead of immediately overwriting it during startup.
+- Put remediation commands on each failed preflight check record and keep the UI passive: render those commands in a dedicated remediation panel with copy buttons and rerun actions, but never execute install or authentication commands from the app itself.
 
 ---
 
@@ -24,4 +25,27 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - The project already stores independent `nativeWindowsPreflight` and `wslPreflight` payloads in project metadata; UI stories should usually wire into that persisted state rather than create new storage paths.
   - WSL preflight autoruns are more sensitive than native startup checks because rerunning them on restore can replace the last actionable report with machine-specific startup noise, so restore should prefer stored state plus a manual rerun affordance.
+---
+## 2026-03-15 - US-015
+- Added remediation commands to native and WSL preflight check records, persisted them in project metadata schema v5, and generated passive guidance for Codex install/auth, Git recovery, quality-gate recovery, WSL distro setup, and WSL path mapping failures.
+- Rendered dedicated native and WSL remediation panels in the JavaFX shell with copyable command fields, copy buttons, and rerun-preflight actions available directly inside each remediation view.
+- Expanded automated coverage to verify remediation command generation, confirm preflight checks do not invoke install/login commands automatically, validate remediation-panel rendering in the UI, and verify native reruns from the remediation panel.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/PreflightRemediationCommand.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/NativeWindowsPreflightReport.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/WslPreflightReport.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/NativeWindowsPreflightService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/WslPreflightService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/ProjectMetadataInitializer.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`
+  - `src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/NativeWindowsPreflightServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/WslPreflightServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+- **Learnings:**
+  - Persisting remediation commands alongside check results keeps restored diagnostics and freshly rerun diagnostics consistent without adding UI-only remediation heuristics.
+  - Native preflight still auto-runs on restore, so remediation rerun tests need to compare the live detail text before and after the rerun instead of assuming a seeded native report survives startup.
+  - Copyable command fields plus explicit copy buttons are a safer fit for this shell than action buttons that would directly launch setup commands, because the acceptance criteria require passive guidance only.
 ---

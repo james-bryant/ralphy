@@ -51,13 +51,27 @@ public record NativeWindowsPreflightReport(String executedAt,
                               String label,
                               CheckCategory category,
                               CheckStatus status,
-                              String detail) {
+                              String detail,
+                              List<PreflightRemediationCommand> remediationCommands) {
         public CheckResult {
             Objects.requireNonNull(id, "id must not be null");
             Objects.requireNonNull(label, "label must not be null");
             Objects.requireNonNull(category, "category must not be null");
             Objects.requireNonNull(status, "status must not be null");
             Objects.requireNonNull(detail, "detail must not be null");
+            remediationCommands = remediationCommands == null ? List.of() : List.copyOf(remediationCommands);
+        }
+
+        public CheckResult(String id,
+                           String label,
+                           CheckCategory category,
+                           CheckStatus status,
+                           String detail) {
+            this(id, label, category, status, detail, List.of());
+        }
+
+        public boolean hasRemediationCommands() {
+            return !remediationCommands.isEmpty();
         }
     }
 }

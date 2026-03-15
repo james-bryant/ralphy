@@ -6,6 +6,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -61,6 +63,7 @@ class WslPreflightServiceTest {
         assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("codex_auth").status());
         assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("git_ready").status());
         assertTrue(checksById.get("path_mapping").detail().contains("/mnt/c/workspaces/sample-repo"));
+        assertTrue(checksById.get("git_ready").remediationCommands().isEmpty());
     }
 
     @Test
@@ -74,7 +77,9 @@ class WslPreflightServiceTest {
                 "/mnt/c/workspaces"
         );
 
+        List<List<String>> executedCommands = new ArrayList<>();
         WslPreflightService service = new WslPreflightService((workingDirectory, command) -> {
+            executedCommands.add(command);
             if (command.contains("--list")) {
                 return WslPreflightService.CommandResult.success(0, "Debian");
             }
@@ -96,6 +101,12 @@ class WslPreflightServiceTest {
         assertEquals(WslPreflightReport.CheckStatus.FAIL, checksById.get("codex_cli").status());
         assertEquals(WslPreflightReport.CheckStatus.FAIL, checksById.get("codex_auth").status());
         assertEquals(WslPreflightReport.CheckStatus.FAIL, checksById.get("git_ready").status());
+        assertTrue(checksById.get("wsl_distribution").remediationCommands().stream()
+                .anyMatch(command -> command.command().contains("wsl.exe --install -d")));
+        assertTrue(checksById.get("path_mapping").remediationCommands().stream()
+                .anyMatch(command -> command.command().contains("Test-Path")));
+        assertTrue(executedCommands.stream().noneMatch(command -> command.contains("npm install")));
+        assertTrue(executedCommands.stream().noneMatch(command -> command.getLast().contains("codex login")));
     }
 
     private Map<String, WslPreflightReport.CheckResult> checksById(WslPreflightReport report) {

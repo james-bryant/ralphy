@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AppShellUiTest {
@@ -275,7 +276,11 @@ class AppShellUiTest {
                                 "Codex Auth",
                                 NativeWindowsPreflightReport.CheckCategory.AUTHENTICATION,
                                 NativeWindowsPreflightReport.CheckStatus.FAIL,
-                                "No stored Codex credentials were found in C:\\Users\\james\\.codex\\auth.json."
+                                "No stored Codex credentials were found in C:\\Users\\james\\.codex\\auth.json.",
+                                List.of(
+                                        new PreflightRemediationCommand("Authenticate Codex CLI", "codex login"),
+                                        new PreflightRemediationCommand("Check Codex login status", "codex login status")
+                                )
                         ),
                         new NativeWindowsPreflightReport.CheckResult(
                                 "git_ready",
@@ -290,7 +295,19 @@ class AppShellUiTest {
                                 NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
                                 NativeWindowsPreflightReport.CheckStatus.FAIL,
                                 "The quality-gate command .\\mvnw.cmd clean verify jacoco:report is unavailable because "
-                                        + repository.toAbsolutePath().normalize().resolve("mvnw.cmd") + " is missing."
+                                        + repository.toAbsolutePath().normalize().resolve("mvnw.cmd") + " is missing.",
+                                List.of(
+                                        new PreflightRemediationCommand(
+                                                "Restore Maven wrapper files from Git",
+                                                "git -C \"" + repository.toAbsolutePath().normalize()
+                                                        + "\" restore mvnw.cmd pom.xml .mvn"
+                                        ),
+                                        new PreflightRemediationCommand(
+                                                "Run the quality gate from the repository root",
+                                                "Set-Location \"" + repository.toAbsolutePath().normalize()
+                                                        + "\"; .\\mvnw.cmd clean verify jacoco:report"
+                                        )
+                                )
                         )
                 )
         ));
@@ -305,6 +322,12 @@ class AppShellUiTest {
         assertTrue(checks.contains("FAIL | Authentication | Codex Auth"));
         assertTrue(checks.contains("PASS | Git | Git Readiness"));
         assertTrue(checks.contains("FAIL | Quality Gate | Quality Gate Command"));
+        assertTrue(harness.isVisible("#nativePreflightRemediationSection"));
+        String remediation = harness.textContent("#nativePreflightRemediationSection");
+        assertTrue(remediation.contains("Ralphy never installs or authenticates Codex automatically"));
+        assertTrue(remediation.contains("codex login"));
+        assertTrue(remediation.contains(".\\mvnw.cmd clean verify jacoco:report"));
+        assertTrue(remediation.contains("Copy"));
     }
 
     @Test
@@ -347,14 +370,28 @@ class AppShellUiTest {
                                 "Codex CLI",
                                 WslPreflightReport.CheckCategory.TOOLING,
                                 WslPreflightReport.CheckStatus.FAIL,
-                                "Codex CLI is unavailable inside the selected WSL distribution: codex: not found"
+                                "Codex CLI is unavailable inside the selected WSL distribution: codex: not found",
+                                List.of(
+                                        new PreflightRemediationCommand(
+                                                "Install Codex CLI in the selected WSL distribution",
+                                                "wsl.exe --distribution \"Ubuntu-24.04\" --exec /bin/sh -lc "
+                                                        + "\"npm install -g @openai/codex\""
+                                        )
+                                )
                         ),
                         new WslPreflightReport.CheckResult(
                                 "codex_auth",
                                 "Codex Auth",
                                 WslPreflightReport.CheckCategory.AUTHENTICATION,
                                 WslPreflightReport.CheckStatus.FAIL,
-                                "No OPENAI_API_KEY environment variable or stored Codex credentials were found in /home/test/.codex/auth.json."
+                                "No OPENAI_API_KEY environment variable or stored Codex credentials were found in /home/test/.codex/auth.json.",
+                                List.of(
+                                        new PreflightRemediationCommand(
+                                                "Authenticate Codex CLI in the selected WSL distribution",
+                                                "wsl.exe --distribution \"Ubuntu-24.04\" --exec /bin/sh -lc "
+                                                        + "\"codex login\""
+                                        )
+                                )
                         ),
                         new WslPreflightReport.CheckResult(
                                 "git_ready",
@@ -377,6 +414,29 @@ class AppShellUiTest {
         assertTrue(checks.contains("FAIL | Tooling | Codex CLI"));
         assertTrue(checks.contains("FAIL | Authentication | Codex Auth"));
         assertTrue(checks.contains("PASS | Git | Git Readiness"));
+        assertTrue(harness.isVisible("#wslPreflightRemediationSection"));
+        String remediation = harness.textContent("#wslPreflightRemediationSection");
+        assertTrue(remediation.contains("wsl.exe --distribution \"Ubuntu-24.04\""));
+        assertTrue(remediation.contains("codex login"));
+        assertTrue(remediation.contains("Copy"));
+    }
+
+    @Test
+    void appShellCanRerunNativePreflightFromTheRemediationSection() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("rerun-native-preflight-repo");
+        seedStoredProject(storageDirectory, repository);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertTrue(harness.isVisible("#nativePreflightRemediationSection"));
+        String initialDetail = harness.text("#nativePreflightDetailLabel");
+
+        harness.clickOn("#rerunNativePreflightFromRemediationButton");
+
+        assertTrue(harness.isVisible("#nativePreflightRemediationSection"));
+        assertNotEquals(initialDetail, harness.text("#nativePreflightDetailLabel"));
     }
 
     private Path createGitRepository(String directoryName) throws IOException {

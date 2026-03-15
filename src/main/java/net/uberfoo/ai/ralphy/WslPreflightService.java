@@ -12,6 +12,10 @@ import java.util.Objects;
 
 @Component
 public class WslPreflightService {
+    private static final String CODEX_INSTALL_COMMAND = "npm install -g @openai/codex";
+    private static final String CODEX_LOGIN_COMMAND = "codex login";
+    private static final String CODEX_LOGIN_STATUS_COMMAND = "codex login status";
+
     private final CommandExecutor commandExecutor;
 
     public WslPreflightService() {
@@ -53,7 +57,8 @@ public class WslPreflightService {
                     "wsl_distribution",
                     "WSL Distribution",
                     WslPreflightReport.CheckCategory.DISTRIBUTION,
-                    commandFailureDetail("Unable to enumerate WSL distributions", commandResult)
+                    commandFailureDetail("Unable to enumerate WSL distributions", commandResult),
+                    distributionRemediationCommands(executionProfile)
             ));
         }
 
@@ -73,7 +78,8 @@ public class WslPreflightService {
                     "WSL Distribution",
                     WslPreflightReport.CheckCategory.DISTRIBUTION,
                     "The configured WSL distribution '" + configuredDistribution
-                            + "' is unavailable. Detected distributions: " + availableDistributions + "."
+                            + "' is unavailable. Detected distributions: " + availableDistributions + ".",
+                    distributionRemediationCommands(executionProfile)
             ));
         }
 
@@ -92,7 +98,8 @@ public class WslPreflightService {
                     "path_mapping",
                     "Repository Path Mapping",
                     WslPreflightReport.CheckCategory.PATH_MAPPING,
-                    pathMappingResult.message()
+                    pathMappingResult.message(),
+                    pathMappingRemediationCommands(executionProfile)
             );
         }
 
@@ -104,7 +111,8 @@ public class WslPreflightService {
                     "Repository Path Mapping",
                     WslPreflightReport.CheckCategory.PATH_MAPPING,
                     commandFailureDetail("WSL could not access the mapped repository path " + pathMappingResult.wslPath(),
-                            commandResult)
+                            commandResult),
+                    pathMappingRemediationCommands(executionProfile)
             );
         }
 
@@ -123,7 +131,8 @@ public class WslPreflightService {
                     "codex_cli",
                     "Codex CLI",
                     WslPreflightReport.CheckCategory.TOOLING,
-                    "Codex CLI could not be checked because the configured WSL distribution is unavailable."
+                    "Codex CLI could not be checked because the configured WSL distribution is unavailable.",
+                    distributionRemediationCommands(executionProfile)
             );
         }
 
@@ -133,7 +142,8 @@ public class WslPreflightService {
                     "codex_cli",
                     "Codex CLI",
                     WslPreflightReport.CheckCategory.TOOLING,
-                    commandFailureDetail("Codex CLI is unavailable inside the selected WSL distribution", commandResult)
+                    commandFailureDetail("Codex CLI is unavailable inside the selected WSL distribution", commandResult),
+                    codexCliRemediationCommands(executionProfile)
             );
         }
 
@@ -152,7 +162,8 @@ public class WslPreflightService {
                     "codex_auth",
                     "Codex Auth",
                     WslPreflightReport.CheckCategory.AUTHENTICATION,
-                    "Codex authentication could not be checked because the configured WSL distribution is unavailable."
+                    "Codex authentication could not be checked because the configured WSL distribution is unavailable.",
+                    distributionRemediationCommands(executionProfile)
             );
         }
 
@@ -175,7 +186,8 @@ public class WslPreflightService {
                     WslPreflightReport.CheckCategory.AUTHENTICATION,
                     summarizeOutput(commandResult.output(),
                             commandFailureDetail("Codex authentication is unavailable inside the selected WSL distribution",
-                                    commandResult))
+                                    commandResult)),
+                    codexAuthRemediationCommands(executionProfile)
             );
         }
 
@@ -195,7 +207,8 @@ public class WslPreflightService {
                     "git_ready",
                     "Git Readiness",
                     WslPreflightReport.CheckCategory.GIT,
-                    "Git readiness could not be checked because the configured WSL distribution is unavailable."
+                    "Git readiness could not be checked because the configured WSL distribution is unavailable.",
+                    distributionRemediationCommands(executionProfile)
             );
         }
         if (!pathMappingResult.successful()) {
@@ -203,7 +216,8 @@ public class WslPreflightService {
                     "git_ready",
                     "Git Readiness",
                     WslPreflightReport.CheckCategory.GIT,
-                    "Git readiness could not be checked because the repository path mapping is invalid."
+                    "Git readiness could not be checked because the repository path mapping is invalid.",
+                    pathMappingRemediationCommands(executionProfile)
             );
         }
 
@@ -217,7 +231,8 @@ public class WslPreflightService {
                     "git_ready",
                     "Git Readiness",
                     WslPreflightReport.CheckCategory.GIT,
-                    commandFailureDetail("Git is not ready inside the selected WSL distribution", commandResult)
+                    commandFailureDetail("Git is not ready inside the selected WSL distribution", commandResult),
+                    gitRemediationCommands(executionProfile, pathMappingResult.wslPath())
             );
         }
 
@@ -227,7 +242,8 @@ public class WslPreflightService {
                     "git_ready",
                     "Git Readiness",
                     WslPreflightReport.CheckCategory.GIT,
-                    "Git responded with '" + normalizedOutput + "' instead of confirming the mapped working tree."
+                    "Git responded with '" + normalizedOutput + "' instead of confirming the mapped working tree.",
+                    gitRemediationCommands(executionProfile, pathMappingResult.wslPath())
             );
         }
 
@@ -299,13 +315,90 @@ public class WslPreflightService {
                                                 String label,
                                                 WslPreflightReport.CheckCategory category,
                                                 String detail) {
+        return fail(id, label, category, detail, List.of());
+    }
+
+    private WslPreflightReport.CheckResult fail(String id,
+                                                String label,
+                                                WslPreflightReport.CheckCategory category,
+                                                String detail,
+                                                List<PreflightRemediationCommand> remediationCommands) {
         return new WslPreflightReport.CheckResult(
                 id,
                 label,
                 category,
                 WslPreflightReport.CheckStatus.FAIL,
-                detail
+                detail,
+                remediationCommands
         );
+    }
+
+    private List<PreflightRemediationCommand> distributionRemediationCommands(ExecutionProfile executionProfile) {
+        return List.of(
+                remediation("List installed WSL distributions", "wsl.exe --list --verbose"),
+                remediation("Install the configured WSL distribution",
+                        "wsl.exe --install -d " + quoteForPowerShell(executionProfile.wslDistribution()))
+        );
+    }
+
+    private List<PreflightRemediationCommand> pathMappingRemediationCommands(ExecutionProfile executionProfile) {
+        return List.of(
+                remediation("Verify the configured Windows path prefix",
+                        "Test-Path " + quoteForPowerShell(executionProfile.windowsPathPrefix())),
+                remediation("Inspect the configured WSL path prefix",
+                        commandInDistro(executionProfile.wslDistribution(),
+                                "ls -la " + quoteForSh(normalize(executionProfile.wslPathPrefix()))))
+        );
+    }
+
+    private List<PreflightRemediationCommand> codexCliRemediationCommands(ExecutionProfile executionProfile) {
+        return List.of(
+                remediation("Install Codex CLI in the selected WSL distribution",
+                        commandInDistro(executionProfile.wslDistribution(), CODEX_INSTALL_COMMAND)),
+                remediation("Verify Codex CLI in the selected WSL distribution",
+                        commandInDistro(executionProfile.wslDistribution(), "codex --version"))
+        );
+    }
+
+    private List<PreflightRemediationCommand> codexAuthRemediationCommands(ExecutionProfile executionProfile) {
+        return List.of(
+                remediation("Authenticate Codex CLI in the selected WSL distribution",
+                        commandInDistro(executionProfile.wslDistribution(), CODEX_LOGIN_COMMAND)),
+                remediation("Check Codex login status in the selected WSL distribution",
+                        commandInDistro(executionProfile.wslDistribution(), CODEX_LOGIN_STATUS_COMMAND))
+        );
+    }
+
+    private List<PreflightRemediationCommand> gitRemediationCommands(ExecutionProfile executionProfile,
+                                                                     String mappedRepositoryPath) {
+        return List.of(
+                remediation("Inspect Git status in the selected WSL distribution",
+                        commandInDistro(executionProfile.wslDistribution(),
+                                "git -C " + quoteForSh(mappedRepositoryPath) + " status")),
+                remediation("Verify the mapped working tree in the selected WSL distribution",
+                        commandInDistro(executionProfile.wslDistribution(),
+                                "git -C " + quoteForSh(mappedRepositoryPath)
+                                        + " rev-parse --is-inside-work-tree"))
+        );
+    }
+
+    private PreflightRemediationCommand remediation(String label, String command) {
+        return new PreflightRemediationCommand(label, command);
+    }
+
+    private String commandInDistro(String distribution, String script) {
+        return "wsl.exe --distribution " + quoteForPowerShell(distribution)
+                + " --exec /bin/sh -lc " + quoteForPowerShell(script);
+    }
+
+    private String quoteForPowerShell(String value) {
+        String safeValue = value == null ? "" : value;
+        return "\"" + safeValue.replace("\"", "\"\"") + "\"";
+    }
+
+    private String quoteForSh(String value) {
+        String safeValue = value == null ? "" : value;
+        return "'" + safeValue.replace("'", "'\"'\"'") + "'";
     }
 
     private static boolean hasText(String value) {

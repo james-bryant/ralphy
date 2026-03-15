@@ -14,7 +14,7 @@ import java.time.Instant;
 
 @Component
 public class ProjectMetadataInitializer {
-    private static final int SCHEMA_VERSION = 4;
+    private static final int SCHEMA_VERSION = 5;
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     public void writeMetadata(ActiveProject activeProject) throws IOException {

@@ -1,11 +1,17 @@
 package net.uberfoo.ai.ralphy;
 
 import javafx.fxml.FXML;
+import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -107,6 +113,12 @@ public class AppShellController {
     private Label nativePreflightMessageLabel;
 
     @FXML
+    private VBox nativePreflightRemediationContainer;
+
+    @FXML
+    private VBox nativePreflightRemediationSection;
+
+    @FXML
     private Label nativePreflightSummaryLabel;
 
     @FXML
@@ -143,6 +155,12 @@ public class AppShellController {
     private Button runNativePreflightButton;
 
     @FXML
+    private Button rerunNativePreflightFromRemediationButton;
+
+    @FXML
+    private Button rerunWslPreflightFromRemediationButton;
+
+    @FXML
     private Button runWslPreflightButton;
 
     @FXML
@@ -156,6 +174,12 @@ public class AppShellController {
 
     @FXML
     private Label wslPreflightMessageLabel;
+
+    @FXML
+    private VBox wslPreflightRemediationContainer;
+
+    @FXML
+    private VBox wslPreflightRemediationSection;
 
     @FXML
     private Label wslPreflightSummaryLabel;
@@ -190,6 +214,8 @@ public class AppShellController {
         executionProfileMessageLabel.managedProperty().bind(executionProfileMessageLabel.visibleProperty());
         nativePreflightMessageLabel.managedProperty().bind(nativePreflightMessageLabel.visibleProperty());
         wslPreflightMessageLabel.managedProperty().bind(wslPreflightMessageLabel.visibleProperty());
+        nativePreflightRemediationSection.managedProperty().bind(nativePreflightRemediationSection.visibleProperty());
+        wslPreflightRemediationSection.managedProperty().bind(wslPreflightRemediationSection.visibleProperty());
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
@@ -447,6 +473,7 @@ public class AppShellController {
             nativePreflightSummaryLabel.setText(NO_ACTIVE_NATIVE_PREFLIGHT_SUMMARY);
             nativePreflightDetailLabel.setText(NO_ACTIVE_NATIVE_PREFLIGHT_DETAIL);
             nativePreflightChecksLabel.setText("");
+            clearNativePreflightRemediation();
             return;
         }
 
@@ -456,6 +483,7 @@ public class AppShellController {
             nativePreflightSummaryLabel.setText(NO_NATIVE_PREFLIGHT_SUMMARY);
             nativePreflightDetailLabel.setText(NO_NATIVE_PREFLIGHT_DETAIL);
             nativePreflightChecksLabel.setText("");
+            clearNativePreflightRemediation();
             return;
         }
 
@@ -466,6 +494,7 @@ public class AppShellController {
         nativePreflightDetailLabel.setText("Last checked " + report.executedAt()
                 + ". Native PowerShell runs stay blocked until every check passes.");
         nativePreflightChecksLabel.setText(formatNativeWindowsPreflightChecks(report));
+        renderNativePreflightRemediation(report);
     }
 
     private void renderWslPreflight() {
@@ -475,6 +504,7 @@ public class AppShellController {
             wslPreflightSummaryLabel.setText(NO_ACTIVE_WSL_PREFLIGHT_SUMMARY);
             wslPreflightDetailLabel.setText(NO_ACTIVE_WSL_PREFLIGHT_DETAIL);
             wslPreflightChecksLabel.setText("");
+            clearWslPreflightRemediation();
             return;
         }
 
@@ -485,6 +515,7 @@ public class AppShellController {
             wslPreflightSummaryLabel.setText(WSL_PREFLIGHT_PROFILE_REQUIRED_SUMMARY);
             wslPreflightDetailLabel.setText(WSL_PREFLIGHT_PROFILE_REQUIRED_DETAIL);
             wslPreflightChecksLabel.setText("");
+            clearWslPreflightRemediation();
             return;
         }
 
@@ -494,6 +525,7 @@ public class AppShellController {
             wslPreflightSummaryLabel.setText(NO_WSL_PREFLIGHT_SUMMARY);
             wslPreflightDetailLabel.setText(NO_WSL_PREFLIGHT_DETAIL);
             wslPreflightChecksLabel.setText("");
+            clearWslPreflightRemediation();
             return;
         }
 
@@ -504,6 +536,7 @@ public class AppShellController {
         wslPreflightDetailLabel.setText("Last checked " + report.executedAt()
                 + ". WSL runs stay blocked until every check passes.");
         wslPreflightChecksLabel.setText(formatWslPreflightChecks(report));
+        renderWslPreflightRemediation(report);
     }
 
     private String formatNativeWindowsPreflightChecks(NativeWindowsPreflightReport report) {
@@ -538,6 +571,93 @@ public class AppShellController {
                 + checkResult.label()
                 + " | "
                 + checkResult.detail();
+    }
+
+    private void renderNativePreflightRemediation(NativeWindowsPreflightReport report) {
+        List<VBox> remediationCards = report.checks().stream()
+                .filter(checkResult -> checkResult.status() == NativeWindowsPreflightReport.CheckStatus.FAIL)
+                .filter(NativeWindowsPreflightReport.CheckResult::hasRemediationCommands)
+                .map(this::buildNativePreflightRemediationCard)
+                .toList();
+        nativePreflightRemediationContainer.getChildren().setAll(remediationCards);
+        nativePreflightRemediationSection.setVisible(!remediationCards.isEmpty());
+        rerunNativePreflightFromRemediationButton.setDisable(runNativePreflightButton.isDisable());
+    }
+
+    private VBox buildNativePreflightRemediationCard(NativeWindowsPreflightReport.CheckResult checkResult) {
+        return buildRemediationCard(checkResult.label(), checkResult.detail(), checkResult.remediationCommands());
+    }
+
+    private void clearNativePreflightRemediation() {
+        nativePreflightRemediationContainer.getChildren().clear();
+        nativePreflightRemediationSection.setVisible(false);
+        rerunNativePreflightFromRemediationButton.setDisable(true);
+    }
+
+    private void renderWslPreflightRemediation(WslPreflightReport report) {
+        List<VBox> remediationCards = report.checks().stream()
+                .filter(checkResult -> checkResult.status() == WslPreflightReport.CheckStatus.FAIL)
+                .filter(WslPreflightReport.CheckResult::hasRemediationCommands)
+                .map(this::buildWslPreflightRemediationCard)
+                .toList();
+        wslPreflightRemediationContainer.getChildren().setAll(remediationCards);
+        wslPreflightRemediationSection.setVisible(!remediationCards.isEmpty());
+        rerunWslPreflightFromRemediationButton.setDisable(runWslPreflightButton.isDisable());
+    }
+
+    private VBox buildWslPreflightRemediationCard(WslPreflightReport.CheckResult checkResult) {
+        return buildRemediationCard(checkResult.label(), checkResult.detail(), checkResult.remediationCommands());
+    }
+
+    private void clearWslPreflightRemediation() {
+        wslPreflightRemediationContainer.getChildren().clear();
+        wslPreflightRemediationSection.setVisible(false);
+        rerunWslPreflightFromRemediationButton.setDisable(true);
+    }
+
+    private VBox buildRemediationCard(String title,
+                                      String detail,
+                                      List<PreflightRemediationCommand> remediationCommands) {
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("card-title");
+        titleLabel.setWrapText(true);
+
+        Label detailLabel = new Label(detail);
+        detailLabel.getStyleClass().add("muted-text");
+        detailLabel.setWrapText(true);
+
+        VBox card = new VBox(8.0, titleLabel, detailLabel);
+        card.getStyleClass().add("preflight-remediation-card");
+        for (PreflightRemediationCommand remediationCommand : remediationCommands) {
+            card.getChildren().add(buildRemediationCommandRow(remediationCommand));
+        }
+        return card;
+    }
+
+    private VBox buildRemediationCommandRow(PreflightRemediationCommand remediationCommand) {
+        Label label = new Label(remediationCommand.label());
+        label.getStyleClass().add("section-title");
+        label.setWrapText(true);
+
+        TextField commandField = new TextField(remediationCommand.command());
+        commandField.setEditable(false);
+        commandField.getStyleClass().add("preflight-command-field");
+        HBox.setHgrow(commandField, Priority.ALWAYS);
+
+        Button copyButton = new Button("Copy");
+        copyButton.getStyleClass().add("preflight-copy-button");
+        copyButton.setOnAction(event -> copyToClipboard(remediationCommand.command()));
+
+        HBox commandRow = new HBox(8.0, commandField, copyButton);
+        commandRow.setAlignment(Pos.CENTER_LEFT);
+
+        return new VBox(6.0, label, commandRow);
+    }
+
+    private void copyToClipboard(String value) {
+        ClipboardContent clipboardContent = new ClipboardContent();
+        clipboardContent.putString(value);
+        Clipboard.getSystemClipboard().setContent(clipboardContent);
     }
 
     private boolean hasText(String value) {

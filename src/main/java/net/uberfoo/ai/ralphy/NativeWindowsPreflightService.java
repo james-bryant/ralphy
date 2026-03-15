@@ -17,6 +17,9 @@ import java.util.Objects;
 @Component
 public class NativeWindowsPreflightService {
     static final String QUALITY_GATE_COMMAND = ".\\mvnw.cmd clean verify jacoco:report";
+    private static final String CODEX_INSTALL_COMMAND = "npm install -g @openai/codex";
+    private static final String CODEX_LOGIN_COMMAND = "codex login";
+    private static final String CODEX_LOGIN_STATUS_COMMAND = "codex login status";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, String> environmentVariables;
@@ -66,7 +69,8 @@ public class NativeWindowsPreflightService {
                     "codex_cli",
                     "Codex CLI",
                     NativeWindowsPreflightReport.CheckCategory.TOOLING,
-                    commandFailureDetail("Codex CLI is unavailable", commandResult)
+                    commandFailureDetail("Codex CLI is unavailable", commandResult),
+                    codexCliRemediationCommands()
             );
         }
 
@@ -95,7 +99,8 @@ public class NativeWindowsPreflightService {
                     "codex_auth",
                     "Codex Auth",
                     NativeWindowsPreflightReport.CheckCategory.AUTHENTICATION,
-                    "No OPENAI_API_KEY environment variable or Codex auth file was found at " + authFilePath + "."
+                    "No OPENAI_API_KEY environment variable or Codex auth file was found at " + authFilePath + ".",
+                    codexAuthRemediationCommands()
             );
         }
 
@@ -122,7 +127,8 @@ public class NativeWindowsPreflightService {
                     "codex_auth",
                     "Codex Auth",
                     NativeWindowsPreflightReport.CheckCategory.AUTHENTICATION,
-                    "Unable to read Codex auth state from " + authFilePath + ": " + exception.getMessage()
+                    "Unable to read Codex auth state from " + authFilePath + ": " + exception.getMessage(),
+                    codexAuthRemediationCommands()
             );
         }
 
@@ -130,7 +136,8 @@ public class NativeWindowsPreflightService {
                 "codex_auth",
                 "Codex Auth",
                 NativeWindowsPreflightReport.CheckCategory.AUTHENTICATION,
-                "No stored Codex credentials were found in " + authFilePath + "."
+                "No stored Codex credentials were found in " + authFilePath + ".",
+                codexAuthRemediationCommands()
         );
     }
 
@@ -140,7 +147,8 @@ public class NativeWindowsPreflightService {
                     "git_ready",
                     "Git Readiness",
                     NativeWindowsPreflightReport.CheckCategory.GIT,
-                    "The active repository is missing .git metadata at " + activeProject.repositoryPath() + "."
+                    "The active repository is missing .git metadata at " + activeProject.repositoryPath() + ".",
+                    gitRemediationCommands(activeProject)
             );
         }
 
@@ -153,7 +161,8 @@ public class NativeWindowsPreflightService {
                     "git_ready",
                     "Git Readiness",
                     NativeWindowsPreflightReport.CheckCategory.GIT,
-                    commandFailureDetail("Git is not ready for the active repository", commandResult)
+                    commandFailureDetail("Git is not ready for the active repository", commandResult),
+                    gitRemediationCommands(activeProject)
             );
         }
 
@@ -163,7 +172,8 @@ public class NativeWindowsPreflightService {
                     "git_ready",
                     "Git Readiness",
                     NativeWindowsPreflightReport.CheckCategory.GIT,
-                    "Git responded with '" + normalizedOutput + "' instead of confirming the working tree."
+                    "Git responded with '" + normalizedOutput + "' instead of confirming the working tree.",
+                    gitRemediationCommands(activeProject)
             );
         }
 
@@ -184,7 +194,8 @@ public class NativeWindowsPreflightService {
                     "Quality Gate Command",
                     NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
                     "The quality-gate command " + QUALITY_GATE_COMMAND + " is unavailable because " + mvnwPath
-                            + " is missing."
+                            + " is missing.",
+                    qualityGateRemediationCommands(activeProject)
             );
         }
         if (!Files.isRegularFile(pomPath)) {
@@ -193,7 +204,8 @@ public class NativeWindowsPreflightService {
                     "Quality Gate Command",
                     NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
                     "The quality-gate command " + QUALITY_GATE_COMMAND + " is unavailable because " + pomPath
-                            + " is missing."
+                            + " is missing.",
+                    qualityGateRemediationCommands(activeProject)
             );
         }
 
@@ -259,13 +271,63 @@ public class NativeWindowsPreflightService {
                                                           String label,
                                                           NativeWindowsPreflightReport.CheckCategory category,
                                                           String detail) {
+        return fail(id, label, category, detail, List.of());
+    }
+
+    private NativeWindowsPreflightReport.CheckResult fail(String id,
+                                                          String label,
+                                                          NativeWindowsPreflightReport.CheckCategory category,
+                                                          String detail,
+                                                          List<PreflightRemediationCommand> remediationCommands) {
         return new NativeWindowsPreflightReport.CheckResult(
                 id,
                 label,
                 category,
                 NativeWindowsPreflightReport.CheckStatus.FAIL,
-                detail
+                detail,
+                remediationCommands
         );
+    }
+
+    private List<PreflightRemediationCommand> codexCliRemediationCommands() {
+        return List.of(
+                remediation("Install Codex CLI", CODEX_INSTALL_COMMAND),
+                remediation("Verify Codex CLI is available", "codex --version")
+        );
+    }
+
+    private List<PreflightRemediationCommand> codexAuthRemediationCommands() {
+        return List.of(
+                remediation("Authenticate Codex CLI", CODEX_LOGIN_COMMAND),
+                remediation("Check Codex login status", CODEX_LOGIN_STATUS_COMMAND)
+        );
+    }
+
+    private List<PreflightRemediationCommand> gitRemediationCommands(ActiveProject activeProject) {
+        String repositoryPath = quoteForPowerShell(activeProject.repositoryPath().toString());
+        return List.of(
+                remediation("Inspect Git status", "git -C " + repositoryPath + " status"),
+                remediation("Initialize Git metadata if this is a fresh repository",
+                        "git -C " + repositoryPath + " init")
+        );
+    }
+
+    private List<PreflightRemediationCommand> qualityGateRemediationCommands(ActiveProject activeProject) {
+        String repositoryPath = quoteForPowerShell(activeProject.repositoryPath().toString());
+        return List.of(
+                remediation("Restore Maven wrapper files from Git",
+                        "git -C " + repositoryPath + " restore mvnw.cmd pom.xml .mvn"),
+                remediation("Run the quality gate from the repository root",
+                        "Set-Location " + repositoryPath + "; " + QUALITY_GATE_COMMAND)
+        );
+    }
+
+    private PreflightRemediationCommand remediation(String label, String command) {
+        return new PreflightRemediationCommand(label, command);
+    }
+
+    private String quoteForPowerShell(String value) {
+        return "\"" + value.replace("\"", "\"\"") + "\"";
     }
 
     private static Path resolveCodexHomeDirectory(Map<String, String> environmentVariables, String userHome) {

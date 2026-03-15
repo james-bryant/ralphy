@@ -168,6 +168,18 @@ final class JavaFxUiHarness {
         });
     }
 
+    String textContent(String selector) throws Exception {
+        return onFxThread(() -> {
+            StringBuilder builder = new StringBuilder();
+            appendTextContent(requiredNode(selector), builder);
+            return builder.toString();
+        });
+    }
+
+    boolean isVisible(String selector) throws Exception {
+        return onFxThread(() -> requiredNode(selector).isVisible());
+    }
+
     Color textFill(String selector) throws Exception {
         return onFxThread(() -> (Color) requiredNode(selector, Labeled.class).getTextFill());
     }
@@ -190,6 +202,30 @@ final class JavaFxUiHarness {
     private <T extends Node> T requiredNode(String selector, Class<T> nodeType) {
         Node node = requiredNode(selector);
         return nodeType.cast(node);
+    }
+
+    private void appendTextContent(Node node, StringBuilder builder) {
+        if (node instanceof Labeled labeled) {
+            appendText(builder, labeled.getText());
+        } else if (node instanceof TextInputControl textInputControl) {
+            appendText(builder, textInputControl.getText());
+        }
+
+        if (node instanceof Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) {
+                appendTextContent(child, builder);
+            }
+        }
+    }
+
+    private void appendText(StringBuilder builder, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append(System.lineSeparator());
+        }
+        builder.append(value);
     }
 
     private static <T> T onFxThread(ThrowingSupplier<T> supplier)

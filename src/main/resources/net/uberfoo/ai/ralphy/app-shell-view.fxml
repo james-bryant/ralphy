@@ -226,6 +226,30 @@
                             <String fx:value="muted-text"/>
                         </styleClass>
                     </Label>
+                    <VBox id="nativePreflightRemediationSection" fx:id="nativePreflightRemediationSection"
+                          spacing="12.0" visible="false">
+                        <Separator/>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="Native Remediation">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <Region HBox.hgrow="ALWAYS"/>
+                            <Button id="rerunNativePreflightFromRemediationButton"
+                                    fx:id="rerunNativePreflightFromRemediationButton"
+                                    mnemonicParsing="false" onAction="#runNativeWindowsPreflight"
+                                    text="Rerun Native Preflight"/>
+                        </HBox>
+                        <Label text="Copy the commands you want to run. Ralphy never installs or authenticates Codex automatically."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <VBox id="nativePreflightRemediationContainer" fx:id="nativePreflightRemediationContainer"
+                              spacing="12.0"/>
+                    </VBox>
                     <Label id="nativePreflightMessageLabel" fx:id="nativePreflightMessageLabel" visible="false"
                            wrapText="true">
                         <styleClass>
@@ -256,6 +280,30 @@
                             <String fx:value="muted-text"/>
                         </styleClass>
                     </Label>
+                    <VBox id="wslPreflightRemediationSection" fx:id="wslPreflightRemediationSection"
+                          spacing="12.0" visible="false">
+                        <Separator/>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="WSL Remediation">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <Region HBox.hgrow="ALWAYS"/>
+                            <Button id="rerunWslPreflightFromRemediationButton"
+                                    fx:id="rerunWslPreflightFromRemediationButton"
+                                    mnemonicParsing="false" onAction="#runWslPreflight"
+                                    text="Rerun WSL Preflight"/>
+                        </HBox>
+                        <Label text="Copy the commands you want to run. Ralphy never installs or authenticates Codex automatically."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <VBox id="wslPreflightRemediationContainer" fx:id="wslPreflightRemediationContainer"
+                              spacing="12.0"/>
+                    </VBox>
                     <Label id="wslPreflightMessageLabel" fx:id="wslPreflightMessageLabel" visible="false"
                            wrapText="true">
                         <styleClass>

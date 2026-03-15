@@ -6,6 +6,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -52,6 +54,7 @@ class NativeWindowsPreflightServiceTest {
         assertEquals(NativeWindowsPreflightReport.CheckStatus.PASS, checksById.get("git_ready").status());
         assertEquals(NativeWindowsPreflightReport.CheckStatus.PASS, checksById.get("quality_gate").status());
         assertTrue(checksById.get("quality_gate").detail().contains(NativeWindowsPreflightService.QUALITY_GATE_COMMAND));
+        assertTrue(checksById.get("quality_gate").remediationCommands().isEmpty());
     }
 
     @Test
@@ -65,13 +68,17 @@ class NativeWindowsPreflightServiceTest {
                 """);
         Path repository = createRepository("broken-repo", false);
 
+        List<List<String>> executedCommands = new ArrayList<>();
         NativeWindowsPreflightService service = new NativeWindowsPreflightService(
                 Map.of(),
                 codexHome,
-                (workingDirectory, command) -> switch (command.getFirst()) {
+                (workingDirectory, command) -> {
+                    executedCommands.add(command);
+                    return switch (command.getFirst()) {
                     case "codex" -> NativeWindowsPreflightService.CommandResult.failure("The system cannot find the file specified.");
                     case "git" -> NativeWindowsPreflightService.CommandResult.success(1, "fatal: not a git repository");
                     default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
+                    };
                 }
         );
 
@@ -90,6 +97,14 @@ class NativeWindowsPreflightServiceTest {
         assertEquals(NativeWindowsPreflightReport.CheckStatus.FAIL, checksById.get("quality_gate").status());
         assertTrue(checksById.get("codex_auth").detail().contains("No stored Codex credentials"));
         assertTrue(checksById.get("quality_gate").detail().contains("mvnw.cmd"));
+        assertEquals("npm install -g @openai/codex",
+                checksById.get("codex_cli").remediationCommands().getFirst().command());
+        assertEquals("codex login",
+                checksById.get("codex_auth").remediationCommands().getFirst().command());
+        assertTrue(checksById.get("quality_gate").remediationCommands().stream()
+                .anyMatch(command -> command.command().contains(NativeWindowsPreflightService.QUALITY_GATE_COMMAND)));
+        assertTrue(executedCommands.stream().noneMatch(command -> command.contains("login")));
+        assertTrue(executedCommands.stream().noneMatch(command -> command.contains("npm")));
     }
 
     private Path createRepository(String name, boolean includeQualityGateFiles) throws IOException {
