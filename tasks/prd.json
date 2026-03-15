@@ -142,10 +142,11 @@
         "Manual smoke verification on Windows completed"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "dependsOn": [
         "US-007"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-009",
@@ -630,6 +631,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-15T21:49:46.137Z"
+    "updatedAt": "2026-03-15T22:01:52.159Z"
   }
 }

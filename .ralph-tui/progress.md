@@ -14,6 +14,7 @@ after each iteration and it's included in prompts for context.
 - Keep Windows smoke guidance in-repo with a "current baseline" section for already shipped shell behavior plus separate native Windows and WSL scenario sections for future workflows; that preserves one canonical checklist across incremental delivery.
 - For JavaFX flows that use native directory choosers in production, wrap the chooser in a Spring-managed adapter with queued test selections so UI harnesses can cover browse workflows without opening OS dialogs.
 - Validate local Git repositories by checking for `.git` metadata existence, not just a `.git` directory, because worktrees expose `.git` as a file.
+- When a JavaFX workflow must create a new filesystem folder, pair a text field for the new leaf directory name with a chooser for the existing parent folder; JavaFX `DirectoryChooser` cannot target a path that does not exist yet.
 
 ---
 
@@ -116,4 +117,18 @@ after each iteration and it's included in prompts for context.
   - Gotchas encountered
     - Git worktrees expose `.git` as a file, so repository validation must treat either a file or directory marker as valid metadata.
     - JavaFX validation labels should bind `managedProperty()` to `visibleProperty()` or hidden error states still reserve layout space and leave awkward gaps in the card.
+---
+
+## 2026-03-15 - US-008
+- Implemented new-project onboarding in the `Projects` workspace, including a typed folder-name field, parent-folder selection, local folder creation, `git init`, and automatic activation of the new repository as the active project.
+- Added initial project metadata bootstrap at `.ralph-tui/project-metadata.json` inside each newly created repository, and rolled back partially created folders when Git initialization or metadata creation fails.
+- Expanded automated coverage with service tests for successful creation and rollback-on-failure, plus a JavaFX UI test that validates the create flow end to end through the shell.
+- Updated the Windows smoke checklist baseline to include creating a new repository and verifying the metadata artifact, then completed a Windows launch smoke on 2026-03-15 by launching `.\mvnw.cmd -q -DskipTests javafx:run` and detecting the `Ralphy` window.
+- Files changed: `src/main/java/net/uberfoo/ai/ralphy/ActiveProject.java`, `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`, `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`, `src/main/java/net/uberfoo/ai/ralphy/GitRepositoryInitializer.java`, `src/main/java/net/uberfoo/ai/ralphy/ProjectMetadataInitializer.java`, `src/main/java/net/uberfoo/ai/ralphy/RepositoryDirectoryChooser.java`, `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`, `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`, `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`, `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`, `src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java`, `docs/windows-smoke-checklist.md`, `.ralph-tui/progress.md`
+- **Learnings:**
+  - Patterns discovered
+    - New repository onboarding is easiest to keep testable when folder creation, Git initialization, and metadata bootstrap are separate seams orchestrated by the active-project service.
+  - Gotchas encountered
+    - JavaFX `DirectoryChooser` can only select folders that already exist, so the create flow must choose a parent folder and collect the new repository name separately.
+    - Repository creation needs best-effort rollback or failed `git init` and metadata writes leave behind half-created project folders that the next attempt collides with.
 ---

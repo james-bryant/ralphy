@@ -34,6 +34,17 @@
     -fx-text-fill: -color-text-secondary;
 }
 
+.ralphy-shell .text-input {
+    -fx-background-color: -color-surface-primary;
+    -fx-background-radius: 10;
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 10;
+    -fx-highlight-fill: -color-accent;
+    -fx-highlight-text-fill: #020617;
+    -fx-prompt-text-fill: -color-text-secondary;
+    -fx-text-fill: -color-text-primary;
+}
+
 .ralphy-shell .separator *.line {
     -fx-border-color: -color-border-muted;
 }

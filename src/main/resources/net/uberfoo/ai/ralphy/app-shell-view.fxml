@@ -5,6 +5,7 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.BorderPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.Region?>
@@ -94,13 +95,31 @@
                             <String fx:value="card-title"/>
                         </styleClass>
                     </Label>
-                    <Label text="Open an existing local Git repository to make it the active project." wrapText="true">
+                    <Label text="Open an existing local Git repository or create a new one to make it the active project."
+                           wrapText="true">
                         <styleClass>
                             <String fx:value="muted-text"/>
                         </styleClass>
                     </Label>
                     <Button id="openRepositoryButton" fx:id="openRepositoryButton" mnemonicParsing="false"
                             onAction="#openExistingRepository" text="Open Existing Repository"/>
+                    <Label text="Create New Repository">
+                        <styleClass>
+                            <String fx:value="section-title"/>
+                        </styleClass>
+                    </Label>
+                    <Label text="Enter a folder name, then choose the parent folder where the new repository should be created."
+                           wrapText="true">
+                        <styleClass>
+                            <String fx:value="muted-text"/>
+                        </styleClass>
+                    </Label>
+                    <HBox spacing="12.0">
+                        <TextField id="newProjectNameField" fx:id="newProjectNameField" HBox.hgrow="ALWAYS"
+                                   promptText="my-ralphy-project"/>
+                        <Button id="createRepositoryButton" fx:id="createRepositoryButton" mnemonicParsing="false"
+                                onAction="#createNewRepository" text="Create New Repository"/>
+                    </HBox>
                     <Label text="Active Repository">
                         <styleClass>
                             <String fx:value="section-title"/>

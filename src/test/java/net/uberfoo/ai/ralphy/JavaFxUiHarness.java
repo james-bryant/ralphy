@@ -6,6 +6,7 @@ import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ButtonBase;
 import javafx.scene.control.Labeled;
+import javafx.scene.control.TextInputControl;
 import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
@@ -133,12 +134,31 @@ final class JavaFxUiHarness {
         });
     }
 
+    void enterText(String selector, String value) throws Exception {
+        onFxThread(() -> {
+            TextInputControl textInputControl = requiredNode(selector, TextInputControl.class);
+            textInputControl.setText(value);
+            root().applyCss();
+            root().layout();
+            return null;
+        });
+    }
+
     String stageTitle() throws Exception {
         return onFxThread(() -> stage.getTitle());
     }
 
     String text(String selector) throws Exception {
-        return onFxThread(() -> requiredNode(selector, Labeled.class).getText());
+        return onFxThread(() -> {
+            Node node = requiredNode(selector);
+            if (node instanceof Labeled labeled) {
+                return labeled.getText();
+            }
+            if (node instanceof TextInputControl textInputControl) {
+                return textInputControl.getText();
+            }
+            throw new IllegalArgumentException("Node does not expose text for selector " + selector);
+        });
     }
 
     Color textFill(String selector) throws Exception {

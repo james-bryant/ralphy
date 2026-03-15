@@ -27,9 +27,11 @@ Run this baseline even when later workflow stories are still incomplete. For any
 6. Confirm the `Active Repository` card shows the selected repository name and full path, and the status bar `Active Project` value updates.
 7. Use `Open Existing Repository` again and choose a non-Git folder.
 8. Confirm a validation message states the selected folder is not a Git repository and the previous active project remains unchanged.
-9. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
-10. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
-11. Close the app cleanly.
+9. In the `Create New Repository` field, enter a new folder name and use `Create New Repository` to choose a parent folder.
+10. Confirm a new Git repository folder is created, the `Active Repository` card updates to that new repository, and `.ralph-tui/project-metadata.json` exists inside the new folder.
+11. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
+12. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
+13. Close the app cleanly.
 
 ## Scenario A: Native Windows Execution Profile
 
@@ -37,7 +39,7 @@ Use this scenario once native PowerShell execution-profile support is available.
 
 | Area | Action | Expected Result |
 | --- | --- | --- |
-| Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the native Windows profile. | The project becomes active, the repository path is shown with a Windows path, and native preflight reports readiness or clear remediation. |
+| Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the native Windows profile. | The project becomes active, the repository path is shown with a Windows path, new projects gain initial `.ralph-tui/project-metadata.json`, and native preflight reports readiness or clear remediation. |
 | PRD Editing | Open the active PRD in `PRD Editor`, make a small Markdown edit, save, and reopen it. | The edit persists without destructive reformatting and dirty-state/save behavior is clear. |
 | Loop Start | Start one eligible story from `Execution`. | The story moves into a queued or running state, live output begins, and the launcher uses the native Windows profile. |
 | Pause | Request `Pause` while a story is running. | The current step is allowed to finish, the UI distinguishes pause requested from fully paused, and the next story does not start. |
@@ -49,7 +51,7 @@ Use this scenario once WSL execution-profile support is available. The desktop a
 
 | Area | Action | Expected Result |
 | --- | --- | --- |
-| Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the WSL profile, choose a distro, and save any Windows-to-WSL path mapping. | The project becomes active, the selected distro is shown, path mapping resolves correctly, and WSL preflight reports readiness or actionable remediation. |
+| Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the WSL profile, choose a distro, and save any Windows-to-WSL path mapping. | The project becomes active, the selected distro is shown, new projects gain initial `.ralph-tui/project-metadata.json`, path mapping resolves correctly, and WSL preflight reports readiness or actionable remediation. |
 | PRD Editing | Open the active PRD in `PRD Editor`, make a small Markdown edit, save, and reopen it. | PRD editing behavior matches the native Windows flow because authoring still happens in the Windows desktop UI. |
 | Loop Start | Start one eligible story from `Execution` while the WSL profile is selected. | The story moves into a queued or running state, live output begins, and the launcher runs through the saved WSL profile and mapped repository path. |
 | Pause | Request `Pause` while a story is running through WSL. | The current step is allowed to finish inside WSL, the UI reaches a paused state, and the next story does not start. |

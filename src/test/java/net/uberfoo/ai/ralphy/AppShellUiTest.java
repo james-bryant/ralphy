@@ -109,6 +109,37 @@ class AppShellUiTest {
                 harness.getRequiredBean(ActiveProjectService.class).activeProject().orElseThrow().repositoryPath());
     }
 
+    @Test
+    void appShellCanCreateNewGitRepositories() throws Exception {
+        Path parentDirectory = Files.createDirectory(tempDir.resolve("new-projects"));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell();
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+        GitRepositoryInitializer gitRepositoryInitializer = harness.getRequiredBean(GitRepositoryInitializer.class);
+
+        harness.clickOn("#projectsNavButton");
+        harness.clickOn("#createRepositoryButton");
+        assertEquals("Enter a project folder name.", harness.text("#projectValidationMessageLabel"));
+
+        gitRepositoryInitializer.queueSuccessForTest();
+        repositoryDirectoryChooser.queueSelectionForTest(parentDirectory);
+        harness.enterText("#newProjectNameField", "starter-repo");
+        harness.clickOn("#createRepositoryButton");
+
+        Path expectedRepositoryPath = parentDirectory.resolve("starter-repo").toAbsolutePath().normalize();
+        assertEquals("starter-repo", harness.text("#activeProjectNameLabel"));
+        assertEquals(expectedRepositoryPath.toString(), harness.text("#activeProjectPathLabel"));
+        assertEquals("", harness.text("#projectValidationMessageLabel"));
+        assertEquals("starter-repo", harness.text("#activeProjectStatusLabel"));
+        assertEquals("", harness.text("#newProjectNameField"));
+        assertTrue(Files.isDirectory(expectedRepositoryPath.resolve(".git")));
+        assertTrue(Files.exists(expectedRepositoryPath.resolve(".ralph-tui").resolve("project-metadata.json")));
+        assertEquals(expectedRepositoryPath,
+                harness.getRequiredBean(ActiveProjectService.class).activeProject().orElseThrow().repositoryPath());
+    }
+
     private Path createGitRepository(String directoryName) throws IOException {
         Path repository = Files.createDirectory(tempDir.resolve(directoryName));
         Files.createDirectory(repository.resolve(".git"));

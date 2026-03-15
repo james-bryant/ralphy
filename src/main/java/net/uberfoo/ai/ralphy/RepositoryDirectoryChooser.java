@@ -16,13 +16,21 @@ public class RepositoryDirectoryChooser {
     private final Deque<Optional<Path>> queuedSelections = new ConcurrentLinkedDeque<>();
 
     public Optional<Path> chooseRepository(Window ownerWindow, Path initialDirectory) {
+        return chooseDirectory(ownerWindow, initialDirectory, "Open Existing Git Repository");
+    }
+
+    public Optional<Path> chooseParentDirectory(Window ownerWindow, Path initialDirectory) {
+        return chooseDirectory(ownerWindow, initialDirectory, "Choose Parent Folder for New Git Repository");
+    }
+
+    private Optional<Path> chooseDirectory(Window ownerWindow, Path initialDirectory, String title) {
         Optional<Path> queuedSelection = queuedSelections.pollFirst();
         if (queuedSelection != null) {
             return queuedSelection.map(path -> path.toAbsolutePath().normalize());
         }
 
         DirectoryChooser directoryChooser = new DirectoryChooser();
-        directoryChooser.setTitle("Open Existing Git Repository");
+        directoryChooser.setTitle(title);
         File chooserInitialDirectory = resolveInitialDirectory(initialDirectory);
         if (chooserInitialDirectory != null) {
             directoryChooser.setInitialDirectory(chooserInitialDirectory);

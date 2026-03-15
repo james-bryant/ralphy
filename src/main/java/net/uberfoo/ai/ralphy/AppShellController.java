@@ -3,6 +3,7 @@ package net.uberfoo.ai.ralphy;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -11,7 +12,8 @@ import java.util.Optional;
 public class AppShellController {
     private static final String ACTIVE_NAV_STYLE_CLASS = "shell-nav-button-active";
     private static final String NO_ACTIVE_PROJECT_NAME = "No active repository selected.";
-    private static final String NO_ACTIVE_PROJECT_PATH = "Browse to a local Git repository to make it the active project.";
+    private static final String NO_ACTIVE_PROJECT_PATH =
+            "Open an existing repository or create a new one to make it the active project.";
     private static final String NO_ACTIVE_PROJECT_STATUS = "No active project selected.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
@@ -46,6 +48,9 @@ public class AppShellController {
     private Label brandLabel;
 
     @FXML
+    private Button createRepositoryButton;
+
+    @FXML
     private Button executionNavButton;
 
     @FXML
@@ -53,6 +58,9 @@ public class AppShellController {
 
     @FXML
     private Button openRepositoryButton;
+
+    @FXML
+    private TextField newProjectNameField;
 
     @FXML
     private Label projectValidationMessageLabel;
@@ -125,7 +133,8 @@ public class AppShellController {
             return;
         }
 
-        ActiveProjectService.SelectionResult selectionResult = activeProjectService.openRepository(selectedDirectory.get());
+        ActiveProjectService.ProjectActivationResult selectionResult =
+                activeProjectService.openRepository(selectedDirectory.get());
         if (selectionResult.successful()) {
             renderActiveProject(selectionResult.activeProject());
             setProjectValidationMessage("");
@@ -136,11 +145,49 @@ public class AppShellController {
         setProjectValidationMessage(selectionResult.message());
     }
 
+    @FXML
+    private void createNewRepository() {
+        String requestedProjectName = newProjectNameField.getText();
+        if (requestedProjectName == null || requestedProjectName.isBlank()) {
+            setProjectValidationMessage("Enter a project folder name.");
+            return;
+        }
+
+        Optional<Path> selectedParentDirectory = repositoryDirectoryChooser.chooseParentDirectory(
+                createRepositoryButton.getScene().getWindow(),
+                defaultCreateParentDirectory()
+        );
+        if (selectedParentDirectory.isEmpty()) {
+            return;
+        }
+
+        ActiveProjectService.ProjectActivationResult creationResult = activeProjectService.createRepository(
+                selectedParentDirectory.get(),
+                requestedProjectName
+        );
+        if (creationResult.successful()) {
+            renderActiveProject(creationResult.activeProject());
+            newProjectNameField.clear();
+            setProjectValidationMessage("");
+            return;
+        }
+
+        renderActiveProject(activeProjectService.activeProject().orElse(null));
+        setProjectValidationMessage(creationResult.message());
+    }
+
     private void activateSection(ShellSection section, Button activeButton) {
         workspaceTitleLabel.setText(section.title());
         workspacePlaceholderLabel.setText(section.workspaceText());
         statusLabel.setText(section.statusText());
         updateActiveNavigationButton(activeButton);
+    }
+
+    private Path defaultCreateParentDirectory() {
+        return activeProjectService.activeProject()
+                .map(ActiveProject::repositoryPath)
+                .map(Path::getParent)
+                .orElseGet(this::defaultBrowseDirectory);
     }
 
     private Path defaultBrowseDirectory() {
