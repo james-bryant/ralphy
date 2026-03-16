@@ -490,6 +490,54 @@
                             </VBox>
                         </HBox>
                     </VBox>
+                    <VBox id="prdDocumentCard" fx:id="prdDocumentCard" spacing="12.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Generated Markdown PRD">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Generate a repository-owned Markdown PRD from the latest interview answers. Regenerating overwrites the saved `active-prd.md` draft."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Button id="generatePrdButton" fx:id="generatePrdButton"
+                                    mnemonicParsing="false" onAction="#generatePrdFromInterviewAnswers"
+                                    text="Generate PRD"/>
+                            <Region HBox.hgrow="ALWAYS"/>
+                            <Label text="Active PRD Path">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                        </HBox>
+                        <TextField id="prdDocumentPathField" fx:id="prdDocumentPathField"/>
+                        <Label text="Preview">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <TextArea id="prdDocumentPreviewArea" fx:id="prdDocumentPreviewArea"
+                                  editable="false" prefRowCount="18" wrapText="true">
+                            <styleClass>
+                                <String fx:value="prd-preview-area"/>
+                            </styleClass>
+                        </TextArea>
+                        <Label id="prdDocumentStateLabel" fx:id="prdDocumentStateLabel"
+                               visible="false" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                    </VBox>
                 </VBox>
             </content>
         </ScrollPane>

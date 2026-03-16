@@ -16,6 +16,7 @@ class ActiveProjectServiceTest {
     private final GitRepositoryInitializer gitRepositoryInitializer = new GitRepositoryInitializer();
     private final ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
     private final ProjectStorageInitializer projectStorageInitializer = new ProjectStorageInitializer();
+    private final PrdMarkdownGenerator prdMarkdownGenerator = new PrdMarkdownGenerator();
 
     @TempDir
     Path tempDir;
@@ -338,6 +339,70 @@ class ActiveProjectServiceTest {
         assertEquals(".\\mvnw.cmd clean verify jacoco:report and Windows smoke.",
                 restoredDraft.answerFor("qualityGates"));
         assertEquals(3, restoredDraft.selectedQuestionIndex());
+    }
+
+    @Test
+    void saveActivePrdPersistsMarkdownAndReloadsItOnStartup() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        Path repository = createGitDirectoryRepository("active-prd-repo");
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        PrdInterviewDraft draft = new PrdInterviewDraft(
+                0,
+                List.of(
+                        new PrdInterviewDraft.Answer(
+                                "overviewContext",
+                                "overview",
+                                "Interactive PRD generation for local Ralph workflows."
+                        ),
+                        new PrdInterviewDraft.Answer(
+                                "userStories",
+                                "user-stories",
+                                "Generate the active PRD | Save Markdown into the active project."
+                        )
+                ),
+                "2026-03-15T18:00:00Z",
+                "2026-03-15T18:05:00Z"
+        );
+        String initialMarkdown = prdMarkdownGenerator.generate(new ActiveProject(repository), draft);
+
+        ActiveProjectService.ActivePrdSaveResult initialSaveResult = activeProjectService.saveActivePrd(initialMarkdown);
+
+        assertTrue(initialSaveResult.successful());
+        assertEquals(initialMarkdown, Files.readString(new ActiveProject(repository).activePrdPath()));
+        assertEquals(initialMarkdown, activeProjectService.activePrdMarkdown().orElseThrow());
+
+        PrdInterviewDraft regeneratedDraft = new PrdInterviewDraft(
+                0,
+                List.of(
+                        new PrdInterviewDraft.Answer(
+                                "overviewContext",
+                                "overview",
+                                "Interactive PRD generation for local Ralph workflows."
+                        ),
+                        new PrdInterviewDraft.Answer(
+                                "userStories",
+                                "user-stories",
+                                "Generate the active PRD | Save Markdown into the active project.\n"
+                                        + "Regenerate the active PRD | Overwrite the saved file with the latest draft."
+                        )
+                ),
+                "2026-03-15T18:00:00Z",
+                "2026-03-15T18:10:00Z"
+        );
+        String regeneratedMarkdown = prdMarkdownGenerator.generate(new ActiveProject(repository), regeneratedDraft);
+
+        ActiveProjectService.ActivePrdSaveResult regenerationResult =
+                activeProjectService.saveActivePrd(regeneratedMarkdown);
+
+        assertTrue(regenerationResult.successful());
+        assertEquals(regeneratedMarkdown, Files.readString(new ActiveProject(repository).activePrdPath()));
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        assertEquals(regeneratedMarkdown, restoredService.activePrdMarkdown().orElseThrow());
     }
 
     @Test

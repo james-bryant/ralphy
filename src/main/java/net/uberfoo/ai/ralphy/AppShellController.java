@@ -58,6 +58,12 @@ public class AppShellController {
             "Draft answers are stored per project in .ralph-tui/project-metadata.json.";
     private static final String PRD_INTERVIEW_UNSAVED_CHANGES_MESSAGE =
             "Draft has unsaved changes. Save or move to another question to persist them.";
+    private static final String NO_ACTIVE_PRD_DOCUMENT_MESSAGE =
+            "Open or create a repository before generating a Markdown PRD.";
+    private static final String EMPTY_PRD_DOCUMENT_MESSAGE =
+            "No generated PRD yet. Generate one from the latest interview answers.";
+    private static final String READY_PRD_DOCUMENT_MESSAGE =
+            "The active project already has a generated Markdown PRD. Regenerate it after updating the interview draft.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -77,6 +83,7 @@ public class AppShellController {
     private final AppShellDescriptor shellDescriptor;
     private final ActiveProjectService activeProjectService;
     private final PresetCatalogService presetCatalogService;
+    private final PrdMarkdownGenerator prdMarkdownGenerator;
     private final PrdInterviewService prdInterviewService;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
@@ -175,6 +182,21 @@ public class AppShellController {
 
     @FXML
     private TextArea prdInterviewAnswerArea;
+
+    @FXML
+    private VBox prdDocumentCard;
+
+    @FXML
+    private TextField prdDocumentPathField;
+
+    @FXML
+    private TextArea prdDocumentPreviewArea;
+
+    @FXML
+    private Label prdDocumentStateLabel;
+
+    @FXML
+    private Button generatePrdButton;
 
     @FXML
     private VBox prdInterviewCard;
@@ -287,11 +309,13 @@ public class AppShellController {
     public AppShellController(AppShellDescriptor shellDescriptor,
                               ActiveProjectService activeProjectService,
                               PresetCatalogService presetCatalogService,
+                              PrdMarkdownGenerator prdMarkdownGenerator,
                               PrdInterviewService prdInterviewService,
                               RepositoryDirectoryChooser repositoryDirectoryChooser) {
         this.shellDescriptor = shellDescriptor;
         this.activeProjectService = activeProjectService;
         this.presetCatalogService = presetCatalogService;
+        this.prdMarkdownGenerator = prdMarkdownGenerator;
         this.prdInterviewService = prdInterviewService;
         this.repositoryDirectoryChooser = repositoryDirectoryChooser;
     }
@@ -312,6 +336,7 @@ public class AppShellController {
         nativePreflightRemediationSection.managedProperty().bind(nativePreflightRemediationSection.visibleProperty());
         wslPreflightRemediationSection.managedProperty().bind(wslPreflightRemediationSection.visibleProperty());
         prdInterviewDraftStateLabel.managedProperty().bind(prdInterviewDraftStateLabel.visibleProperty());
+        prdDocumentStateLabel.managedProperty().bind(prdDocumentStateLabel.visibleProperty());
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
@@ -319,6 +344,8 @@ public class AppShellController {
         );
         configurePresetCatalog();
         configurePrdInterview();
+        prdDocumentPreviewArea.setEditable(false);
+        prdDocumentPathField.setEditable(false);
         nativeExecutionProfileRadioButton.setSelected(true);
         renderActiveProject(activeProjectService.activeProject().orElse(null));
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
@@ -435,6 +462,29 @@ public class AppShellController {
     }
 
     @FXML
+    private void generatePrdFromInterviewAnswers() {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            renderGeneratedPrd(null);
+            return;
+        }
+
+        if (!persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, false)) {
+            return;
+        }
+
+        String markdown = prdMarkdownGenerator.generate(activeProject.get(), currentPrdInterviewDraft);
+        ActiveProjectService.ActivePrdSaveResult saveResult = activeProjectService.saveActivePrd(markdown);
+        if (!saveResult.successful()) {
+            setPrdDocumentState(saveResult.message());
+            return;
+        }
+
+        renderGeneratedPrd(activeProject.get());
+        setPrdDocumentState("Generated PRD saved to " + saveResult.path() + ".");
+    }
+
+    @FXML
     private void showPreviousPrdInterviewQuestion() {
         navigateToPrdInterviewQuestion(currentPrdInterviewQuestionIndex - 1);
     }
@@ -496,6 +546,7 @@ public class AppShellController {
             renderNativeWindowsPreflight();
             renderWslPreflight();
             renderPrdInterview(null);
+            renderGeneratedPrd(null);
             return;
         }
 
@@ -507,6 +558,7 @@ public class AppShellController {
         renderNativeWindowsPreflight();
         renderWslPreflight();
         renderPrdInterview(activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
+        renderGeneratedPrd(activeProject);
     }
 
     private void renderExecutionProfile(ExecutionProfile executionProfile) {
@@ -931,6 +983,31 @@ public class AppShellController {
         }
     }
 
+    private void renderGeneratedPrd(ActiveProject activeProject) {
+        boolean activeProjectPresent = activeProject != null;
+        prdDocumentCard.setDisable(!activeProjectPresent);
+        generatePrdButton.setDisable(!activeProjectPresent);
+        prdDocumentPreviewArea.setDisable(!activeProjectPresent);
+
+        if (!activeProjectPresent) {
+            prdDocumentPathField.clear();
+            prdDocumentPreviewArea.clear();
+            setPrdDocumentState(NO_ACTIVE_PRD_DOCUMENT_MESSAGE);
+            return;
+        }
+
+        prdDocumentPathField.setText(activeProject.activePrdPath().toString());
+        Optional<String> activePrdMarkdown = activeProjectService.activePrdMarkdown();
+        if (activePrdMarkdown.isEmpty()) {
+            prdDocumentPreviewArea.clear();
+            setPrdDocumentState(EMPTY_PRD_DOCUMENT_MESSAGE);
+            return;
+        }
+
+        prdDocumentPreviewArea.setText(activePrdMarkdown.get());
+        setPrdDocumentState(READY_PRD_DOCUMENT_MESSAGE);
+    }
+
     private void renderCurrentPrdInterviewQuestion() {
         PrdInterviewQuestion question = prdInterviewService.questionForIndex(currentPrdInterviewQuestionIndex);
         prdInterviewSummaryLabel.setText(currentPrdInterviewDraft.answeredQuestionCount()
@@ -1033,6 +1110,12 @@ public class AppShellController {
         boolean hasMessage = message != null && !message.isBlank();
         prdInterviewDraftStateLabel.setText(hasMessage ? message : "");
         prdInterviewDraftStateLabel.setVisible(hasMessage);
+    }
+
+    private void setPrdDocumentState(String message) {
+        boolean hasMessage = message != null && !message.isBlank();
+        prdDocumentStateLabel.setText(hasMessage ? message : "");
+        prdDocumentStateLabel.setVisible(hasMessage);
     }
 
     private String capitalize(String value) {

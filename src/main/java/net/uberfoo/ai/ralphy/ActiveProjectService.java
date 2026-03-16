@@ -5,9 +5,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.Objects;
@@ -27,6 +30,7 @@ public class ActiveProjectService {
     private NativeWindowsPreflightReport latestNativeWindowsPreflightReport;
     private WslPreflightReport latestWslPreflightReport;
     private PrdInterviewDraft prdInterviewDraft;
+    private String activePrdMarkdown;
     private String startupRecoveryMessage = "";
 
     @Autowired
@@ -103,6 +107,10 @@ public class ActiveProjectService {
         return Optional.ofNullable(prdInterviewDraft);
     }
 
+    public synchronized Optional<String> activePrdMarkdown() {
+        return Optional.ofNullable(activePrdMarkdown);
+    }
+
     public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
         Objects.requireNonNull(executionProfile, "executionProfile must not be null");
         if (activeProject == null) {
@@ -153,6 +161,29 @@ public class ActiveProjectService {
             return PrdInterviewDraftSaveResult.failure(
                     replacementDraft,
                     "Unable to store PRD interview answers: " + exception.getMessage()
+            );
+        }
+    }
+
+    public synchronized ActivePrdSaveResult saveActivePrd(String markdown) {
+        Objects.requireNonNull(markdown, "markdown must not be null");
+        if (activeProject == null) {
+            return ActivePrdSaveResult.failure("Open or create a repository before saving a Markdown PRD.");
+        }
+
+        try {
+            Files.createDirectories(activeProject.prdsDirectoryPath());
+            Path activePrdPath = activeProject.activePrdPath();
+            Path temporaryPrdPath = activePrdPath.resolveSibling(activePrdPath.getFileName() + ".tmp");
+            Files.writeString(temporaryPrdPath, markdown, StandardCharsets.UTF_8);
+            moveIntoPlace(temporaryPrdPath, activePrdPath);
+            activePrdMarkdown = markdown;
+            return ActivePrdSaveResult.success(markdown, activePrdPath);
+        } catch (IOException exception) {
+            return ActivePrdSaveResult.failure(
+                    markdown,
+                    activeProject.activePrdPath(),
+                    "Unable to store the active Markdown PRD: " + exception.getMessage()
             );
         }
     }
@@ -266,6 +297,7 @@ public class ActiveProjectService {
         localMetadataStorage.recordProjectActivation(candidateProject);
         refreshPreflightState();
         refreshPrdInterviewDraft();
+        refreshActivePrd();
         startupRecoveryMessage = "";
         return ProjectActivationResult.success(candidateProject);
     }
@@ -342,6 +374,10 @@ public class ActiveProjectService {
         prdInterviewDraft = readStoredPrdInterviewDraft().orElse(null);
     }
 
+    private void refreshActivePrd() {
+        activePrdMarkdown = readStoredActivePrd().orElse(null);
+    }
+
     private Optional<PrdInterviewDraft> readStoredPrdInterviewDraft() {
         if (activeProject == null) {
             return Optional.empty();
@@ -351,6 +387,31 @@ public class ActiveProjectService {
             return projectMetadataInitializer.readPrdInterviewDraft(activeProject);
         } catch (IOException exception) {
             return Optional.empty();
+        }
+    }
+
+    private Optional<String> readStoredActivePrd() {
+        if (activeProject == null || !Files.exists(activeProject.activePrdPath())) {
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(Files.readString(activeProject.activePrdPath(), StandardCharsets.UTF_8));
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private void moveIntoPlace(Path temporaryPath, Path destinationPath) throws IOException {
+        try {
+            Files.move(
+                    temporaryPath,
+                    destinationPath,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE
+            );
+        } catch (AtomicMoveNotSupportedException exception) {
+            Files.move(temporaryPath, destinationPath, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
@@ -564,6 +625,20 @@ public class ActiveProjectService {
 
         private static PrdInterviewDraftSaveResult failure(PrdInterviewDraft draft, String message) {
             return new PrdInterviewDraftSaveResult(false, draft, message);
+        }
+    }
+
+    public record ActivePrdSaveResult(boolean successful, String markdown, Path path, String message) {
+        private static ActivePrdSaveResult success(String markdown, Path path) {
+            return new ActivePrdSaveResult(true, markdown, path, "");
+        }
+
+        private static ActivePrdSaveResult failure(String message) {
+            return new ActivePrdSaveResult(false, null, null, message);
+        }
+
+        private static ActivePrdSaveResult failure(String markdown, Path path, String message) {
+            return new ActivePrdSaveResult(false, markdown, path, message);
         }
     }
 

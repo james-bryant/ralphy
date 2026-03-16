@@ -11,6 +11,7 @@ after each iteration and it's included in prompts for context.
 - Put remediation commands on each failed preflight check record and keep the UI passive: render those commands in a dedicated remediation panel with copy buttons and rerun actions, but never execute install or authentication commands from the app itself.
 - Keep built-in workflow presets as typed catalog records in code and render previews directly from that catalog; until customization exists, avoid persisting or editing raw prompt bodies in project metadata.
 - Persist in-progress PRD authoring in `project-metadata.json` as typed question/answer draft state plus the selected step index, so JavaFX authoring screens can restore users to the same interview prompt after restart without inventing a second persistence path.
+- Treat generated PRDs as project-scoped filesystem artifacts: save and restore `.ralph-tui/prds/active-prd.md` through `ActiveProjectService` and render the current file in the UI instead of duplicating Markdown content inside project metadata.
 
 ---
 
@@ -92,4 +93,23 @@ after each iteration and it's included in prompts for context.
   - Reusing `ProjectMetadataInitializer` for PRD interview drafts keeps authoring state aligned with other project-scoped artifacts and avoids splitting restart behavior between project metadata and session metadata.
   - A small dynamic button list inside the shared JavaFX shell is enough to support sequenced interview navigation and revisit behavior without introducing a separate navigation framework or additional controllers.
   - Storing the selected interview question index alongside answers makes restart restoration materially better because users return to the exact clarification step they were editing rather than only recovering raw text blobs.
+---
+## 2026-03-15 - US-018
+- Implemented `PrdMarkdownGenerator` to turn PRD interview answers into repository-owned Markdown with ordered `US-XXX` story headers, required PRD sections, and placeholder scope text when later prompts are still blank.
+- Added active PRD persistence and restore behavior in `ActiveProjectService`, saving generated Markdown to `.ralph-tui/prds/active-prd.md` and reloading the file when the active project is reopened.
+- Extended the JavaFX PRD Editor with a `Generate PRD` action, active PRD path display, and read-only Markdown preview. Added unit and UI coverage for generation, regeneration, and saved-file restoration. Updated the Windows smoke checklist to cover PRD generation and regeneration.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdMarkdownGenerator.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`
+  - `src/test/java/net/uberfoo/ai/ralphy/PrdMarkdownGeneratorTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Generated Markdown belongs with the other repository-owned artifacts under `.ralph-tui/`; restoring it from disk on project activation keeps preview state accurate without creating a second PRD persistence model.
+  - Saving the currently edited interview answer before generation is necessary so regeneration always reflects the latest draft, not only the last explicitly saved question transition.
+  - JavaFX text controls can normalize line endings differently from the filesystem on Windows, so UI assertions should compare normalized content when verifying saved Markdown previews.
 ---

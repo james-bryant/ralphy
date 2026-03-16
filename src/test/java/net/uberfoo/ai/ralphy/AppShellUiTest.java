@@ -153,6 +153,59 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellCanGenerateAndRegenerateMarkdownPrdFromInterviewAnswers() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("generated-prd-repo");
+        Path generatedPrdPath = repository.resolve(".ralph-tui").resolve("prds").resolve("active-prd.md");
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+        harness.clickOn("#prdEditorNavButton");
+
+        harness.enterText("#prdInterviewAnswerArea", "Repository-owned PRD generation for Codex-driven workflows.");
+        harness.clickOn("#prdInterviewNextButton");
+        harness.enterText("#prdInterviewAnswerArea", "Developers operating one repository at a time.");
+        harness.clickOn("#prdInterviewQuestionGoalsOutcomes");
+        harness.enterText("#prdInterviewAnswerArea", "Generate reviewable Markdown PRDs from interview answers.");
+        harness.clickOn("#prdInterviewQuestionQualityGates");
+        harness.enterText("#prdInterviewAnswerArea", ".\\mvnw.cmd clean verify jacoco:report");
+        harness.clickOn("#prdInterviewQuestionUserStories");
+        harness.enterText("#prdInterviewAnswerArea",
+                "US-010: Edit the active PRD | Refine the generated Markdown before execution.\n"
+                        + "US-018: Generate Markdown PRD from Interview Answers | Save reviewable Markdown to the active project.");
+
+        harness.clickOn("#generatePrdButton");
+
+        String initialPreview = harness.text("#prdDocumentPreviewArea");
+        assertTrue(harness.text("#prdDocumentStateLabel").contains("Generated PRD saved to"));
+        assertTrue(harness.text("#prdDocumentPathField").endsWith("active-prd.md"));
+        assertTrue(initialPreview.contains("## Overview"));
+        assertTrue(initialPreview.contains("## Goals"));
+        assertTrue(initialPreview.contains("## Quality Gates"));
+        assertTrue(initialPreview.contains("## User Stories"));
+        assertTrue(initialPreview.indexOf("### US-010: Edit the active PRD")
+                < initialPreview.indexOf("### US-018: Generate Markdown PRD from Interview Answers"));
+        assertTrue(Files.exists(generatedPrdPath));
+        assertEquals(normalizeLineEndings(initialPreview), normalizeLineEndings(Files.readString(generatedPrdPath)));
+
+        harness.enterText("#prdInterviewAnswerArea",
+                "US-010: Edit the active PRD | Refine the generated Markdown before execution.\n"
+                        + "US-018: Generate Markdown PRD from Interview Answers | Save reviewable Markdown to the active project.\n"
+                        + "US-019: Validate the regenerated PRD | Confirm the latest draft replaces the prior Markdown.");
+        harness.clickOn("#generatePrdButton");
+
+        String regeneratedPreview = harness.text("#prdDocumentPreviewArea");
+        assertTrue(regeneratedPreview.contains("### US-019: Validate the regenerated PRD"));
+        assertEquals(normalizeLineEndings(regeneratedPreview), normalizeLineEndings(Files.readString(generatedPrdPath)));
+    }
+
+    @Test
     void appShellCanOpenGitRepositoriesAndRejectNonGitFolders() throws Exception {
         Path nonGitDirectory = Files.createDirectory(tempDir.resolve("plain-folder"));
         Path gitRepository = createGitRepository("sample-repo");
@@ -528,5 +581,9 @@ class AppShellUiTest {
         localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
         localMetadataStorage.finishSession();
         return localMetadataStorage;
+    }
+
+    private String normalizeLineEndings(String value) {
+        return value.replace("\r\n", "\n");
     }
 }

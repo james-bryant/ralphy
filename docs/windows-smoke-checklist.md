@@ -47,8 +47,10 @@ Run this baseline even when later workflow stories are still incomplete. For any
 26. In the `PRD Interview Engine`, confirm the first question starts on `Product Context`, the sequence includes goals, quality gates, user stories, and scope boundary prompts, and the draft state message references `.ralph-tui/project-metadata.json`.
 27. Enter draft answers for at least the first two questions, move forward with `Next`, revisit the first question from the question list, and confirm the earlier answer is restored.
 28. Close and relaunch the app, confirm the last active repository is restored, and verify the PRD interview answers and current question are restored with the saved draft summary.
-29. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
-30. Close the app cleanly.
+29. Choose `Generate PRD` and confirm the active PRD path points to `.ralph-tui/prds/active-prd.md`, the preview shows `Overview`, `Goals`, `Quality Gates`, `User Stories`, and `Scope Boundaries`, and the file is written inside the active repository.
+30. Update the `User Stories` interview answer, choose `Generate PRD` again, and confirm the preview plus saved `active-prd.md` reflect the latest draft answers.
+31. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
+32. Close the app cleanly.
 
 ## Scenario A: Native Windows Execution Profile
 
@@ -57,7 +59,7 @@ Use this scenario now for profile selection, native preflight, and save verifica
 | Area | Action | Expected Result |
 | --- | --- | --- |
 | Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the native Windows profile. | The project becomes active, the repository path is shown with a Windows path, new projects gain initial `.ralph-tui/project-metadata.json`, and native preflight reports readiness or clear remediation. |
-| PRD Editing | Open `PRD Editor`, switch between the built-in presets, answer several prompts in the PRD interview flow, revisit an earlier answer, then open the active PRD, make a small Markdown edit, save, and reopen it. | Preset selection updates the preview without enabling prompt editing, interview answers persist per project and can be revisited before generation, and PRD edits persist without destructive reformatting while dirty-state/save behavior is clear. |
+| PRD Editing | Open `PRD Editor`, switch between the built-in presets, answer several prompts in the PRD interview flow, revisit an earlier answer, generate the active PRD, then update the stories answer and regenerate it. | Preset selection updates the preview without enabling prompt editing, interview answers persist per project and can be revisited before generation, and the generated Markdown is saved to `.ralph-tui/prds/active-prd.md` and refreshed from the latest draft answers on regeneration. |
 | Loop Start | Start one eligible story from `Execution`. | The story moves into a queued or running state, live output begins, and the launcher uses the native Windows profile. |
 | Pause | Request `Pause` while a story is running. | The current step is allowed to finish, the UI distinguishes pause requested from fully paused, and the next story does not start. |
 | Log Viewing | Open the latest run artifacts after the story stops. | Raw output, summary, and any linked files remain viewable from the app and on disk after restart. |
@@ -69,7 +71,7 @@ Use this scenario now for WSL profile selection, path-mapping validation, and WS
 | Area | Action | Expected Result |
 | --- | --- | --- |
 | Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the WSL profile, choose a distro, save any Windows-to-WSL path mapping, and review the WSL preflight section. | The project becomes active, the selected distro is shown, new projects gain initial `.ralph-tui/project-metadata.json`, path mapping resolves correctly, and WSL preflight reports readiness or actionable remediation. |
-| PRD Editing | Open `PRD Editor`, review the built-in preset catalog, answer several prompts in the PRD interview flow, revisit an earlier answer, then open the active PRD, make a small Markdown edit, save, and reopen it. | Preset previews remain read-only, PRD interview drafts persist per project and restore after restart, and PRD editing behavior matches the native Windows flow because authoring still happens in the Windows desktop UI. |
+| PRD Editing | Open `PRD Editor`, review the built-in preset catalog, answer several prompts in the PRD interview flow, revisit an earlier answer, generate the active PRD, then update the stories answer and regenerate it. | Preset previews remain read-only, PRD interview drafts persist per project and restore after restart, and generated Markdown authoring behavior matches the native Windows flow because PRD generation still happens in the Windows desktop UI. |
 | Loop Start | Start one eligible story from `Execution` while the WSL profile is selected. | The story moves into a queued or running state, live output begins, and the launcher runs through the saved WSL profile and mapped repository path. |
 | Pause | Request `Pause` while a story is running through WSL. | The current step is allowed to finish inside WSL, the UI reaches a paused state, and the next story does not start. |
 | Log Viewing | Open the latest run artifacts after the story stops. | Raw output, summary, distro/profile details, and linked files remain viewable from the app and on disk after restart. |
