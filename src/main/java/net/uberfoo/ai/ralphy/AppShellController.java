@@ -1,5 +1,6 @@
 package net.uberfoo.ai.ralphy;
 
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -13,12 +14,16 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 public class AppShellController {
     private static final String ACTIVE_NAV_STYLE_CLASS = "shell-nav-button-active";
@@ -71,10 +76,24 @@ public class AppShellController {
             "Save the current Markdown PRD before regenerating it from interview answers.";
     private static final String PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_IMPORT_MESSAGE =
             "Save the current Markdown PRD before importing another Markdown file.";
+    private static final String PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_PRD_JSON_IMPORT_MESSAGE =
+            "Save the current Markdown PRD before importing prd.json.";
     private static final String NO_ACTIVE_PRD_TO_SAVE_MESSAGE =
             "Generate or import a Markdown PRD before saving edits.";
     private static final String NO_ACTIVE_PRD_TO_EXPORT_MESSAGE =
             "Generate or import a Markdown PRD before exporting it.";
+    private static final String NO_ACTIVE_PRD_TO_IMPORT_JSON_MESSAGE =
+            "Generate, save, or import a Markdown PRD before importing prd.json.";
+    private static final String NO_ACTIVE_STORY_PROGRESS_SUMMARY = "No active project";
+    private static final String NO_ACTIVE_STORY_PROGRESS_DETAIL =
+            "Open a repository before tracking story progress.";
+    private static final String NO_ACTIVE_STORY_PROGRESS_CURRENT = "Current story: none";
+    private static final String NO_ACTIVE_STORY_PROGRESS_COUNTS = "0 total stories tracked.";
+    private static final String NO_SYNCED_STORY_PROGRESS_SUMMARY = "No synced stories";
+    private static final String NO_SYNCED_STORY_PROGRESS_DETAIL =
+            "Save a valid PRD so Ralphy can create persisted story records.";
+    private static final String NO_SYNCED_STORY_PROGRESS_CURRENT = "Current story: none";
+    private static final String NO_SYNCED_STORY_PROGRESS_COUNTS = "0 total stories tracked.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -97,7 +116,9 @@ public class AppShellController {
     private final PrdMarkdownGenerator prdMarkdownGenerator;
     private final PrdInterviewService prdInterviewService;
     private final MarkdownPrdFileChooser markdownPrdFileChooser;
+    private final PrdJsonFileChooser prdJsonFileChooser;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
+    private final Executor backgroundExecutor;
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
     private final ToggleGroup presetCatalogToggleGroup = new ToggleGroup();
     private final List<Button> prdInterviewQuestionButtons = new ArrayList<>();
@@ -106,6 +127,8 @@ public class AppShellController {
     private boolean renderingPrdInterview;
     private boolean renderingPrdDocument;
     private boolean prdDocumentDirty;
+    private boolean singleStorySessionInProgress;
+    private String singleStorySessionTaskId;
     private String prdDocumentEditorBaseline = "";
     private String prdDocumentLineSeparator = System.lineSeparator();
 
@@ -138,6 +161,45 @@ public class AppShellController {
 
     @FXML
     private Label executionProfileSummaryLabel;
+
+    @FXML
+    private Label singleStorySessionDetailLabel;
+
+    @FXML
+    private Label singleStorySessionMessageLabel;
+
+    @FXML
+    private Label singleStorySessionSummaryLabel;
+
+    @FXML
+    private Label storyProgressSummaryLabel;
+
+    @FXML
+    private Label storyProgressDetailLabel;
+
+    @FXML
+    private Label storyProgressCurrentStoryLabel;
+
+    @FXML
+    private Label storyProgressOverallCountsLabel;
+
+    @FXML
+    private Label storyProgressPendingCountLabel;
+
+    @FXML
+    private Label storyProgressBlockedCountLabel;
+
+    @FXML
+    private Label storyProgressRunningCountLabel;
+
+    @FXML
+    private Label storyProgressPassedCountLabel;
+
+    @FXML
+    private Label storyProgressFailedCountLabel;
+
+    @FXML
+    private Label storyProgressPausedCountLabel;
 
     @FXML
     private Label prdValidationDetailLabel;
@@ -230,6 +292,9 @@ public class AppShellController {
     private VBox prdInterviewCard;
 
     @FXML
+    private Button importPrdJsonButton;
+
+    @FXML
     private Button savePrdDocumentButton;
 
     @FXML
@@ -299,6 +364,9 @@ public class AppShellController {
     private Button saveExecutionProfileButton;
 
     @FXML
+    private Button startSingleStoryButton;
+
+    @FXML
     private Button runNativePreflightButton;
 
     @FXML
@@ -346,14 +414,18 @@ public class AppShellController {
                               PrdMarkdownGenerator prdMarkdownGenerator,
                               PrdInterviewService prdInterviewService,
                               MarkdownPrdFileChooser markdownPrdFileChooser,
-                              RepositoryDirectoryChooser repositoryDirectoryChooser) {
+                              PrdJsonFileChooser prdJsonFileChooser,
+                              RepositoryDirectoryChooser repositoryDirectoryChooser,
+                              @Qualifier("ralphyBackgroundExecutor") Executor backgroundExecutor) {
         this.shellDescriptor = shellDescriptor;
         this.activeProjectService = activeProjectService;
         this.presetCatalogService = presetCatalogService;
         this.prdMarkdownGenerator = prdMarkdownGenerator;
         this.prdInterviewService = prdInterviewService;
         this.markdownPrdFileChooser = markdownPrdFileChooser;
+        this.prdJsonFileChooser = prdJsonFileChooser;
         this.repositoryDirectoryChooser = repositoryDirectoryChooser;
+        this.backgroundExecutor = backgroundExecutor;
     }
 
     @FXML
@@ -374,6 +446,7 @@ public class AppShellController {
         prdInterviewDraftStateLabel.managedProperty().bind(prdInterviewDraftStateLabel.visibleProperty());
         prdDocumentStateLabel.managedProperty().bind(prdDocumentStateLabel.visibleProperty());
         prdValidationErrorsLabel.managedProperty().bind(prdValidationErrorsLabel.visibleProperty());
+        singleStorySessionMessageLabel.managedProperty().bind(singleStorySessionMessageLabel.visibleProperty());
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
@@ -491,6 +564,7 @@ public class AppShellController {
         renderNativeWindowsPreflight();
         renderWslPreflight();
         renderPrdValidation();
+        renderSingleStorySession();
         setExecutionProfileMessage("");
     }
 
@@ -498,6 +572,7 @@ public class AppShellController {
     private void runNativeWindowsPreflight() {
         ActiveProjectService.NativeWindowsPreflightRunResult runResult = activeProjectService.runNativeWindowsPreflight();
         renderNativeWindowsPreflight();
+        renderSingleStorySession();
         setNativePreflightMessage(runResult.message());
     }
 
@@ -505,6 +580,7 @@ public class AppShellController {
     private void runWslPreflight() {
         ActiveProjectService.WslPreflightRunResult runResult = activeProjectService.runWslPreflight();
         renderWslPreflight();
+        renderSingleStorySession();
         setWslPreflightMessage(runResult.message());
     }
 
@@ -543,6 +619,8 @@ public class AppShellController {
         if (importResult.markdown() != null) {
             renderGeneratedPrd(activeProject.get());
             renderPrdValidation();
+            renderSingleStorySession();
+            renderStoryProgressDashboard();
         }
         if (!importResult.successful()) {
             setPrdDocumentState(importResult.message());
@@ -551,6 +629,40 @@ public class AppShellController {
 
         setPrdDocumentState("Imported Markdown PRD from " + importResult.importedFromPath()
                 + " into " + importResult.activePrdPath() + ".");
+    }
+
+    @FXML
+    private void importPrdJson() {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            setPrdDocumentState(NO_ACTIVE_PRD_DOCUMENT_MESSAGE);
+            return;
+        }
+        if (prdDocumentDirty) {
+            setPrdDocumentState(PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_PRD_JSON_IMPORT_MESSAGE);
+            return;
+        }
+        if (activeProjectService.activePrdMarkdown().isEmpty()) {
+            setPrdDocumentState(NO_ACTIVE_PRD_TO_IMPORT_JSON_MESSAGE);
+            return;
+        }
+
+        Optional<Path> selectedPath = prdJsonFileChooser.chooseImportFile(
+                importPrdJsonButton.getScene().getWindow(),
+                initialImportPrdJsonPath(activeProject.get())
+        );
+        if (selectedPath.isEmpty()) {
+            return;
+        }
+
+        ActiveProjectService.PrdJsonImportResult importResult = activeProjectService.importPrdJson(selectedPath.get());
+        if (importResult.taskState() != null) {
+            renderGeneratedPrd(activeProject.get());
+            renderPrdValidation();
+            renderSingleStorySession();
+            renderStoryProgressDashboard();
+        }
+        setPrdDocumentState(formatPrdJsonImportMessage(importResult));
     }
 
     @FXML
@@ -612,6 +724,8 @@ public class AppShellController {
 
         renderGeneratedPrd(activeProject.get());
         renderPrdValidation();
+        renderSingleStorySession();
+        renderStoryProgressDashboard();
         setPrdDocumentState("Generated PRD saved to " + saveResult.path()
                 + ". Edit it below and save when you refine the plan.");
     }
@@ -648,6 +762,10 @@ public class AppShellController {
     private Path initialExportPrdPath(ActiveProject activeProject) {
         return trackedMarkdownPrdPath(MarkdownPrdExchangeLocations::lastExportedPath)
                 .orElse(activeProject.activePrdPath());
+    }
+
+    private Path initialImportPrdJsonPath(ActiveProject activeProject) {
+        return activeProject.activePrdJsonPath();
     }
 
     private Optional<Path> trackedMarkdownPrdPath(
@@ -707,6 +825,8 @@ public class AppShellController {
             renderNativeWindowsPreflight();
             renderWslPreflight();
             renderPrdValidation();
+            renderSingleStorySession();
+            renderStoryProgressDashboard();
             renderPrdInterview(null);
             renderGeneratedPrd(null);
             return;
@@ -720,6 +840,8 @@ public class AppShellController {
         renderNativeWindowsPreflight();
         renderWslPreflight();
         renderPrdValidation();
+        renderSingleStorySession();
+        renderStoryProgressDashboard();
         renderPrdInterview(activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
         renderGeneratedPrd(activeProject);
     }
@@ -771,6 +893,227 @@ public class AppShellController {
         ActiveProjectService.RunRecoveryCandidate candidate = runRecoveryCandidate.get();
         executionOverviewHeadlineLabel.setText(candidate.action().label() + " run available");
         executionOverviewDetailLabel.setText(describeRunRecovery(candidate));
+    }
+
+    private void renderSingleStorySession() {
+        ActiveProjectService.SingleStorySessionAvailability availability =
+                activeProjectService.singleStorySessionAvailability(selectedPresetUseCase());
+        singleStorySessionSummaryLabel.setText(availability.summary());
+        singleStorySessionDetailLabel.setText(availability.detail());
+        startSingleStoryButton.setText(selectedPresetUseCase() == PresetUseCase.RETRY_FIX
+                ? "Retry Failed Story"
+                : "Start Single Story");
+        startSingleStoryButton.setDisable(!availability.startable() || singleStorySessionInProgress);
+    }
+
+    private void renderStoryProgressDashboard() {
+        StoryProgressDashboard dashboard = buildStoryProgressDashboard();
+        storyProgressSummaryLabel.setText(dashboard.summary());
+        storyProgressDetailLabel.setText(dashboard.detail());
+        storyProgressCurrentStoryLabel.setText(dashboard.currentStory());
+        storyProgressOverallCountsLabel.setText(dashboard.overallCounts());
+        storyProgressPendingCountLabel.setText(Integer.toString(dashboard.pendingCount()));
+        storyProgressBlockedCountLabel.setText(Integer.toString(dashboard.blockedCount()));
+        storyProgressRunningCountLabel.setText(Integer.toString(dashboard.runningCount()));
+        storyProgressPassedCountLabel.setText(Integer.toString(dashboard.passedCount()));
+        storyProgressFailedCountLabel.setText(Integer.toString(dashboard.failedCount()));
+        storyProgressPausedCountLabel.setText(Integer.toString(dashboard.pausedCount()));
+    }
+
+    private StoryProgressDashboard buildStoryProgressDashboard() {
+        if (activeProjectService.activeProject().isEmpty()) {
+            return new StoryProgressDashboard(
+                    NO_ACTIVE_STORY_PROGRESS_SUMMARY,
+                    NO_ACTIVE_STORY_PROGRESS_DETAIL,
+                    NO_ACTIVE_STORY_PROGRESS_CURRENT,
+                    NO_ACTIVE_STORY_PROGRESS_COUNTS,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+            );
+        }
+
+        Optional<PrdTaskState> taskState = activeProjectService.prdTaskState();
+        if (taskState.isEmpty() || taskState.get().tasks().isEmpty()) {
+            return new StoryProgressDashboard(
+                    NO_SYNCED_STORY_PROGRESS_SUMMARY,
+                    NO_SYNCED_STORY_PROGRESS_DETAIL,
+                    NO_SYNCED_STORY_PROGRESS_CURRENT,
+                    NO_SYNCED_STORY_PROGRESS_COUNTS,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+            );
+        }
+
+        String pausedStoryId = pausedStoryIdFromRecovery();
+        EnumMap<StoryDashboardState, Integer> counts = new EnumMap<>(StoryDashboardState.class);
+        for (StoryDashboardState state : StoryDashboardState.values()) {
+            counts.put(state, 0);
+        }
+
+        List<DashboardStoryState> dashboardStories = taskState.get().tasks().stream()
+                .map(task -> new DashboardStoryState(task, dashboardStateFor(task, pausedStoryId)))
+                .toList();
+        for (DashboardStoryState dashboardStory : dashboardStories) {
+            StoryDashboardState state = dashboardStory.state();
+            counts.put(state, counts.get(state) + 1);
+        }
+
+        DashboardStoryState focusedStory = findFocusedStory(dashboardStories).orElse(null);
+        int totalStories = taskState.get().tasks().size();
+        int passedCount = counts.get(StoryDashboardState.PASSED);
+        int outstandingCount = totalStories - passedCount;
+
+        String summary;
+        String detail;
+        if (counts.get(StoryDashboardState.RUNNING) > 0) {
+            summary = "Execution running";
+            detail = focusedStory == null
+                    ? "A story is in progress and the counts update from persisted task state."
+                    : focusedStory.task().taskId()
+                    + " is running and the dashboard reflects the live execution state.";
+        } else if (counts.get(StoryDashboardState.PAUSED) > 0) {
+            summary = "Execution paused";
+            detail = focusedStory == null
+                    ? "A resumable story was restored from persisted metadata."
+                    : focusedStory.task().taskId()
+                    + " was restored from persisted metadata and is waiting to resume.";
+        } else if (passedCount == totalStories) {
+            summary = "All synced stories passed";
+            detail = totalStories + " of " + totalStories + " stories are in the passed state.";
+        } else if (counts.get(StoryDashboardState.FAILED) > 0) {
+            summary = "Execution needs review";
+            detail = counts.get(StoryDashboardState.FAILED)
+                    + " failed stor"
+                    + (counts.get(StoryDashboardState.FAILED) == 1 ? "y requires" : "ies require")
+                    + " attention before the next loop step.";
+        } else if (counts.get(StoryDashboardState.BLOCKED) > 0
+                && counts.get(StoryDashboardState.PENDING) == 0
+                && counts.get(StoryDashboardState.RUNNING) == 0
+                && counts.get(StoryDashboardState.PAUSED) == 0) {
+            summary = "Execution blocked";
+            detail = counts.get(StoryDashboardState.BLOCKED)
+                    + " blocked stor"
+                    + (counts.get(StoryDashboardState.BLOCKED) == 1 ? "y is" : "ies are")
+                    + " preventing forward progress.";
+        } else {
+            summary = "Execution ready";
+            detail = counts.get(StoryDashboardState.PENDING)
+                    + " pending, "
+                    + counts.get(StoryDashboardState.BLOCKED)
+                    + " blocked, and "
+                    + counts.get(StoryDashboardState.FAILED)
+                    + " failed stories are currently tracked.";
+        }
+
+        return new StoryProgressDashboard(
+                summary,
+                detail,
+                formatCurrentStory(focusedStory),
+                totalStories
+                        + " total stories | "
+                        + passedCount
+                        + " passed | "
+                        + outstandingCount
+                        + " not yet done.",
+                counts.get(StoryDashboardState.PENDING),
+                counts.get(StoryDashboardState.BLOCKED),
+                counts.get(StoryDashboardState.RUNNING),
+                counts.get(StoryDashboardState.PASSED),
+                counts.get(StoryDashboardState.FAILED),
+                counts.get(StoryDashboardState.PAUSED)
+        );
+    }
+
+    private Optional<DashboardStoryState> findFocusedStory(List<DashboardStoryState> dashboardStories) {
+        for (StoryDashboardState preferredState : List.of(
+                StoryDashboardState.RUNNING,
+                StoryDashboardState.PAUSED,
+                StoryDashboardState.FAILED,
+                StoryDashboardState.PENDING,
+                StoryDashboardState.BLOCKED,
+                StoryDashboardState.PASSED
+        )) {
+            Optional<DashboardStoryState> matchingStory = dashboardStories.stream()
+                    .filter(dashboardStory -> dashboardStory.state() == preferredState)
+                    .findFirst();
+            if (matchingStory.isPresent()) {
+                return matchingStory;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private StoryDashboardState dashboardStateFor(PrdTaskRecord task, String pausedStoryId) {
+        if (singleStorySessionInProgress
+                && hasText(singleStorySessionTaskId)
+                && task.taskId().equals(singleStorySessionTaskId)) {
+            return StoryDashboardState.RUNNING;
+        }
+        if (hasText(pausedStoryId)
+                && task.taskId().equals(pausedStoryId)
+                && task.status() == PrdTaskStatus.RUNNING) {
+            return StoryDashboardState.PAUSED;
+        }
+
+        return switch (task.status()) {
+            case READY -> StoryDashboardState.PENDING;
+            case BLOCKED -> StoryDashboardState.BLOCKED;
+            case RUNNING -> StoryDashboardState.RUNNING;
+            case COMPLETED -> StoryDashboardState.PASSED;
+            case FAILED -> StoryDashboardState.FAILED;
+        };
+    }
+
+    private String pausedStoryIdFromRecovery() {
+        if (singleStorySessionInProgress) {
+            return null;
+        }
+
+        return activeProjectService.latestRunRecoveryState()
+                .filter(candidate -> candidate.action() == ActiveProjectService.RunRecoveryAction.RESUMABLE)
+                .map(ActiveProjectService.RunRecoveryCandidate::storyId)
+                .orElse(null);
+    }
+
+    private String formatCurrentStory(DashboardStoryState focusedStory) {
+        if (focusedStory == null) {
+            return "Current story: none";
+        }
+
+        return switch (focusedStory.state()) {
+            case RUNNING -> "Current story: Running | "
+                    + focusedStory.task().taskId()
+                    + " - "
+                    + focusedStory.task().title();
+            case PAUSED -> "Current story: Paused | "
+                    + focusedStory.task().taskId()
+                    + " - "
+                    + focusedStory.task().title();
+            case FAILED -> "Current story: Failed | "
+                    + focusedStory.task().taskId()
+                    + " - "
+                    + focusedStory.task().title();
+            case PENDING -> "Current story: Next pending | "
+                    + focusedStory.task().taskId()
+                    + " - "
+                    + focusedStory.task().title();
+            case BLOCKED -> "Current story: Blocked | "
+                    + focusedStory.task().taskId()
+                    + " - "
+                    + focusedStory.task().title();
+            case PASSED -> "Current story: Most recent pass | "
+                    + focusedStory.task().taskId()
+                    + " - "
+                    + focusedStory.task().title();
+        };
     }
 
     private String describeRunRecovery(ActiveProjectService.RunRecoveryCandidate candidate) {
@@ -1010,6 +1353,49 @@ public class AppShellController {
         Clipboard.getSystemClipboard().setContent(clipboardContent);
     }
 
+    @FXML
+    private void startSingleStorySession() {
+        if (singleStorySessionInProgress) {
+            return;
+        }
+
+        ActiveProjectService.SingleStorySessionAvailability availability =
+                activeProjectService.singleStorySessionAvailability(selectedPresetUseCase());
+        if (!availability.startable()) {
+            setSingleStorySessionMessage(availability.detail());
+            renderSingleStorySession();
+            renderStoryProgressDashboard();
+            return;
+        }
+
+        singleStorySessionInProgress = true;
+        singleStorySessionTaskId = availability.story().taskId();
+        setSingleStorySessionMessage("Starting " + availability.story().taskId() + "...");
+        renderSingleStorySession();
+        renderStoryProgressDashboard();
+
+        CompletableFuture.supplyAsync(
+                        () -> activeProjectService.startEligibleSingleStory(selectedPresetUseCase()),
+                        backgroundExecutor
+                )
+                .whenComplete((result, throwable) -> Platform.runLater(() -> {
+                    singleStorySessionInProgress = false;
+                    singleStorySessionTaskId = null;
+                    if (throwable != null) {
+                        setSingleStorySessionMessage("Single story session failed: " + throwable.getMessage());
+                    } else {
+                        setSingleStorySessionMessage(result.detail());
+                    }
+                    renderActiveProject(activeProjectService.activeProject().orElse(null));
+                }));
+    }
+
+    private void setSingleStorySessionMessage(String message) {
+        boolean visible = hasText(message);
+        singleStorySessionMessageLabel.setText(visible ? message : "");
+        singleStorySessionMessageLabel.setVisible(visible);
+    }
+
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
     }
@@ -1027,9 +1413,10 @@ public class AppShellController {
         configurePresetToggle(storyImplementationPresetRadioButton, PresetUseCase.STORY_IMPLEMENTATION);
         configurePresetToggle(retryFixPresetRadioButton, PresetUseCase.RETRY_FIX);
         configurePresetToggle(runSummaryPresetRadioButton, PresetUseCase.RUN_SUMMARY);
-        presetCatalogToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
-                renderPresetPreview(selectedPresetUseCase())
-        );
+        presetCatalogToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) -> {
+            renderPresetPreview(selectedPresetUseCase());
+            renderSingleStorySession();
+        });
         presetPromptPreviewArea.setEditable(false);
         prdCreationPresetRadioButton.setSelected(true);
         renderPresetPreview(PresetUseCase.PRD_CREATION);
@@ -1217,6 +1604,8 @@ public class AppShellController {
 
         renderGeneratedPrd(activeProject.get());
         renderPrdValidation();
+        renderSingleStorySession();
+        renderStoryProgressDashboard();
         setPrdDocumentState((manualSave ? "Markdown PRD saved to " : "Pending Markdown PRD edits saved to ")
                 + saveResult.path() + ".");
         return true;
@@ -1227,6 +1616,7 @@ public class AppShellController {
         prdDocumentCard.setDisable(!activeProjectPresent);
         generatePrdButton.setDisable(!activeProjectPresent);
         importPrdDocumentButton.setDisable(!activeProjectPresent);
+        importPrdJsonButton.setDisable(!activeProjectPresent);
         exportPrdDocumentButton.setDisable(true);
         savePrdDocumentButton.setDisable(true);
         setPrdDocumentDirty(false);
@@ -1413,6 +1803,21 @@ public class AppShellController {
         prdDocumentStateLabel.setVisible(hasMessage);
     }
 
+    private String formatPrdJsonImportMessage(ActiveProjectService.PrdJsonImportResult importResult) {
+        if (importResult.conflictDetails().isEmpty()) {
+            return importResult.message();
+        }
+
+        return importResult.message()
+                + System.lineSeparator()
+                + "Conflicts:"
+                + System.lineSeparator()
+                + importResult.conflictDetails().stream()
+                .map(detail -> "- " + detail)
+                .reduce((left, right) -> left + System.lineSeparator() + right)
+                .orElse("");
+    }
+
     private String capitalize(String value) {
         if (value == null || value.isBlank()) {
             return "";
@@ -1421,5 +1826,29 @@ public class AppShellController {
     }
 
     private record ShellSection(String title, String workspaceText, String statusText) {
+    }
+
+    private enum StoryDashboardState {
+        PENDING,
+        BLOCKED,
+        RUNNING,
+        PASSED,
+        FAILED,
+        PAUSED
+    }
+
+    private record DashboardStoryState(PrdTaskRecord task, StoryDashboardState state) {
+    }
+
+    private record StoryProgressDashboard(String summary,
+                                          String detail,
+                                          String currentStory,
+                                          String overallCounts,
+                                          int pendingCount,
+                                          int blockedCount,
+                                          int runningCount,
+                                          int passedCount,
+                                          int failedCount,
+                                          int pausedCount) {
     }
 }

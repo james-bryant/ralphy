@@ -105,6 +105,206 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellShowsSingleStorySessionAsBlockedWithoutAnActiveProject() throws Exception {
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(tempDir.resolve("storage"));
+
+        assertEquals("No active project", harness.text("#singleStorySessionSummaryLabel"));
+        assertTrue(harness.text("#singleStorySessionDetailLabel")
+                .contains("Open a repository"));
+        assertTrue(harness.isDisabled("#startSingleStoryButton"));
+        assertEquals("No active project", harness.text("#storyProgressSummaryLabel"));
+        assertEquals("Current story: none", harness.text("#storyProgressCurrentStoryLabel"));
+        assertEquals("0", harness.text("#storyProgressPendingCountLabel"));
+        assertEquals("0", harness.text("#storyProgressPausedCountLabel"));
+    }
+
+    @Test
+    void appShellShowsStoryProgressDashboardCountsForPersistedStories() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("story-progress-dashboard-repo");
+        seedStoryProgressArtifacts(repository, storyProgressDashboardMarkdown(), """
+                {
+                  "name": "Story Progress Dashboard",
+                  "branchName": "ralph/story-progress-dashboard",
+                  "description": "Track persisted story states in the execution dashboard.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-028",
+                      "title": "Show pending story counts",
+                      "description": "As a user, I want pending stories counted.",
+                      "acceptanceCriteria": [
+                        "Pending stories appear in the dashboard.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Pending stories appear in the dashboard.",
+                      "ralphyStatus": "READY"
+                    },
+                    {
+                      "id": "US-029",
+                      "title": "Show blocked story counts",
+                      "description": "As a user, I want blocked stories counted.",
+                      "acceptanceCriteria": [
+                        "Blocked stories appear in the dashboard.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 2,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Blocked stories appear in the dashboard.",
+                      "ralphyStatus": "BLOCKED"
+                    },
+                    {
+                      "id": "US-030",
+                      "title": "Show the current running story",
+                      "description": "As a user, I want the running story highlighted.",
+                      "acceptanceCriteria": [
+                        "The running story appears as the current story.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 3,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "The running story appears as the current story.",
+                      "ralphyStatus": "RUNNING"
+                    },
+                    {
+                      "id": "US-031",
+                      "title": "Show passed story counts",
+                      "description": "As a user, I want passed stories counted.",
+                      "acceptanceCriteria": [
+                        "Passed stories appear in the dashboard.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 4,
+                      "passes": true,
+                      "dependsOn": [],
+                      "completionNotes": "Completed in a prior run.",
+                      "outcome": "Passed stories appear in the dashboard.",
+                      "ralphyStatus": "PASSED"
+                    },
+                    {
+                      "id": "US-032",
+                      "title": "Show failed story counts",
+                      "description": "As a user, I want failed stories counted.",
+                      "acceptanceCriteria": [
+                        "Failed stories appear in the dashboard.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 5,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Failed stories appear in the dashboard.",
+                      "ralphyStatus": "FAILED"
+                    }
+                  ]
+                }
+                """);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+
+        assertEquals("Execution running", harness.text("#storyProgressSummaryLabel"));
+        assertTrue(harness.text("#storyProgressDetailLabel").contains("US-030"));
+        assertTrue(harness.text("#storyProgressCurrentStoryLabel").contains("Running | US-030"));
+        assertTrue(harness.text("#storyProgressOverallCountsLabel").contains("5 total stories"));
+        assertEquals("1", harness.text("#storyProgressPendingCountLabel"));
+        assertEquals("1", harness.text("#storyProgressBlockedCountLabel"));
+        assertEquals("1", harness.text("#storyProgressRunningCountLabel"));
+        assertEquals("1", harness.text("#storyProgressPassedCountLabel"));
+        assertEquals("1", harness.text("#storyProgressFailedCountLabel"));
+        assertEquals("0", harness.text("#storyProgressPausedCountLabel"));
+    }
+
+    @Test
+    void appShellRestoresPausedStoryProgressDashboardStateAfterRestart() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("paused-story-progress-repo");
+        seedStoryProgressArtifacts(repository, pausedStoryProgressMarkdown(), """
+                {
+                  "name": "Paused Story Progress",
+                  "branchName": "ralph/paused-story-progress",
+                  "description": "Restore paused dashboard state from persisted metadata.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-028",
+                      "title": "Restore the paused story",
+                      "description": "As a user, I want a resumable story restored.",
+                      "acceptanceCriteria": [
+                        "The paused story appears after restart.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "The paused story appears after restart.",
+                      "ralphyStatus": "RUNNING"
+                    },
+                    {
+                      "id": "US-029",
+                      "title": "Keep pending stories visible",
+                      "description": "As a user, I want pending stories preserved.",
+                      "acceptanceCriteria": [
+                        "Pending story counts survive restart.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 2,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Pending story counts survive restart.",
+                      "ralphyStatus": "READY"
+                    }
+                  ]
+                }
+                """);
+        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(new LocalMetadataStorage.RunMetadataRecord(
+                "run-paused-1",
+                projectId,
+                "US-028",
+                "RUNNING",
+                "2026-03-15T20:00:00Z",
+                null
+        )));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertEquals("Execution paused", harness.text("#storyProgressSummaryLabel"));
+        assertTrue(harness.text("#storyProgressDetailLabel").contains("US-028"));
+        assertTrue(harness.text("#storyProgressCurrentStoryLabel").contains("Paused | US-028"));
+        assertTrue(harness.text("#storyProgressOverallCountsLabel").contains("2 total stories"));
+        assertEquals("1", harness.text("#storyProgressPendingCountLabel"));
+        assertEquals("0", harness.text("#storyProgressBlockedCountLabel"));
+        assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
+        assertEquals("0", harness.text("#storyProgressPassedCountLabel"));
+        assertEquals("0", harness.text("#storyProgressFailedCountLabel"));
+        assertEquals("1", harness.text("#storyProgressPausedCountLabel"));
+    }
+
+    @Test
     void appShellCanCaptureRevisitAndRestorePrdInterviewDraftAnswers() throws Exception {
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("prd-interview-repo");
@@ -245,6 +445,109 @@ class AppShellUiTest {
         String metadataDocument = Files.readString(repository.resolve(".ralph-tui").resolve("project-metadata.json"));
         assertTrue(metadataDocument.contains(importedMarkdownPath.toAbsolutePath().normalize().toString().replace("\\", "\\\\")));
         assertTrue(metadataDocument.contains(exportedMarkdownPath.toAbsolutePath().normalize().toString().replace("\\", "\\\\")));
+    }
+
+    @Test
+    void appShellCanImportPrdJsonAndSurfaceMarkdownConflictsClearly() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("import-prd-json-ui-repo");
+        Path activePrdPath = repository.resolve(".ralph-tui").resolve("prds").resolve("active-prd.md");
+        Path importedPrdJsonPath = tempDir.resolve("external-import-prd.json");
+        Files.createDirectories(activePrdPath.getParent());
+        Files.writeString(activePrdPath, """
+                # PRD: Task Sync Plan
+
+                ## Overview
+                Import tracker changes safely.
+
+                ## Goals
+                - Keep Markdown authoritative
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+
+                ## User Stories
+                ### US-022: Sync PRD stories
+                **Outcome:** Internal tasks are created from the active PRD.
+
+                ### US-023: Export prd json
+                **Outcome:** Internal task state can be shared outside the app.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Tracker import
+
+                ### Out of Scope
+                - Editing tracker files in place
+                """);
+        Files.writeString(importedPrdJsonPath, """
+                {
+                  "name": "Task Sync Plan",
+                  "branchName": "ralph/task-sync-plan",
+                  "description": "Import tracker changes safely.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-022",
+                      "title": "Sync PRD tracker stories",
+                      "description": "As a user, I want tracker edits reflected.",
+                      "acceptanceCriteria": [
+                        "Tracker wording changed outside the app.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": true,
+                      "dependsOn": [],
+                      "completionNotes": "Completed in tracker.",
+                      "outcome": "Tracker wording changed outside the app.",
+                      "ralphyStatus": "COMPLETED"
+                    },
+                    {
+                      "id": "US-023",
+                      "title": "Export prd json",
+                      "description": "As a user, I want exports preserved.",
+                      "acceptanceCriteria": [
+                        "Internal task state can be shared outside the app.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 2,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Internal task state can be shared outside the app.",
+                      "ralphyStatus": "READY"
+                    }
+                  ]
+                }
+                """);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+        PrdJsonFileChooser prdJsonFileChooser = harness.getRequiredBean(PrdJsonFileChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+        harness.clickOn("#prdEditorNavButton");
+
+        prdJsonFileChooser.queueSelectionForTest(importedPrdJsonPath);
+        harness.clickOn("#importPrdJsonButton");
+
+        String importMessage = harness.text("#prdDocumentStateLabel");
+        assertTrue(importMessage.contains("Imported compatible prd.json"));
+        assertTrue(importMessage.contains("Conflicts:"));
+        assertTrue(importMessage.contains("US-022 differs between active Markdown and imported prd.json"));
+        assertTrue(harness.text("#prdDocumentPreviewArea").contains("### US-022: Sync PRD stories"));
+
+        ActiveProjectService activeProjectService = harness.getRequiredBean(ActiveProjectService.class);
+        assertEquals(PrdTaskStatus.COMPLETED,
+                activeProjectService.prdTaskState().orElseThrow().taskById("US-022").orElseThrow().status());
+        assertTrue(Files.readString(repository.resolve(".ralph-tui").resolve("prd-json").resolve("prd.json"))
+                .contains("\"title\" : \"Sync PRD stories\""));
     }
 
     @Test
@@ -751,6 +1054,81 @@ class AppShellUiTest {
         localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
         localMetadataStorage.finishSession();
         return localMetadataStorage;
+    }
+
+    private void seedStoryProgressArtifacts(Path repository, String markdown, String prdJson) throws IOException {
+        ActiveProject activeProject = new ActiveProject(repository);
+        Files.createDirectories(activeProject.prdsDirectoryPath());
+        Files.createDirectories(activeProject.prdJsonDirectoryPath());
+        Files.writeString(activeProject.activePrdPath(), markdown);
+        Files.writeString(activeProject.activePrdJsonPath(), prdJson);
+    }
+
+    private String storyProgressDashboardMarkdown() {
+        return """
+                # PRD: Story Progress Dashboard
+
+                ## Overview
+                Track persisted story states in the execution dashboard.
+
+                ## Goals
+                - Show running work and overall counts clearly.
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+
+                ## User Stories
+                ### US-028: Show pending story counts
+                **Outcome:** Pending stories appear in the dashboard.
+
+                ### US-029: Show blocked story counts
+                **Outcome:** Blocked stories appear in the dashboard.
+
+                ### US-030: Show the current running story
+                **Outcome:** The running story appears as the current story.
+
+                ### US-031: Show passed story counts
+                **Outcome:** Passed stories appear in the dashboard.
+
+                ### US-032: Show failed story counts
+                **Outcome:** Failed stories appear in the dashboard.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Persisted story progress
+
+                ### Out of Scope
+                - Multi-project execution
+                """;
+    }
+
+    private String pausedStoryProgressMarkdown() {
+        return """
+                # PRD: Paused Story Progress
+
+                ## Overview
+                Restore paused dashboard state from persisted metadata.
+
+                ## Goals
+                - Resume work with the same story focus after restart.
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+
+                ## User Stories
+                ### US-028: Restore the paused story
+                **Outcome:** The paused story appears after restart.
+
+                ### US-029: Keep pending stories visible
+                **Outcome:** Pending story counts survive restart.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Persisted dashboard state
+
+                ### Out of Scope
+                - Live log streaming
+                """;
     }
 
     private String normalizeLineEndings(String value) {

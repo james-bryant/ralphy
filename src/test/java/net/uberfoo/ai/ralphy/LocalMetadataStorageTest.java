@@ -39,7 +39,7 @@ class LocalMetadataStorageTest {
         LocalMetadataStorage.ProfileRecord profileRecord = restartedSnapshot.profiles().getFirst();
         ActiveProject activeProject = new ActiveProject(repositoryPath);
 
-        assertEquals(3, restartedSnapshot.schemaVersion());
+        assertEquals(4, restartedSnapshot.schemaVersion());
         assertEquals(repositoryPath.toAbsolutePath().normalize().toString(), projectRecord.repositoryPath());
         assertEquals(activeProject.activePrdPath().toString(), projectRecord.storagePaths().activePrdPath());
         assertEquals(activeProject.prdJsonDirectoryPath().toString(), projectRecord.storagePaths().prdJsonDirectoryPath());
@@ -100,7 +100,7 @@ class LocalMetadataStorageTest {
                 LocalMetadataStorage.forTest(storageDirectory).snapshot();
         ActiveProject activeProject = new ActiveProject(repositoryPath);
 
-        assertEquals(3, migratedSnapshot.schemaVersion());
+        assertEquals(4, migratedSnapshot.schemaVersion());
         assertEquals(activeProject.artifactsDirectoryPath().toString(),
                 migratedSnapshot.projects().getFirst().storagePaths().artifactsDirectoryPath());
         assertEquals(activeProject.logsDirectoryPath().toString(),
@@ -180,6 +180,82 @@ class LocalMetadataStorageTest {
         assertNull(migratedProfile.wslDistribution());
         assertNull(migratedProfile.windowsPathPrefix());
         assertNull(migratedProfile.wslPathPrefix());
+    }
+
+    @Test
+    void versionThreeMetadataStoreMigratesRunMetadataWithoutArtifactPaths() throws IOException {
+        Path storageDirectory = tempDir.resolve("schema-three-storage");
+        Files.createDirectories(storageDirectory);
+        Path repositoryPath = Files.createDirectory(tempDir.resolve("schema-three-repo"));
+        Path storageFile = storageDirectory.resolve("metadata-store.json");
+        String escapedRepositoryPath = escapeJson(repositoryPath.toAbsolutePath().normalize().toString());
+        String escapedProjectMetadataPath = escapeJson(
+                repositoryPath.resolve(".ralph-tui").resolve("project-metadata.json").toAbsolutePath().normalize().toString()
+        );
+
+        Files.writeString(storageFile, """
+                {
+                  "schemaVersion": 3,
+                  "projects": [
+                    {
+                      "projectId": "project-1",
+                      "displayName": "schema-three-repo",
+                      "repositoryPath": "%s",
+                      "projectMetadataPath": "%s",
+                      "storagePaths": {
+                        "ralphyDirectoryPath": "%s",
+                        "prdsDirectoryPath": "%s",
+                        "activePrdPath": "%s",
+                        "prdJsonDirectoryPath": "%s",
+                        "activePrdJsonPath": "%s",
+                        "promptsDirectoryPath": "%s",
+                        "logsDirectoryPath": "%s",
+                        "artifactsDirectoryPath": "%s"
+                      },
+                      "createdAt": "2026-03-15T00:00:00Z",
+                      "lastOpenedAt": "2026-03-15T00:00:00Z"
+                    }
+                  ],
+                  "sessions": [],
+                  "profiles": [],
+                  "runMetadata": [
+                    {
+                      "runId": "run-legacy-1",
+                      "projectId": "project-1",
+                      "storyId": "US-025",
+                      "status": "SUCCEEDED",
+                      "startedAt": "2026-03-15T20:00:00Z",
+                      "endedAt": "2026-03-15T20:05:00Z",
+                      "profileType": "POWERSHELL",
+                      "workingDirectory": "%s",
+                      "processId": 1234,
+                      "exitCode": 0,
+                      "command": ["powershell.exe", "-NoLogo", "-NoProfile", "-Command", "& 'codex' 'exec' '-'"]
+                    }
+                  ]
+                }
+                """.formatted(
+                escapedRepositoryPath,
+                escapedProjectMetadataPath,
+                escapeJson(repositoryPath.resolve(".ralph-tui").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prds").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prds").resolve("active-prd.md")
+                        .toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prd-json").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prd-json").resolve("prd.json")
+                        .toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("prompts").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("logs").toAbsolutePath().normalize().toString()),
+                escapeJson(repositoryPath.resolve(".ralph-tui").resolve("artifacts").toAbsolutePath().normalize().toString()),
+                escapedRepositoryPath
+        ), StandardCharsets.UTF_8);
+
+        LocalMetadataStorage.LocalMetadataSnapshot migratedSnapshot =
+                LocalMetadataStorage.forTest(storageDirectory).snapshot();
+
+        assertEquals(4, migratedSnapshot.schemaVersion());
+        assertEquals(new LocalMetadataStorage.RunArtifactPaths(null, null, null, null, null),
+                migratedSnapshot.runMetadata().getFirst().artifactPaths());
     }
 
     private String escapeJson(String value) {

@@ -24,7 +24,7 @@ import java.util.UUID;
 
 @Component
 public class LocalMetadataStorage {
-    private static final int SCHEMA_VERSION = 3;
+    private static final int SCHEMA_VERSION = 4;
     private static final String STORAGE_FILE_NAME = "metadata-store.json";
     private static final String DEFAULT_PROFILE_TYPE = ExecutionProfile.ProfileType.POWERSHELL.storageValue();
 
@@ -174,6 +174,20 @@ public class LocalMetadataStorage {
         return state.runMetadata().stream()
                 .filter(runMetadataRecord -> projectId.equals(runMetadataRecord.projectId()))
                 .max(Comparator.comparing(this::runSortKey));
+    }
+
+    public synchronized RunMetadataRecord saveRunMetadata(RunMetadataRecord runMetadataRecord) {
+        Objects.requireNonNull(runMetadataRecord, "runMetadataRecord must not be null");
+
+        state = new LocalMetadataSnapshot(
+                SCHEMA_VERSION,
+                state.projects(),
+                state.sessions(),
+                state.profiles(),
+                upsertRunMetadataRecord(state.runMetadata(), runMetadataRecord)
+        );
+        persistState();
+        return runMetadataRecord;
     }
 
     public synchronized LocalMetadataSnapshot snapshot() {
@@ -335,6 +349,27 @@ public class LocalMetadataStorage {
         return List.copyOf(updatedProfileRecords);
     }
 
+    private List<RunMetadataRecord> upsertRunMetadataRecord(List<RunMetadataRecord> runMetadataRecords,
+                                                            RunMetadataRecord replacementRecord) {
+        List<RunMetadataRecord> updatedRunMetadataRecords = new ArrayList<>(runMetadataRecords.size() + 1);
+        boolean replaced = false;
+        for (RunMetadataRecord runMetadataRecord : runMetadataRecords) {
+            if (runMetadataRecord.runId().equals(replacementRecord.runId())) {
+                updatedRunMetadataRecords.add(replacementRecord);
+                replaced = true;
+                continue;
+            }
+
+            updatedRunMetadataRecords.add(runMetadataRecord);
+        }
+
+        if (!replaced) {
+            updatedRunMetadataRecords.add(replacementRecord);
+        }
+
+        return List.copyOf(updatedRunMetadataRecords);
+    }
+
     private LocalMetadataSnapshot loadState() {
         if (!Files.exists(storageFilePath)) {
             return emptyState();
@@ -367,13 +402,16 @@ public class LocalMetadataStorage {
                 .map(sessionRecord -> normalizeSessionRecord(sessionRecord, normalizedProjects))
                 .toList());
         List<ProfileRecord> normalizedProfiles = normalizeProfileRecords(loadedState.profiles(), normalizedProjects);
+        List<RunMetadataRecord> normalizedRunMetadata = List.copyOf((loadedState.runMetadata() == null
+                ? List.<RunMetadataRecord>of()
+                : loadedState.runMetadata()).stream().map(this::normalizeRunMetadataRecord).toList());
 
         return new LocalMetadataSnapshot(
                 SCHEMA_VERSION,
                 normalizedProjects,
                 normalizedSessions,
                 normalizedProfiles,
-                List.copyOf(loadedState.runMetadata() == null ? List.of() : loadedState.runMetadata())
+                normalizedRunMetadata
         );
     }
 
@@ -462,6 +500,23 @@ public class LocalMetadataStorage {
         );
     }
 
+    private RunMetadataRecord normalizeRunMetadataRecord(RunMetadataRecord runMetadataRecord) {
+        return new RunMetadataRecord(
+                runMetadataRecord.runId(),
+                runMetadataRecord.projectId(),
+                runMetadataRecord.storyId(),
+                runMetadataRecord.status(),
+                runMetadataRecord.startedAt(),
+                runMetadataRecord.endedAt(),
+                runMetadataRecord.profileType(),
+                runMetadataRecord.workingDirectory(),
+                runMetadataRecord.processId(),
+                runMetadataRecord.exitCode(),
+                runMetadataRecord.command(),
+                runMetadataRecord.artifactPaths()
+        );
+    }
+
     private ProfileRecord defaultProfileRecord(String projectId, String timestamp) {
         return new ProfileRecord(
                 UUID.randomUUID().toString(),
@@ -519,6 +574,10 @@ public class LocalMetadataStorage {
 
     private boolean isPopulated(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private static String normalizeOptionalValue(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private String runSortKey(RunMetadataRecord runMetadataRecord) {
@@ -643,11 +702,75 @@ public class LocalMetadataStorage {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    public record RunArtifactPaths(String promptPath,
+                                   String stdoutPath,
+                                   String stderrPath,
+                                   String structuredEventsPath,
+                                   String summaryPath) {
+        public RunArtifactPaths {
+            promptPath = normalizeOptionalValue(promptPath);
+            stdoutPath = normalizeOptionalValue(stdoutPath);
+            stderrPath = normalizeOptionalValue(stderrPath);
+            structuredEventsPath = normalizeOptionalValue(structuredEventsPath);
+            summaryPath = normalizeOptionalValue(summaryPath);
+        }
+
+        public static RunArtifactPaths empty() {
+            return new RunArtifactPaths(null, null, null, null, null);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record RunMetadataRecord(String runId,
                                     String projectId,
                                     String storyId,
                                     String status,
                                     String startedAt,
-                                    String endedAt) {
+                                    String endedAt,
+                                    String profileType,
+                                    String workingDirectory,
+                                    Long processId,
+                                    Integer exitCode,
+                                    List<String> command,
+                                    RunArtifactPaths artifactPaths) {
+        public RunMetadataRecord {
+            command = List.copyOf(command == null ? List.of() : command);
+            artifactPaths = artifactPaths == null ? RunArtifactPaths.empty() : artifactPaths;
+        }
+
+        public RunMetadataRecord(String runId,
+                                 String projectId,
+                                 String storyId,
+                                 String status,
+                                 String startedAt,
+                                 String endedAt,
+                                 String profileType,
+                                 String workingDirectory,
+                                 Long processId,
+                                 Integer exitCode,
+                                 List<String> command) {
+            this(runId,
+                    projectId,
+                    storyId,
+                    status,
+                    startedAt,
+                    endedAt,
+                    profileType,
+                    workingDirectory,
+                    processId,
+                    exitCode,
+                    command,
+                    RunArtifactPaths.empty());
+        }
+
+        public RunMetadataRecord(String runId,
+                                 String projectId,
+                                 String storyId,
+                                 String status,
+                                 String startedAt,
+                                 String endedAt) {
+            this(runId, projectId, storyId, status, startedAt, endedAt, null, null, null, null, List.of(),
+                    RunArtifactPaths.empty());
+        }
     }
 }

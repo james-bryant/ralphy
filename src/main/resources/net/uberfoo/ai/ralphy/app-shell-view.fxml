@@ -426,6 +426,206 @@
                             </VBox>
                         </HBox>
                     </VBox>
+                    <VBox spacing="12.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Single Story Session">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Start exactly one eligible story against the active repository. Story state and attempts are persisted on every transition."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="singleStorySessionSummaryLabel" fx:id="singleStorySessionSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="singleStorySessionDetailLabel" fx:id="singleStorySessionDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Button id="startSingleStoryButton" fx:id="startSingleStoryButton"
+                                mnemonicParsing="false" onAction="#startSingleStorySession"
+                                text="Start Single Story"/>
+                        <Label id="singleStorySessionMessageLabel" fx:id="singleStorySessionMessageLabel" visible="false"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="validation-text"/>
+                            </styleClass>
+                        </Label>
+                    </VBox>
+                    <VBox id="storyProgressDashboardCard" fx:id="storyProgressDashboardCard" spacing="12.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Story Progress Dashboard">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Track the current story plus the persisted counts for pending, blocked, running, passed, failed, and paused work."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="storyProgressSummaryLabel" fx:id="storyProgressSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="storyProgressDetailLabel" fx:id="storyProgressDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Separator/>
+                        <Label text="Current Story">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="storyProgressCurrentStoryLabel" fx:id="storyProgressCurrentStoryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Overall Counts">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="storyProgressOverallCountsLabel" fx:id="storyProgressOverallCountsLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox spacing="12.0">
+                            <VBox HBox.hgrow="ALWAYS" spacing="6.0">
+                                <styleClass>
+                                    <String fx:value="story-progress-metric"/>
+                                </styleClass>
+                                <padding>
+                                    <Insets bottom="12.0" left="12.0" right="12.0" top="12.0"/>
+                                </padding>
+                                <Label text="Pending">
+                                    <styleClass>
+                                        <String fx:value="section-title"/>
+                                    </styleClass>
+                                </Label>
+                                <Label id="storyProgressPendingCountLabel" fx:id="storyProgressPendingCountLabel">
+                                    <styleClass>
+                                        <String fx:value="story-progress-count"/>
+                                    </styleClass>
+                                </Label>
+                            </VBox>
+                            <VBox HBox.hgrow="ALWAYS" spacing="6.0">
+                                <styleClass>
+                                    <String fx:value="story-progress-metric"/>
+                                </styleClass>
+                                <padding>
+                                    <Insets bottom="12.0" left="12.0" right="12.0" top="12.0"/>
+                                </padding>
+                                <Label text="Blocked">
+                                    <styleClass>
+                                        <String fx:value="section-title"/>
+                                    </styleClass>
+                                </Label>
+                                <Label id="storyProgressBlockedCountLabel" fx:id="storyProgressBlockedCountLabel">
+                                    <styleClass>
+                                        <String fx:value="story-progress-count"/>
+                                    </styleClass>
+                                </Label>
+                            </VBox>
+                            <VBox HBox.hgrow="ALWAYS" spacing="6.0">
+                                <styleClass>
+                                    <String fx:value="story-progress-metric"/>
+                                </styleClass>
+                                <padding>
+                                    <Insets bottom="12.0" left="12.0" right="12.0" top="12.0"/>
+                                </padding>
+                                <Label text="Running">
+                                    <styleClass>
+                                        <String fx:value="section-title"/>
+                                    </styleClass>
+                                </Label>
+                                <Label id="storyProgressRunningCountLabel" fx:id="storyProgressRunningCountLabel">
+                                    <styleClass>
+                                        <String fx:value="story-progress-count"/>
+                                    </styleClass>
+                                </Label>
+                            </VBox>
+                        </HBox>
+                        <HBox spacing="12.0">
+                            <VBox HBox.hgrow="ALWAYS" spacing="6.0">
+                                <styleClass>
+                                    <String fx:value="story-progress-metric"/>
+                                </styleClass>
+                                <padding>
+                                    <Insets bottom="12.0" left="12.0" right="12.0" top="12.0"/>
+                                </padding>
+                                <Label text="Passed">
+                                    <styleClass>
+                                        <String fx:value="section-title"/>
+                                    </styleClass>
+                                </Label>
+                                <Label id="storyProgressPassedCountLabel" fx:id="storyProgressPassedCountLabel">
+                                    <styleClass>
+                                        <String fx:value="story-progress-count"/>
+                                    </styleClass>
+                                </Label>
+                            </VBox>
+                            <VBox HBox.hgrow="ALWAYS" spacing="6.0">
+                                <styleClass>
+                                    <String fx:value="story-progress-metric"/>
+                                </styleClass>
+                                <padding>
+                                    <Insets bottom="12.0" left="12.0" right="12.0" top="12.0"/>
+                                </padding>
+                                <Label text="Failed">
+                                    <styleClass>
+                                        <String fx:value="section-title"/>
+                                    </styleClass>
+                                </Label>
+                                <Label id="storyProgressFailedCountLabel" fx:id="storyProgressFailedCountLabel">
+                                    <styleClass>
+                                        <String fx:value="story-progress-count"/>
+                                    </styleClass>
+                                </Label>
+                            </VBox>
+                            <VBox HBox.hgrow="ALWAYS" spacing="6.0">
+                                <styleClass>
+                                    <String fx:value="story-progress-metric"/>
+                                </styleClass>
+                                <padding>
+                                    <Insets bottom="12.0" left="12.0" right="12.0" top="12.0"/>
+                                </padding>
+                                <Label text="Paused">
+                                    <styleClass>
+                                        <String fx:value="section-title"/>
+                                    </styleClass>
+                                </Label>
+                                <Label id="storyProgressPausedCountLabel" fx:id="storyProgressPausedCountLabel">
+                                    <styleClass>
+                                        <String fx:value="story-progress-count"/>
+                                    </styleClass>
+                                </Label>
+                            </VBox>
+                        </HBox>
+                    </VBox>
                     <VBox id="prdInterviewCard" fx:id="prdInterviewCard" spacing="16.0">
                         <styleClass>
                             <String fx:value="shell-card"/>
@@ -524,7 +724,7 @@
                                 <String fx:value="card-title"/>
                             </styleClass>
                         </Label>
-                        <Label text="Generate a repository-owned Markdown PRD from the latest interview answers, import one from another tool, and export the saved draft when you need to share it outside Ralphy. Regenerating overwrites the saved `active-prd.md` draft."
+                        <Label text="Generate a repository-owned Markdown PRD from the latest interview answers, import one from another tool, export the saved draft when you need to share it outside Ralphy, and reconcile tracker updates from compatible `prd.json`. Regenerating overwrites the saved `active-prd.md` draft."
                                wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
@@ -537,6 +737,9 @@
                             <Button id="importPrdDocumentButton" fx:id="importPrdDocumentButton"
                                     mnemonicParsing="false" onAction="#importPrdDocument"
                                     text="Import PRD"/>
+                            <Button id="importPrdJsonButton" fx:id="importPrdJsonButton"
+                                    mnemonicParsing="false" onAction="#importPrdJson"
+                                    text="Import prd.json"/>
                             <Button id="savePrdDocumentButton" fx:id="savePrdDocumentButton"
                                     mnemonicParsing="false" onAction="#savePrdDocument"
                                     text="Save PRD"/>

@@ -1,5 +1,7 @@
 package net.uberfoo.ai.ralphy;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -10,6 +12,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ActiveProjectServiceTest {
@@ -20,6 +23,10 @@ class ActiveProjectServiceTest {
     private final PrdStructureValidator prdStructureValidator = new PrdStructureValidator();
     private final PrdTaskStateStore prdTaskStateStore = new PrdTaskStateStore();
     private final PrdTaskSynchronizer prdTaskSynchronizer = new PrdTaskSynchronizer();
+    private final RalphPrdJsonMapper ralphPrdJsonMapper = new RalphPrdJsonMapper();
+    private final RalphPrdJsonCompatibilityValidator ralphPrdJsonCompatibilityValidator =
+            new RalphPrdJsonCompatibilityValidator();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @TempDir
     Path tempDir;
@@ -272,6 +279,144 @@ class ActiveProjectServiceTest {
     }
 
     @Test
+    void startEligibleSingleStoryQueuesRunsAndPassesTheStoryAttempt() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                launchPlan -> CodexLauncherService.ProcessExecution.completed(
+                        4321L,
+                        0,
+                        "{\"event\":\"done\"}",
+                        ""
+                ),
+                () -> "run-pass-1"
+        );
+        Path repository = createGitDirectoryRepository("single-story-pass-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-011: Execute a Single Story Session
+                **Outcome:** Start one queued story and persist the result.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStorySessionAvailability availability =
+                activeProjectService.singleStorySessionAvailability(PresetUseCase.STORY_IMPLEMENTATION);
+        assertTrue(availability.startable());
+        assertEquals("US-011", availability.story().taskId());
+
+        ActiveProjectService.SingleStoryStartResult startResult =
+                activeProjectService.startEligibleSingleStory(PresetUseCase.STORY_IMPLEMENTATION);
+
+        assertTrue(startResult.successful());
+        assertEquals("US-011", startResult.storyId());
+        assertNotNull(startResult.launchResult());
+        assertTrue(startResult.launchResult().successful());
+
+        PrdTaskRecord updatedTask = activeProjectService.prdTaskState()
+                .orElseThrow()
+                .taskById("US-011")
+                .orElseThrow();
+        assertEquals(PrdTaskStatus.COMPLETED, updatedTask.status());
+        assertEquals(1, updatedTask.attempts().size());
+
+        PrdStoryAttemptRecord attempt = updatedTask.attempts().getFirst();
+        assertEquals("run-pass-1", attempt.runId());
+        assertEquals("ralph-codex-implement-v1", attempt.presetId());
+        assertEquals("Ralph/Codex Story Implementation", attempt.presetName());
+        assertEquals("v1", attempt.presetVersion());
+        assertEquals(PrdTaskStatus.COMPLETED, attempt.outcome());
+        assertFalse(attempt.queuedAt().isBlank());
+        assertFalse(attempt.startedAt().isBlank());
+        assertFalse(attempt.endedAt().isBlank());
+        assertTrue(updatedTask.history().stream()
+                .anyMatch(entry -> entry.status() == PrdTaskStatus.READY
+                        && entry.message().contains("Queued")));
+        assertTrue(updatedTask.history().stream()
+                .anyMatch(entry -> entry.status() == PrdTaskStatus.RUNNING
+                        && entry.message().contains("Started")));
+        assertTrue(updatedTask.history().stream()
+                .anyMatch(entry -> entry.status() == PrdTaskStatus.COMPLETED
+                        && entry.message().contains("passed")));
+
+        JsonNode persistedTaskState = objectMapper.readTree(Files.readString(repository
+                .resolve(".ralph-tui")
+                .resolve("prd-json")
+                .resolve("prd.json")));
+        JsonNode persistedStory = persistedTaskState.path("userStories").get(0);
+        assertEquals("PASSED", persistedStory.path("ralphyStatus").asText());
+        assertTrue(persistedStory.path("passes").asBoolean());
+        assertEquals(1, persistedStory.path("attempts").size());
+        JsonNode persistedAttempt = persistedStory.path("attempts").get(0);
+        assertEquals("run-pass-1", persistedAttempt.path("runId").asText());
+        assertEquals("PASSED", persistedAttempt.path("outcome").asText());
+        assertEquals("ralph-codex-implement-v1", persistedAttempt.path("presetId").asText());
+    }
+
+    @Test
+    void startEligibleSingleStoryMarksFailedAttemptsAndMakesThemRetryable() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                launchPlan -> CodexLauncherService.ProcessExecution.failure("Access is denied."),
+                () -> "run-fail-1"
+        );
+        Path repository = createGitDirectoryRepository("single-story-fail-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-012: Retry a Failed Story
+                **Outcome:** Leave failed attempts resumable and reviewable.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStoryStartResult startResult =
+                activeProjectService.startEligibleSingleStory(PresetUseCase.STORY_IMPLEMENTATION);
+
+        assertTrue(startResult.successful());
+        assertEquals("US-012", startResult.storyId());
+        assertNotNull(startResult.launchResult());
+        assertFalse(startResult.launchResult().successful());
+
+        PrdTaskRecord failedTask = activeProjectService.prdTaskState()
+                .orElseThrow()
+                .taskById("US-012")
+                .orElseThrow();
+        assertEquals(PrdTaskStatus.FAILED, failedTask.status());
+        assertEquals(1, failedTask.attempts().size());
+
+        PrdStoryAttemptRecord failedAttempt = failedTask.attempts().getFirst();
+        assertEquals("run-fail-1", failedAttempt.runId());
+        assertEquals(PrdTaskStatus.FAILED, failedAttempt.outcome());
+        assertFalse(failedAttempt.queuedAt().isBlank());
+        assertFalse(failedAttempt.startedAt().isBlank());
+        assertFalse(failedAttempt.endedAt().isBlank());
+        assertTrue(failedTask.history().stream()
+                .anyMatch(entry -> entry.status() == PrdTaskStatus.FAILED
+                        && entry.message().contains("Access is denied")));
+
+        ActiveProjectService.SingleStorySessionAvailability retryAvailability =
+                activeProjectService.singleStorySessionAvailability(PresetUseCase.RETRY_FIX);
+        assertTrue(retryAvailability.startable());
+        assertEquals("US-012", retryAvailability.story().taskId());
+
+        JsonNode persistedTaskState = objectMapper.readTree(Files.readString(repository
+                .resolve(".ralph-tui")
+                .resolve("prd-json")
+                .resolve("prd.json")));
+        JsonNode persistedStory = persistedTaskState.path("userStories").get(0);
+        assertEquals("FAILED", persistedStory.path("ralphyStatus").asText());
+        assertFalse(persistedStory.path("passes").asBoolean());
+        assertEquals("FAILED", persistedStory.path("attempts").get(0).path("outcome").asText());
+    }
+
+    @Test
     void saveExecutionProfileRejectsIncompleteWslSettingsWithoutOverwritingExistingProfile() throws IOException {
         ActiveProjectService activeProjectService = createService();
         Path repository = createGitDirectoryRepository("wsl-validation-repo");
@@ -435,6 +580,31 @@ class ActiveProjectServiceTest {
         assertEquals("US-023", taskState.tasks().get(1).taskId());
         assertTrue(Files.exists(new ActiveProject(repository).activePrdJsonPath()));
         assertEquals(2, prdTaskStateStore.read(new ActiveProject(repository)).orElseThrow().tasks().size());
+
+        JsonNode exportedPrdJson = objectMapper.readTree(Files.readString(new ActiveProject(repository).activePrdJsonPath()));
+        assertEquals("Task Sync Plan", exportedPrdJson.path("name").asText());
+        assertTrue(exportedPrdJson.has("userStories"));
+        assertFalse(exportedPrdJson.has("tasks"));
+        assertEquals(List.of(".\\mvnw.cmd clean verify jacoco:report"),
+                objectMapper.convertValue(exportedPrdJson.path("qualityGates"), objectMapper.getTypeFactory()
+                        .constructCollectionType(List.class, String.class)));
+
+        JsonNode firstStory = exportedPrdJson.path("userStories").get(0);
+        assertEquals("US-022", firstStory.path("id").asText());
+        assertEquals("Sync PRD stories into internal task state", firstStory.path("title").asText());
+        assertTrue(firstStory.path("description").asText().contains("Execution can track stable internal task records."));
+        assertEquals(List.of(
+                        "Execution can track stable internal task records.",
+                        ".\\mvnw.cmd clean verify jacoco:report"
+                ),
+                objectMapper.convertValue(firstStory.path("acceptanceCriteria"), objectMapper.getTypeFactory()
+                        .constructCollectionType(List.class, String.class)));
+        assertEquals(1, firstStory.path("priority").asInt());
+        assertFalse(firstStory.path("passes").asBoolean());
+        assertTrue(firstStory.path("dependsOn").isArray());
+        assertFalse(firstStory.has("status"));
+        assertEquals("QUEUED", firstStory.path("ralphyStatus").asText());
+        assertTrue(ralphPrdJsonCompatibilityValidator.validate(Files.readString(new ActiveProject(repository).activePrdJsonPath())).valid());
     }
 
     @Test
@@ -490,6 +660,46 @@ class ActiveProjectServiceTest {
         assertTrue(resyncedTask.history().size() > completedTask.history().size());
         assertTrue(resyncedTask.history().stream().anyMatch(entry -> entry.type().equals("STATUS_CHANGE")));
         assertTrue(resyncedTask.history().stream().anyMatch(entry -> entry.type().equals("PRD_SYNC")));
+
+        JsonNode exportedPrdJson = objectMapper.readTree(Files.readString(new ActiveProject(repository).activePrdJsonPath()));
+        JsonNode firstStory = exportedPrdJson.path("userStories").get(0);
+        assertTrue(firstStory.path("passes").asBoolean());
+        assertEquals("PASSED", firstStory.path("ralphyStatus").asText());
+        assertTrue(firstStory.path("history").isArray());
+        assertTrue(firstStory.path("history").size() >= completedTask.history().size());
+    }
+
+    @Test
+    void openRepositoryRewritesLegacyInternalPrdJsonIntoCompatibleExportFormat() throws IOException {
+        Path repository = createGitDirectoryRepository("legacy-prd-json-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        Files.createDirectories(activeProject.prdsDirectoryPath());
+        Files.writeString(activeProject.activePrdPath(), validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories into internal task state
+                **Outcome:** Execution can track stable internal task records.
+                """
+        ));
+        Files.createDirectories(activeProject.prdJsonDirectoryPath());
+        objectMapper.writeValue(activeProject.activePrdJsonPath().toFile(), PrdTaskState.created(
+                activeProject.activePrdPath().toString(),
+                List.of(".\\mvnw.cmd clean verify jacoco:report"),
+                List.of(PrdTaskRecord.created(
+                        "US-022",
+                        "Sync PRD stories into internal task state",
+                        "Execution can track stable internal task records.",
+                        "2026-03-15T21:00:00Z"
+                )),
+                "2026-03-15T21:00:00Z"
+        ));
+
+        ActiveProjectService activeProjectService = createService();
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(ralphPrdJsonCompatibilityValidator.validate(Files.readString(activeProject.activePrdJsonPath())).valid());
+        assertTrue(objectMapper.readTree(Files.readString(activeProject.activePrdJsonPath())).has("userStories"));
+        assertEquals(1, activeProjectService.prdTaskState().orElseThrow().tasks().size());
     }
 
     @Test
@@ -535,6 +745,270 @@ class ActiveProjectServiceTest {
         assertFalse(confirmedSync.confirmationRequired());
         assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-023").isEmpty());
         assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-024").isPresent());
+    }
+
+    @Test
+    void importPrdJsonReconcilesCompatibleTrackerUpdatesAndPreservesCompletedHistory() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        Path repository = createGitDirectoryRepository("import-prd-json-repo");
+        Path importSource = tempDir.resolve("external-prd.json");
+        ActiveProject activeProject = new ActiveProject(repository);
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories
+                **Outcome:** Internal tasks are created from the active PRD.
+
+                ### US-023: Export prd json
+                **Outcome:** Internal task state can be shared outside the app.
+                """
+        )).successful());
+
+        PrdTaskState initialState = activeProjectService.prdTaskState().orElseThrow();
+        PrdTaskRecord completedTask = initialState.taskById("US-022").orElseThrow()
+                .withStatus(PrdTaskStatus.COMPLETED, "2026-03-15T21:15:00Z", "Completed locally before import.");
+        PrdTaskState completedState = new PrdTaskState(
+                initialState.schemaVersion(),
+                initialState.sourcePrdPath(),
+                initialState.qualityGates(),
+                List.of(completedTask, initialState.taskById("US-023").orElseThrow()),
+                initialState.createdAt(),
+                "2026-03-15T21:15:00Z"
+        );
+        prdTaskStateStore.write(activeProject, completedState);
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        RalphPrdJsonDocument importedDocument = new RalphPrdJsonDocument(
+                "Task Sync Plan",
+                "ralph/task-sync-plan",
+                "Imports tracker changes safely.",
+                List.of(".\\mvnw.cmd clean verify jacoco:report"),
+                List.of(
+                        new RalphPrdJsonUserStory(
+                                "US-022",
+                                "Sync PRD stories",
+                                "As a user, I want tracker completions restored.",
+                                List.of(
+                                        "Internal tasks are created from the active PRD.",
+                                        ".\\mvnw.cmd clean verify jacoco:report"
+                                ),
+                                1,
+                                true,
+                                List.of(),
+                                "Completed in tracker.",
+                                "Internal tasks are created from the active PRD.",
+                                "COMPLETED",
+                                List.of(),
+                                "2026-03-15T21:15:00Z",
+                                "2026-03-15T21:30:00Z"
+                        ),
+                        new RalphPrdJsonUserStory(
+                                "US-023",
+                                "Export prd json",
+                                "As a user, I want exports preserved.",
+                                List.of(
+                                        "Internal task state can be shared outside the app.",
+                                        ".\\mvnw.cmd clean verify jacoco:report"
+                                ),
+                                2,
+                                false,
+                                List.of(),
+                                "",
+                                "Internal task state can be shared outside the app.",
+                                "READY",
+                                List.of(),
+                                "2026-03-15T21:15:00Z",
+                                "2026-03-15T21:30:00Z"
+                        )
+                ),
+                activeProject.activePrdPath().toString(),
+                completedState.createdAt(),
+                "2026-03-15T21:30:00Z"
+        );
+        objectMapper.writeValue(importSource.toFile(), importedDocument);
+
+        ActiveProjectService.PrdJsonImportResult importResult = restoredService.importPrdJson(importSource);
+
+        assertTrue(importResult.successful());
+        assertFalse(importResult.blockingConflictsDetected());
+        PrdTaskRecord reconciledTask = restoredService.prdTaskState().orElseThrow().taskById("US-022").orElseThrow();
+        assertEquals(PrdTaskStatus.COMPLETED, reconciledTask.status());
+        assertEquals("Sync PRD stories", reconciledTask.title());
+        assertTrue(reconciledTask.history().size() >= completedTask.history().size());
+        assertTrue(reconciledTask.history().stream()
+                .anyMatch(entry -> entry.message().contains("Completed locally before import.")));
+        assertTrue(reconciledTask.history().stream()
+                .anyMatch(entry -> entry.message().contains("Completed in tracker.")));
+        assertTrue(ralphPrdJsonCompatibilityValidator.validate(Files.readString(activeProject.activePrdJsonPath())).valid());
+    }
+
+    @Test
+    void importPrdJsonSurfacesNonBlockingMarkdownConflictsAndKeepsMarkdownDefinitions() throws IOException {
+        Path repository = createGitDirectoryRepository("import-prd-json-conflict-repo");
+        Path importSource = tempDir.resolve("external-conflict-prd.json");
+        ActiveProject activeProject = new ActiveProject(repository);
+
+        ActiveProjectService activeProjectService = createService();
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories
+                **Outcome:** Internal tasks are created from the active PRD.
+
+                ### US-023: Export prd json
+                **Outcome:** Internal task state can be shared outside the app.
+                """
+        )).successful());
+
+        RalphPrdJsonDocument conflictingDocument = new RalphPrdJsonDocument(
+                "Task Sync Plan",
+                "ralph/task-sync-plan",
+                "Imports tracker changes safely.",
+                List.of(".\\mvnw.cmd clean verify jacoco:report"),
+                List.of(
+                        new RalphPrdJsonUserStory(
+                                "US-022",
+                                "Sync PRD tracker stories",
+                                "As a user, I want tracker edits reflected.",
+                                List.of(
+                                        "Tracker wording changed outside the app.",
+                                        ".\\mvnw.cmd clean verify jacoco:report"
+                                ),
+                                1,
+                                true,
+                                List.of(),
+                                "Completed in tracker.",
+                                "Tracker wording changed outside the app.",
+                                "COMPLETED",
+                                List.of(),
+                                "2026-03-15T21:15:00Z",
+                                "2026-03-15T21:30:00Z"
+                        ),
+                        new RalphPrdJsonUserStory(
+                                "US-023",
+                                "Export prd json",
+                                "As a user, I want exports preserved.",
+                                List.of(
+                                        "Internal task state can be shared outside the app.",
+                                        ".\\mvnw.cmd clean verify jacoco:report"
+                                ),
+                                2,
+                                false,
+                                List.of(),
+                                "",
+                                "Internal task state can be shared outside the app.",
+                                "READY",
+                                List.of(),
+                                "2026-03-15T21:15:00Z",
+                                "2026-03-15T21:30:00Z"
+                        )
+                ),
+                activeProject.activePrdPath().toString(),
+                "2026-03-15T21:15:00Z",
+                "2026-03-15T21:30:00Z"
+        );
+        objectMapper.writeValue(importSource.toFile(), conflictingDocument);
+
+        ActiveProjectService.PrdJsonImportResult importResult = activeProjectService.importPrdJson(importSource);
+
+        assertTrue(importResult.successful());
+        assertTrue(importResult.conflictsDetected());
+        assertFalse(importResult.blockingConflictsDetected());
+        assertTrue(importResult.conflictDetails().stream()
+                .anyMatch(detail -> detail.contains("US-022 differs")));
+        PrdTaskRecord reconciledTask = activeProjectService.prdTaskState().orElseThrow().taskById("US-022").orElseThrow();
+        assertEquals("Sync PRD stories", reconciledTask.title());
+        assertEquals(PrdTaskStatus.COMPLETED, reconciledTask.status());
+        JsonNode exportedPrdJson = objectMapper.readTree(Files.readString(activeProject.activePrdJsonPath()));
+        assertEquals("Sync PRD stories", exportedPrdJson.path("userStories").get(0).path("title").asText());
+    }
+
+    @Test
+    void importPrdJsonBlocksStoryIdDriftAgainstActiveMarkdown() throws IOException {
+        Path repository = createGitDirectoryRepository("import-prd-json-blocked-repo");
+        Path importSource = tempDir.resolve("external-blocked-prd.json");
+        ActiveProject activeProject = new ActiveProject(repository);
+
+        ActiveProjectService activeProjectService = createService();
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories
+                **Outcome:** Internal tasks are created from the active PRD.
+
+                ### US-023: Export prd json
+                **Outcome:** Internal task state can be shared outside the app.
+                """
+        )).successful());
+
+        RalphPrdJsonDocument blockedDocument = new RalphPrdJsonDocument(
+                "Task Sync Plan",
+                "ralph/task-sync-plan",
+                "Imports tracker changes safely.",
+                List.of(".\\mvnw.cmd clean verify jacoco:report"),
+                List.of(
+                        new RalphPrdJsonUserStory(
+                                "US-022",
+                                "Sync PRD stories",
+                                "As a user, I want safe sync.",
+                                List.of(
+                                        "Internal tasks are created from the active PRD.",
+                                        ".\\mvnw.cmd clean verify jacoco:report"
+                                ),
+                                1,
+                                false,
+                                List.of(),
+                                "",
+                                "Internal tasks are created from the active PRD.",
+                                "READY",
+                                List.of(),
+                                "2026-03-15T21:15:00Z",
+                                "2026-03-15T21:30:00Z"
+                        ),
+                        new RalphPrdJsonUserStory(
+                                "US-024",
+                                "Import prd json safely",
+                                "As a user, I want tracker updates imported safely.",
+                                List.of(
+                                        "External tracker changes reconcile without silent data loss.",
+                                        ".\\mvnw.cmd clean verify jacoco:report"
+                                ),
+                                2,
+                                false,
+                                List.of(),
+                                "",
+                                "External tracker changes reconcile without silent data loss.",
+                                "READY",
+                                List.of(),
+                                "2026-03-15T21:15:00Z",
+                                "2026-03-15T21:30:00Z"
+                        )
+                ),
+                activeProject.activePrdPath().toString(),
+                "2026-03-15T21:15:00Z",
+                "2026-03-15T21:30:00Z"
+        );
+        objectMapper.writeValue(importSource.toFile(), blockedDocument);
+
+        ActiveProjectService.PrdJsonImportResult importResult = activeProjectService.importPrdJson(importSource);
+
+        assertFalse(importResult.successful());
+        assertTrue(importResult.conflictsDetected());
+        assertTrue(importResult.blockingConflictsDetected());
+        assertTrue(importResult.conflictDetails().stream()
+                .anyMatch(detail -> detail.contains("Stories only in active Markdown: US-023")));
+        assertTrue(importResult.conflictDetails().stream()
+                .anyMatch(detail -> detail.contains("Stories only in imported prd.json: US-024")));
+        assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-023").isPresent());
+        assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-024").isEmpty());
+        JsonNode exportedPrdJson = objectMapper.readTree(Files.readString(activeProject.activePrdJsonPath()));
+        assertEquals("US-023", exportedPrdJson.path("userStories").get(1).path("id").asText());
     }
 
     @Test
@@ -750,6 +1224,23 @@ class ActiveProjectServiceTest {
     }
 
     private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage) throws IOException {
+        return createService(
+                localMetadataStorage,
+                launchPlan -> CodexLauncherService.ProcessExecution.completed(1234L, 0, "", ""),
+                () -> "run-default"
+        );
+    }
+
+    private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage,
+                                               CodexLauncherService.ProcessExecutor processExecutor,
+                                               java.util.function.Supplier<String> runIdGenerator) throws IOException {
+        PresetCatalogService presetCatalogService = new PresetCatalogService();
+        CodexLauncherService codexLauncherService = new CodexLauncherService(
+                localMetadataStorage,
+                java.time.Clock.systemUTC(),
+                runIdGenerator,
+                processExecutor
+        );
         return new ActiveProjectService(
                 gitRepositoryInitializer,
                 projectMetadataInitializer,
@@ -759,6 +1250,9 @@ class ActiveProjectServiceTest {
                 prdStructureValidator,
                 prdTaskStateStore,
                 prdTaskSynchronizer,
+                ralphPrdJsonMapper,
+                presetCatalogService,
+                codexLauncherService,
                 createWslPreflightService(),
                 true
         );
@@ -824,6 +1318,12 @@ class ActiveProjectServiceTest {
         assertTrue(Files.isDirectory(activeProject.promptsDirectoryPath()));
         assertTrue(Files.isDirectory(activeProject.logsDirectoryPath()));
         assertTrue(Files.isDirectory(activeProject.artifactsDirectoryPath()));
+    }
+
+    private void seedQualityGateFiles(Path repository) throws IOException {
+        Files.writeString(repository.resolve("mvnw.cmd"), "@echo off");
+        Files.writeString(repository.resolve("pom.xml"), "<project/>");
+        Files.createDirectories(repository.resolve(".mvn"));
     }
 
     private String validPrdMarkdown(String qualityGatesSection, String userStoriesSection) {

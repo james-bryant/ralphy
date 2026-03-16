@@ -16,9 +16,14 @@ after each iteration and it's included in prompts for context.
 - Model execution prerequisites as typed service-level reports and let JavaFX render those reports directly; keeping PRD validation and future launch gating in `ActiveProjectService` avoids duplicating parser rules in the controller.
 - Track external PRD exchange paths in `.ralph-tui/project-metadata.json` with a typed metadata record and feed those paths back into JavaFX file choosers, so import/export workflows restore their last-used locations without inventing app-global state.
 - Keep PRD-derived task state as its own typed `.ralph-tui/prd-json/prd.json` artifact and auto-sync only non-destructive story changes; when a re-sync would remove existing story IDs, preserve the current task file and require explicit confirmation before remapping.
+- When a repository-owned artifact must satisfy an external tracker schema, export the tracker-required flat document and keep app-only state as additive extension fields; validate the export before replacing the managed file, and force a rewrite on no-op syncs so legacy internal formats migrate forward.
+- Treat imported `prd.json` as tracker state, not a second source of story structure: reconcile status/history back into the Markdown-derived task graph for stable story IDs, keep Markdown authoritative for conflicting definitions, and block imports when the story ID sets drift.
+- Model Codex execution as a typed launch plan plus launch result: build profile-specific commands once, pass the final prompt over stdin, and persist only normalized run metadata such as profile, working directory, command, PID, and exit code so later UI flows can reuse the same launcher seam.
+- Store Codex audit trails as repository-scoped per-attempt artifacts under `.ralph-tui/prompts`, `.ralph-tui/logs`, and `.ralph-tui/artifacts`, and keep only stable artifact paths in `LocalMetadataStorage`; that preserves raw launch output on disk while restart flows restore lightweight typed references instead of duplicating large blobs in app-local metadata.
+- Persist one-story loop execution on the task record itself: append per-run attempt records to `PrdTaskRecord`, export them as additive `prd.json` fields, and pre-save launcher metadata as `RUNNING` before `codex exec` so queued/running/passed/failed recovery survives restart without scraping raw logs.
+- Build execution dashboards from persisted task state plus persisted run-recovery metadata instead of rewriting task records on startup; that lets the UI show a resumable `RUNNING` story as paused after restart while keeping the underlying tracker state stable for later resume flows.
 
 ---
-
 ## 2026-03-15 - US-014
 - Implemented WSL preflight presentation in the desktop shell, including stored-report rendering, a manual `Run WSL Preflight` action, and WSL-specific summary/detail/check formatting alongside the existing native diagnostics.
 - Fixed Spring construction for `ActiveProjectService` by marking the primary constructor for autowiring, which restored application startup after the WSL service constructor was added.
@@ -32,6 +37,70 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - The project already stores independent `nativeWindowsPreflight` and `wslPreflight` payloads in project metadata; UI stories should usually wire into that persisted state rather than create new storage paths.
   - WSL preflight autoruns are more sensitive than native startup checks because rerunning them on restore can replace the last actionable report with machine-specific startup noise, so restore should prefer stored state plus a manual rerun affordance.
+---
+## 2026-03-15 - US-025
+- Implemented `CodexLauncherService` as a shared native/WSL launcher that builds `codex exec` commands from the saved execution profile, renders preset plus input payloads into one non-interactive stdin prompt, and captures typed launch results with stdout, stderr, timestamps, PID, and exit code.
+- Extended local run metadata persistence so each launch can store normalized process details such as execution profile, effective working directory, command, PID, and exit code without adding any new UI-only state.
+- Added focused launcher tests for native PowerShell command construction, WSL path-mapped command construction, successful launch metadata capture, failed launch metadata capture, and run-metadata restart persistence. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/CodexLauncherService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/CodexLauncherServiceTest.java`
+- **Learnings:**
+  - `codex exec` accepts `-` as the prompt argument and reads the full instruction payload from stdin, which is the cleanest way to keep preset text and story-specific inputs non-interactive across both Windows and WSL launches.
+  - The existing `LocalMetadataStorage` run-metadata stream was already the right seam for launcher diagnostics, so extending that typed record avoided inventing a second persistence path for process metadata.
+---
+## 2026-03-15 - US-028
+- Implemented a JavaFX `Story Progress Dashboard` in the execution workspace with visible `Pending`, `Blocked`, `Running`, `Passed`, `Failed`, and `Paused` counts plus current-story and overall-count summaries.
+- Derived dashboard state from persisted `prd.json` task records and persisted run metadata, including a paused/resumable view after restart without mutating the underlying task record state.
+- Added JavaFX coverage for no-project defaults, persisted per-state counts, and paused-state restoration after restart; updated the Windows smoke checklist for dashboard verification; ran `.\mvnw.cmd clean verify jacoco:report`; completed a Windows smoke launch by starting `.\mvnw.cmd -q -DskipTests javafx:run` and detecting a live `Ralphy` window.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Dashboard pause state is best treated as a derived UI state from resumable run metadata plus a persisted `RUNNING` story, because rewriting the task record on startup would blur the boundary between interruption, pause, and future resume behavior.
+  - Re-rendering execution availability and dashboard state after PRD save/import flows keeps the execution workspace consistent with newly synced task records instead of waiting for a full project reopen.
+  - For Windows smoke verification in this repo, detecting a live JavaFX process with `MainWindowTitle` set to `Ralphy` is a workable way to confirm the app launched before tearing the process back down.
+---
+## 2026-03-15 - US-026
+- Implemented per-attempt Codex audit artifact capture in `CodexLauncherService`, storing prompt text, raw stdout, raw stderr, opportunistic structured JSON event streams, and a summary artifact under the active project's managed `.ralph-tui` directories.
+- Extended `LocalMetadataStorage` run metadata schema to v4 so each stored run keeps stable artifact paths alongside the existing normalized launch metadata, and migrated legacy v3 run records by defaulting missing artifact-path fields.
+- Added launcher and metadata regression coverage for successful and failed attempt artifact capture, structured-event persistence when stdout contains JSON event lines, and restart-safe restoration of stored artifact paths. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/CodexLauncherService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/CodexLauncherServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/LocalMetadataStorageTest.java`
+- **Learnings:**
+  - Capturing raw prompt/log data as repository files and storing only their paths in local metadata keeps restart restore lightweight while still leaving a durable audit trail next to the project.
+  - Structured Codex events can be treated as an optional derived artifact: keep raw stdout untouched, then persist a separate `structured-events.jsonl` file only when stdout lines parse as container JSON.
+  - Bumping the local metadata schema for additive run-artifact fields is safest when normalization rewrites legacy records through the new typed constructor, because restart restore then upgrades missing fields without special-case logic elsewhere.
+---
+## 2026-03-15 - US-027
+- Implemented single-story session orchestration in `ActiveProjectService`, gating launch on the active project, PRD validation, profile-specific preflight readiness, and an eligible queued or failed story before starting exactly one attempt at a time.
+- Extended PRD task persistence with per-attempt records that capture run ID, queued/started/ended timestamps, preset ID/name/version, and queued/running/passed/failed outcomes, and exported those fields through the compatible `.ralph-tui/prd-json/prd.json` document.
+- Updated `CodexLauncherService` to persist a `RUNNING` metadata record before execution begins, added a JavaFX `Single Story Session` card with a `Start Single Story` / `Retry Failed Story` action, and ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/CodexLauncherService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdStoryAttemptRecord.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskRecord.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskState.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskStatus.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/RalphPrdJsonMapper.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/RalphPrdJsonUserStory.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/CodexLauncherServiceTest.java`
+- **Learnings:**
+  - Keeping attempt history on the task record itself lets PRD sync and compatible `prd.json` export preserve execution evidence without inventing a second story-history file.
+  - The existing native/WSL preflight reports are the right launch gate for single-story execution too; tests need to seed minimal Maven wrapper files when they expect a repository to be launch-eligible.
+  - Pre-saving `RUNNING` launcher metadata before `codex exec` starts is the cleanest way to make resumable/reviewable run detection survive mid-run restarts instead of only successful or failed completions.
 ---
 ## 2026-03-15 - US-015
 - Added remediation commands to native and WSL preflight check records, persisted them in project metadata schema v5, and generated passive guidance for Codex install/auth, Git recovery, quality-gate recovery, WSL distro setup, and WSL path mapping failures.
@@ -186,4 +255,52 @@ after each iteration and it's included in prompts for context.
   - Treating PRD-derived task state as a separate typed file keeps execution-facing task data decoupled from Markdown editing while still letting `ActiveProjectService` restore and sync it from one project-scoped seam.
   - Using story IDs themselves as task identities makes non-destructive re-sync straightforward: unchanged IDs can safely keep status and history even when titles or outcomes evolve.
   - Destructive re-sync detection can stay narrow and predictable by keying it off removed story IDs; additions and same-ID content edits can auto-sync safely without forcing user confirmation.
+---
+## 2026-03-15 - US-023
+- Reworked `.ralph-tui/prd-json/prd.json` into a Ralph-compatible flat export with root `name`/`branchName`/`description`/`userStories`, per-story acceptance criteria that append PRD quality gates, and completion/pass state derived from the internal task records.
+- Added a dedicated compatibility validator plus mapper logic that preserves Ralphy-specific task history and status in additive extension fields, and upgraded legacy US-022-era internal `prd.json` files to the new export format during reopen or re-sync.
+- Added regression coverage for compatible export content, validator pass/fail cases, completed-story export state, and legacy-file migration. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskStateStore.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/RalphPrdJsonDocument.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/RalphPrdJsonUserStory.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/RalphPrdJsonMapper.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/RalphPrdJsonCompatibilityValidator.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/RalphPrdJsonCompatibilityValidatorTest.java`
+- **Learnings:**
+  - Compatibility exports are safer when the mapper owns both directions: it can flatten PRD/task state into tracker fields while still restoring internal history from additive extension fields on reopen.
+  - A no-op sync still needs to consider schema migration; otherwise previously stored internal JSON can survive forever without ever being rewritten into the new compatible shape.
+  - Appending shared PRD quality gates onto each exported story acceptance list keeps the tracker file self-contained even when the source Markdown keeps quality gates in a separate section.
+---
+## 2026-03-15 - US-024
+- Implemented compatible `prd.json` import in `ActiveProjectService`, validating external tracker files before reconciliation, rewriting the managed `.ralph-tui/prd-json/prd.json` artifact after import, and blocking imports when Markdown and JSON disagree on story IDs.
+- Reconciled imported tracker state back into the Markdown-derived task graph for stable story IDs, preserving completed history by merging local and imported task histories while keeping Markdown as the canonical source of story definitions and surfacing any non-blocking drift.
+- Added a JavaFX `Import prd.json` action plus conflict messaging in the PRD editor, covered the safe import and conflict flows with unit/UI tests, updated the Windows smoke checklist, ran `.\mvnw.cmd clean verify jacoco:report`, and completed a Windows smoke launch via `.\mvnw.cmd -q -DskipTests javafx:run` with a live `Ralphy` window detected.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdJsonFileChooser.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskStateStore.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Importing tracker state is safest when the app re-canonicalizes imported stories through the active Markdown PRD instead of trusting `prd.json` as an equal structural source.
+  - Merging local and imported task histories before reconciliation preserves completed execution evidence even when external tracker tools strip or rewrite Ralphy’s additive history fields.
+  - JavaFX only needed a small extension to the existing PRD editor surface: a dedicated `Import prd.json` action plus multi-line state messaging was enough to expose blocking and non-blocking Markdown-versus-JSON drift clearly.
+---
+## 2026-03-15 - US-025
+- Implemented `CodexLauncherService` as a shared native/WSL launcher that builds `codex exec` commands from the saved execution profile, renders preset plus input payloads into one non-interactive stdin prompt, and captures typed launch results with stdout, stderr, timestamps, PID, and exit code.
+- Extended local run metadata persistence so each launch can store normalized process details such as execution profile, effective working directory, command, PID, and exit code without adding any new UI-only state.
+- Added focused launcher tests for native PowerShell command construction, WSL path-mapped command construction, successful launch metadata capture, failed launch metadata capture, and run-metadata restart persistence. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/CodexLauncherService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/CodexLauncherServiceTest.java`
+- **Learnings:**
+  - `codex exec` accepts `-` as the prompt argument and reads the full instruction payload from stdin, which is the cleanest way to keep preset text and story-specific inputs non-interactive across both Windows and WSL launches.
+  - The existing `LocalMetadataStorage` run-metadata stream was already the right seam for launcher diagnostics, so extending that typed record avoided inventing a second persistence path for process metadata.
 ---

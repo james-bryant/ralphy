@@ -1,5 +1,6 @@
 package net.uberfoo.ai.ralphy;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -44,5 +45,34 @@ public record PrdTaskState(int schemaVersion,
         return tasks.stream()
                 .filter(task -> task.taskId().equals(taskId))
                 .findFirst();
+    }
+
+    public PrdTaskState replaceTask(PrdTaskRecord replacementTask, String timestamp) {
+        Objects.requireNonNull(replacementTask, "replacementTask must not be null");
+        Objects.requireNonNull(timestamp, "timestamp must not be null");
+
+        List<PrdTaskRecord> updatedTasks = new ArrayList<>(tasks.size());
+        boolean replaced = false;
+        for (PrdTaskRecord task : tasks) {
+            if (task.taskId().equals(replacementTask.taskId())) {
+                updatedTasks.add(replacementTask);
+                replaced = true;
+            } else {
+                updatedTasks.add(task);
+            }
+        }
+
+        if (!replaced) {
+            throw new IllegalArgumentException("No task exists for " + replacementTask.taskId() + ".");
+        }
+
+        return new PrdTaskState(
+                schemaVersion,
+                sourcePrdPath,
+                qualityGates,
+                updatedTasks,
+                createdAt,
+                timestamp
+        );
     }
 }
