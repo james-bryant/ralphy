@@ -24,7 +24,7 @@ import java.util.UUID;
 
 @Component
 public class LocalMetadataStorage {
-    private static final int SCHEMA_VERSION = 4;
+    private static final int SCHEMA_VERSION = 5;
     private static final String STORAGE_FILE_NAME = "metadata-store.json";
     private static final String DEFAULT_PROFILE_TYPE = ExecutionProfile.ProfileType.POWERSHELL.storageValue();
 
@@ -706,17 +706,19 @@ public class LocalMetadataStorage {
                                    String stdoutPath,
                                    String stderrPath,
                                    String structuredEventsPath,
-                                   String summaryPath) {
+                                   String summaryPath,
+                                   String assistantSummaryPath) {
         public RunArtifactPaths {
             promptPath = normalizeOptionalValue(promptPath);
             stdoutPath = normalizeOptionalValue(stdoutPath);
             stderrPath = normalizeOptionalValue(stderrPath);
             structuredEventsPath = normalizeOptionalValue(structuredEventsPath);
             summaryPath = normalizeOptionalValue(summaryPath);
+            assistantSummaryPath = normalizeOptionalValue(assistantSummaryPath);
         }
 
         public static RunArtifactPaths empty() {
-            return new RunArtifactPaths(null, null, null, null, null);
+            return new RunArtifactPaths(null, null, null, null, null, null);
         }
     }
 

@@ -464,6 +464,48 @@
                             </styleClass>
                         </Label>
                     </VBox>
+                    <VBox id="runOutputCard" fx:id="runOutputCard" spacing="12.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Run Output">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Follow the current run without opening raw log files. Assistant Summary shows the stored final assistant message and Raw Output shows the live or persisted log stream."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="runOutputSummaryLabel" fx:id="runOutputSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="runOutputDetailLabel" fx:id="runOutputDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <RadioButton id="assistantSummaryViewRadioButton"
+                                         fx:id="assistantSummaryViewRadioButton"
+                                         mnemonicParsing="false" text="Assistant Summary"/>
+                            <RadioButton id="rawOutputViewRadioButton" fx:id="rawOutputViewRadioButton"
+                                         mnemonicParsing="false" text="Raw Output"/>
+                        </HBox>
+                        <TextArea id="runOutputTextArea" fx:id="runOutputTextArea"
+                                  editable="false" prefRowCount="12" wrapText="true">
+                            <styleClass>
+                                <String fx:value="run-output-area"/>
+                            </styleClass>
+                        </TextArea>
+                    </VBox>
                     <VBox id="storyProgressDashboardCard" fx:id="storyProgressDashboardCard" spacing="12.0">
                         <styleClass>
                             <String fx:value="shell-card"/>

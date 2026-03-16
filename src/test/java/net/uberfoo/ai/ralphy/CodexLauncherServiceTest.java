@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -163,16 +164,23 @@ class CodexLauncherServiceTest {
                 .resolve("US-025")
                 .resolve("run-789")
                 .resolve("attempt-summary.json");
+        Path assistantSummaryPath = activeProject.artifactsDirectoryPath()
+                .resolve("US-025")
+                .resolve("run-789")
+                .resolve("assistant-summary.txt");
 
         assertEquals(promptPath, launchResult.artifacts().promptPath());
         assertEquals(stdoutPath, launchResult.artifacts().stdoutPath());
         assertEquals(stderrPath, launchResult.artifacts().stderrPath());
         assertEquals(structuredEventsPath, launchResult.artifacts().structuredEventsPath());
         assertEquals(summaryPath, launchResult.artifacts().summaryPath());
+        assertEquals(assistantSummaryPath, launchResult.artifacts().assistantSummaryPath());
         assertEquals(executedPlan.get().promptText(), Files.readString(promptPath));
         assertEquals("{\"event\":\"done\"}", Files.readString(stdoutPath));
         assertEquals("", Files.readString(stderrPath));
         assertEquals("{\"event\":\"done\"}", Files.readString(structuredEventsPath));
+        assertEquals("", Files.readString(assistantSummaryPath));
+        assertEquals("", launchResult.assistantSummary());
 
         JsonNode summaryArtifact = objectMapper.readTree(Files.readString(summaryPath));
         assertEquals("run-789", summaryArtifact.path("runId").asText());
@@ -181,6 +189,8 @@ class CodexLauncherServiceTest {
         assertEquals("POWERSHELL", summaryArtifact.path("profileType").asText());
         assertEquals(0, summaryArtifact.path("exitCode").asInt());
         assertEquals(summaryPath.toString(), summaryArtifact.path("artifactPaths").path("summaryPath").asText());
+        assertEquals(assistantSummaryPath.toString(),
+                summaryArtifact.path("artifactPaths").path("assistantSummaryPath").asText());
 
         LocalMetadataStorage.RunMetadataRecord persistedRunMetadata =
                 localMetadataStorage.latestRunMetadataForProject(
@@ -202,7 +212,8 @@ class CodexLauncherServiceTest {
                 stdoutPath.toString(),
                 stderrPath.toString(),
                 structuredEventsPath.toString(),
-                summaryPath.toString()
+                summaryPath.toString(),
+                assistantSummaryPath.toString()
         ), persistedRunMetadata.artifactPaths());
 
         LocalMetadataStorage restartedStorage = LocalMetadataStorage.forTest(storageDirectory);
@@ -354,6 +365,73 @@ class CodexLauncherServiceTest {
         assertEquals(7, summaryArtifact.path("exitCode").asInt());
         assertEquals("Codex exited with code 7.", summaryArtifact.path("message").asText());
         assertTrue(summaryArtifact.path("artifactPaths").path("structuredEventsPath").isNull());
+    }
+
+    @Test
+    void launchStreamsLiveOutputAndStoresAssistantSummarySeparately() throws IOException {
+        Path storageDirectory = tempDir.resolve("streaming-local-storage");
+        LocalMetadataStorage localMetadataStorage = LocalMetadataStorage.forTest(storageDirectory);
+        ActiveProject activeProject = new ActiveProject(createGitRepository("streaming-launch-repo"));
+        localMetadataStorage.startSession();
+        localMetadataStorage.recordProjectActivation(activeProject);
+
+        List<String> streamedStdout = new ArrayList<>();
+        List<String> streamedStderr = new ArrayList<>();
+        CodexLauncherService.ProcessExecutor processExecutor = new CodexLauncherService.ProcessExecutor() {
+            @Override
+            public CodexLauncherService.ProcessExecution execute(CodexLauncherService.CodexLaunchPlan launchPlan,
+                                                                 CodexLauncherService.RunOutputListener runOutputListener) {
+                runOutputListener.onStdout("""
+                        {"event":"assistant_message.delta","role":"assistant","delta":"Planning..."}
+                        """);
+                runOutputListener.onStderr("warning: live stderr");
+                String stdout = """
+                        {"event":"assistant_message.delta","role":"assistant","delta":"Planning..."}
+                        {"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Implemented US-029. Ran tests."}]}
+                        """.trim();
+                return CodexLauncherService.ProcessExecution.completed(9999L, 0, stdout, "warning: live stderr");
+            }
+
+            @Override
+            public CodexLauncherService.ProcessExecution execute(CodexLauncherService.CodexLaunchPlan launchPlan) {
+                throw new AssertionError("Streaming path should be used.");
+            }
+        };
+
+        CodexLauncherService launcherService = new CodexLauncherService(
+                localMetadataStorage,
+                Clock.fixed(Instant.parse("2026-03-15T22:05:00Z"), ZoneOffset.UTC),
+                () -> "run-stream-1",
+                processExecutor
+        );
+
+        CodexLauncherService.CodexLaunchResult launchResult =
+                launcherService.launch(new CodexLauncherService.CodexLaunchRequest(
+                        "US-029",
+                        activeProject,
+                        ExecutionProfile.nativePowerShell(),
+                        presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
+                        List.of(new CodexLauncherService.PromptInput("Story", "US-029")),
+                        "",
+                        List.of("--json")
+                ), new CodexLauncherService.RunOutputListener() {
+                    @Override
+                    public void onStdout(String text) {
+                        streamedStdout.add(text);
+                    }
+
+                    @Override
+                    public void onStderr(String text) {
+                        streamedStderr.add(text);
+                    }
+                });
+
+        assertEquals(1, streamedStdout.size());
+        assertTrue(streamedStdout.getFirst().contains("Planning..."));
+        assertEquals(List.of("warning: live stderr"), streamedStderr);
+        assertEquals("Implemented US-029. Ran tests.", launchResult.assistantSummary());
+        assertEquals("Implemented US-029. Ran tests.",
+                Files.readString(launchResult.artifacts().assistantSummaryPath()));
     }
 
     private CodexLauncherService createLauncherService(CodexLauncherService.ProcessExecutor processExecutor) {

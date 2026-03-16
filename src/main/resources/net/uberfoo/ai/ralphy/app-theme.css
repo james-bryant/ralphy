@@ -183,6 +183,10 @@
     -fx-font-family: "Consolas";
 }
 
+.ralphy-shell .run-output-area {
+    -fx-font-family: "Consolas";
+}
+
 .ralphy-shell .story-progress-metric {
     -fx-background-color: -color-surface-primary;
     -fx-background-radius: 10;

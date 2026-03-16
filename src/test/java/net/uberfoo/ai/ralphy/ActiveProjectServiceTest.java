@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -354,6 +355,62 @@ class ActiveProjectServiceTest {
         assertEquals("run-pass-1", persistedAttempt.path("runId").asText());
         assertEquals("PASSED", persistedAttempt.path("outcome").asText());
         assertEquals("ralph-codex-implement-v1", persistedAttempt.path("presetId").asText());
+    }
+
+    @Test
+    void startEligibleSingleStoryForwardsLiveOutputCallbacks() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        List<String> streamedStdout = new ArrayList<>();
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                new CodexLauncherService.ProcessExecutor() {
+                    @Override
+                    public CodexLauncherService.ProcessExecution execute(CodexLauncherService.CodexLaunchPlan launchPlan,
+                                                                         CodexLauncherService.RunOutputListener runOutputListener) {
+                        runOutputListener.onStdout("streamed stdout");
+                        return CodexLauncherService.ProcessExecution.completed(
+                                7654L,
+                                0,
+                                """
+                                {"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Final summary"}]}
+                                """.trim(),
+                                ""
+                        );
+                    }
+
+                    @Override
+                    public CodexLauncherService.ProcessExecution execute(CodexLauncherService.CodexLaunchPlan launchPlan) {
+                        throw new AssertionError("Streaming launcher path should be used.");
+                    }
+                },
+                () -> "run-stream-service-1"
+        );
+        Path repository = createGitDirectoryRepository("single-story-stream-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-029: Stream Live Output and Display a Final Summary
+                **Outcome:** Live output and a final summary are captured.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStoryStartResult startResult =
+                activeProjectService.startEligibleSingleStory(
+                        PresetUseCase.STORY_IMPLEMENTATION,
+                        new CodexLauncherService.RunOutputListener() {
+                            @Override
+                            public void onStdout(String text) {
+                                streamedStdout.add(text);
+                            }
+                        }
+                );
+
+        assertTrue(startResult.successful());
+        assertEquals(List.of("streamed stdout"), streamedStdout);
+        assertEquals("Final summary", startResult.launchResult().assistantSummary());
     }
 
     @Test

@@ -22,6 +22,7 @@ after each iteration and it's included in prompts for context.
 - Store Codex audit trails as repository-scoped per-attempt artifacts under `.ralph-tui/prompts`, `.ralph-tui/logs`, and `.ralph-tui/artifacts`, and keep only stable artifact paths in `LocalMetadataStorage`; that preserves raw launch output on disk while restart flows restore lightweight typed references instead of duplicating large blobs in app-local metadata.
 - Persist one-story loop execution on the task record itself: append per-run attempt records to `PrdTaskRecord`, export them as additive `prd.json` fields, and pre-save launcher metadata as `RUNNING` before `codex exec` so queued/running/passed/failed recovery survives restart without scraping raw logs.
 - Build execution dashboards from persisted task state plus persisted run-recovery metadata instead of rewriting task records on startup; that lets the UI show a resumable `RUNNING` story as paused after restart while keeping the underlying tracker state stable for later resume flows.
+- Keep run-output viewing split between ephemeral stream state and persisted artifacts: stream live stdout/stderr chunks straight into controller state while the process is active, but persist the final assistant summary as its own artifact path and reload summary/raw views from those stored files after completion or restart.
 
 ---
 ## 2026-03-15 - US-014
@@ -49,6 +50,27 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - `codex exec` accepts `-` as the prompt argument and reads the full instruction payload from stdin, which is the cleanest way to keep preset text and story-specific inputs non-interactive across both Windows and WSL launches.
   - The existing `LocalMetadataStorage` run-metadata stream was already the right seam for launcher diagnostics, so extending that typed record avoided inventing a second persistence path for process metadata.
+---
+## 2026-03-15 - US-029
+- Implemented streamed run-output handling in `CodexLauncherService` and `ActiveProjectService`, including live stdout/stderr callbacks during execution plus a separately persisted `assistant-summary.txt` artifact for the final assistant summary.
+- Added a JavaFX `Run Output` card that restores the latest run from persisted artifact paths, defaults to a restart-safe summary view, and lets users switch between `Assistant Summary` and `Raw Output` without opening repository log files directly.
+- Expanded automated coverage for live-output forwarding, separate assistant-summary persistence, restart-safe summary/raw rendering, and metadata schema migration; updated the Windows smoke checklist; ran `.\mvnw.cmd clean verify jacoco:report`; completed a Windows smoke launch by starting `.\mvnw.cmd -q -DskipTests javafx:run` and detecting a live `Ralphy` window.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/CodexLauncherService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`
+  - `src/test/java/net/uberfoo/ai/ralphy/CodexLauncherServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/LocalMetadataStorageTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Streaming output is easiest to land by extending the launcher seam with a listener while keeping the service contract synchronous; the controller can then update JavaFX state from callbacks without inventing a second execution pipeline.
+  - The stored `attempt-summary.json` metadata artifact is not a user-facing assistant summary; the UI needs a separate persisted text artifact so restart flows can show the final assistant message without reparsing raw logs on every render.
+  - Keeping raw stdout and stderr as separate disk artifacts while composing a combined raw-output view in the controller preserves the audit trail format from US-026 and still gives the UI a simple switchable presentation model.
 ---
 ## 2026-03-15 - US-028
 - Implemented a JavaFX `Story Progress Dashboard` in the execution workspace with visible `Pending`, `Blocked`, `Running`, `Passed`, `Failed`, and `Paused` counts plus current-story and overall-count summaries.

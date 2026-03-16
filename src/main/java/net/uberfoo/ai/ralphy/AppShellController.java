@@ -16,8 +16,10 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import org.springframework.beans.factory.annotation.Qualifier;
 
+import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -94,6 +96,19 @@ public class AppShellController {
             "Save a valid PRD so Ralphy can create persisted story records.";
     private static final String NO_SYNCED_STORY_PROGRESS_CURRENT = "Current story: none";
     private static final String NO_SYNCED_STORY_PROGRESS_COUNTS = "0 total stories tracked.";
+    private static final String NO_ACTIVE_RUN_OUTPUT_SUMMARY = "No active project";
+    private static final String NO_ACTIVE_RUN_OUTPUT_DETAIL =
+            "Open a repository before reviewing live or persisted run output.";
+    private static final String NO_PERSISTED_RUN_OUTPUT_SUMMARY = "No run output yet";
+    private static final String NO_PERSISTED_RUN_OUTPUT_DETAIL =
+            "Start a story to stream live Codex output or reopen a completed run.";
+    private static final String PENDING_ASSISTANT_SUMMARY_MESSAGE =
+            "Waiting for the final assistant summary. Switch to Raw Output to follow the live stream.";
+    private static final String PENDING_RAW_OUTPUT_MESSAGE = "Waiting for Codex to emit live output...";
+    private static final String MISSING_ASSISTANT_SUMMARY_MESSAGE =
+            "No final assistant summary is stored for this run.";
+    private static final String MISSING_RAW_OUTPUT_MESSAGE = "No raw output is stored for this run.";
+    private static final String STDERR_SECTION_HEADER = "[stderr]";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -121,6 +136,7 @@ public class AppShellController {
     private final Executor backgroundExecutor;
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
     private final ToggleGroup presetCatalogToggleGroup = new ToggleGroup();
+    private final ToggleGroup runOutputViewToggleGroup = new ToggleGroup();
     private final List<Button> prdInterviewQuestionButtons = new ArrayList<>();
     private PrdInterviewDraft currentPrdInterviewDraft = PrdInterviewDraft.empty();
     private int currentPrdInterviewQuestionIndex;
@@ -131,6 +147,7 @@ public class AppShellController {
     private String singleStorySessionTaskId;
     private String prdDocumentEditorBaseline = "";
     private String prdDocumentLineSeparator = System.lineSeparator();
+    private RunOutputPresentationState runOutputPresentationState = RunOutputPresentationState.empty();
 
     @FXML
     private Label activeProjectNameLabel;
@@ -200,6 +217,21 @@ public class AppShellController {
 
     @FXML
     private Label storyProgressPausedCountLabel;
+
+    @FXML
+    private Label runOutputDetailLabel;
+
+    @FXML
+    private RadioButton assistantSummaryViewRadioButton;
+
+    @FXML
+    private RadioButton rawOutputViewRadioButton;
+
+    @FXML
+    private Label runOutputSummaryLabel;
+
+    @FXML
+    private TextArea runOutputTextArea;
 
     @FXML
     private Label prdValidationDetailLabel;
@@ -452,10 +484,17 @@ public class AppShellController {
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
                 updateExecutionProfileFieldState()
         );
+        assistantSummaryViewRadioButton.setToggleGroup(runOutputViewToggleGroup);
+        rawOutputViewRadioButton.setToggleGroup(runOutputViewToggleGroup);
+        runOutputViewToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
+                renderRunOutputView()
+        );
+        assistantSummaryViewRadioButton.setSelected(true);
         configurePresetCatalog();
         configurePrdInterview();
         configurePrdDocumentEditor();
         prdDocumentPathField.setEditable(false);
+        runOutputTextArea.setEditable(false);
         nativeExecutionProfileRadioButton.setSelected(true);
         renderActiveProject(activeProjectService.activeProject().orElse(null));
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
@@ -817,6 +856,7 @@ public class AppShellController {
         setNativePreflightMessage("");
         setWslPreflightMessage("");
         if (activeProject == null) {
+            runOutputPresentationState = RunOutputPresentationState.empty();
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
             activeProjectStatusLabel.setText(NO_ACTIVE_PROJECT_STATUS);
@@ -827,11 +867,13 @@ public class AppShellController {
             renderPrdValidation();
             renderSingleStorySession();
             renderStoryProgressDashboard();
+            renderRunOutputView();
             renderPrdInterview(null);
             renderGeneratedPrd(null);
             return;
         }
 
+        refreshRunOutputPresentationState();
         activeProjectNameLabel.setText(activeProject.displayName());
         activeProjectPathLabel.setText(activeProject.displayPath());
         activeProjectStatusLabel.setText(activeProject.displayName());
@@ -842,6 +884,7 @@ public class AppShellController {
         renderPrdValidation();
         renderSingleStorySession();
         renderStoryProgressDashboard();
+        renderRunOutputView();
         renderPrdInterview(activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
         renderGeneratedPrd(activeProject);
     }
@@ -918,6 +961,148 @@ public class AppShellController {
         storyProgressPassedCountLabel.setText(Integer.toString(dashboard.passedCount()));
         storyProgressFailedCountLabel.setText(Integer.toString(dashboard.failedCount()));
         storyProgressPausedCountLabel.setText(Integer.toString(dashboard.pausedCount()));
+    }
+
+    private void renderRunOutputView() {
+        if (activeProjectService.activeProject().isEmpty()) {
+            runOutputSummaryLabel.setText(NO_ACTIVE_RUN_OUTPUT_SUMMARY);
+            runOutputDetailLabel.setText(NO_ACTIVE_RUN_OUTPUT_DETAIL);
+            runOutputTextArea.setText(NO_ACTIVE_RUN_OUTPUT_DETAIL);
+            return;
+        }
+
+        runOutputSummaryLabel.setText(runOutputPresentationState.summary());
+        runOutputDetailLabel.setText(runOutputPresentationState.detail());
+        runOutputTextArea.setText(selectedRunOutputView() == RunOutputView.ASSISTANT_SUMMARY
+                ? assistantSummaryBody(runOutputPresentationState)
+                : rawOutputBody(runOutputPresentationState));
+    }
+
+    private void refreshRunOutputPresentationState() {
+        if (singleStorySessionInProgress && runOutputPresentationState.active()) {
+            return;
+        }
+        runOutputPresentationState = loadPersistedRunOutputPresentationState();
+    }
+
+    private RunOutputPresentationState loadPersistedRunOutputPresentationState() {
+        if (activeProjectService.activeProject().isEmpty()) {
+            return RunOutputPresentationState.empty();
+        }
+
+        return activeProjectService.latestRunMetadata()
+                .map(this::toRunOutputPresentationState)
+                .orElseGet(RunOutputPresentationState::empty);
+    }
+
+    private RunOutputPresentationState toRunOutputPresentationState(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        String storyId = valueOrEmpty(runMetadataRecord.storyId());
+        String status = valueOrEmpty(runMetadataRecord.status());
+        String runId = valueOrEmpty(runMetadataRecord.runId());
+        String profileType = valueOrEmpty(runMetadataRecord.profileType());
+        String summary = hasText(storyId)
+                ? "Latest run: " + storyId + " | " + status
+                : "Latest run output";
+        String detail = buildRunOutputDetail(runId, profileType, runMetadataRecord.startedAt(), runMetadataRecord.endedAt());
+        return new RunOutputPresentationState(
+                true,
+                "RUNNING".equalsIgnoreCase(status) && !hasText(runMetadataRecord.endedAt()),
+                summary,
+                detail,
+                readAssistantSummary(runMetadataRecord),
+                readCombinedRawOutput(runMetadataRecord)
+        );
+    }
+
+    private String buildRunOutputDetail(String runId, String profileType, String startedAt, String endedAt) {
+        List<String> details = new ArrayList<>();
+        if (hasText(runId)) {
+            details.add("Run " + runId);
+        }
+        if (hasText(profileType)) {
+            details.add(profileType + " profile");
+        }
+        if (hasText(startedAt)) {
+            details.add("Started " + startedAt);
+        }
+        if (hasText(endedAt)) {
+            details.add("Ended " + endedAt);
+        }
+        if (details.isEmpty()) {
+            return NO_PERSISTED_RUN_OUTPUT_DETAIL;
+        }
+        return String.join(" | ", details);
+    }
+
+    private String readAssistantSummary(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        return readArtifactText(runMetadataRecord.artifactPaths().assistantSummaryPath());
+    }
+
+    private String readCombinedRawOutput(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        String stdout = readArtifactText(runMetadataRecord.artifactPaths().stdoutPath());
+        String stderr = readArtifactText(runMetadataRecord.artifactPaths().stderrPath());
+        if (!hasText(stdout) && !hasText(stderr)) {
+            return "";
+        }
+        if (!hasText(stderr)) {
+            return stdout;
+        }
+        if (!hasText(stdout)) {
+            return STDERR_SECTION_HEADER + System.lineSeparator() + stderr;
+        }
+
+        StringBuilder rawOutput = new StringBuilder(stdout);
+        if (!stdout.endsWith(System.lineSeparator())) {
+            rawOutput.append(System.lineSeparator());
+        }
+        rawOutput.append(System.lineSeparator())
+                .append(STDERR_SECTION_HEADER)
+                .append(System.lineSeparator())
+                .append(stderr);
+        return rawOutput.toString();
+    }
+
+    private String readArtifactText(String artifactPath) {
+        if (!hasText(artifactPath)) {
+            return "";
+        }
+
+        try {
+            Path resolvedPath = Path.of(artifactPath);
+            if (!Files.exists(resolvedPath)) {
+                return "";
+            }
+            return Files.readString(resolvedPath, StandardCharsets.UTF_8);
+        } catch (InvalidPathException | java.io.IOException ignored) {
+            return "";
+        }
+    }
+
+    private String assistantSummaryBody(RunOutputPresentationState state) {
+        if (!state.available()) {
+            return NO_PERSISTED_RUN_OUTPUT_DETAIL;
+        }
+        if (hasText(state.assistantSummary())) {
+            return state.assistantSummary();
+        }
+        return state.active() ? PENDING_ASSISTANT_SUMMARY_MESSAGE : MISSING_ASSISTANT_SUMMARY_MESSAGE;
+    }
+
+    private String rawOutputBody(RunOutputPresentationState state) {
+        if (!state.available()) {
+            return NO_PERSISTED_RUN_OUTPUT_DETAIL;
+        }
+        if (hasText(state.rawOutput())) {
+            return state.rawOutput();
+        }
+        return state.active() ? PENDING_RAW_OUTPUT_MESSAGE : MISSING_RAW_OUTPUT_MESSAGE;
+    }
+
+    private RunOutputView selectedRunOutputView() {
+        if (rawOutputViewRadioButton.isSelected()) {
+            return RunOutputView.RAW_OUTPUT;
+        }
+        return RunOutputView.ASSISTANT_SUMMARY;
     }
 
     private StoryProgressDashboard buildStoryProgressDashboard() {
@@ -1371,11 +1556,53 @@ public class AppShellController {
         singleStorySessionInProgress = true;
         singleStorySessionTaskId = availability.story().taskId();
         setSingleStorySessionMessage("Starting " + availability.story().taskId() + "...");
+        rawOutputViewRadioButton.setSelected(true);
+        runOutputPresentationState = RunOutputPresentationState.live("Preparing " + availability.story().taskId(),
+                availability.story().taskId() + " is queued for execution.",
+                "",
+                "");
         renderSingleStorySession();
         renderStoryProgressDashboard();
+        renderRunOutputView();
+
+        CodexLauncherService.RunOutputListener runOutputListener = new CodexLauncherService.RunOutputListener() {
+            @Override
+            public void onLaunchStarted(CodexLauncherService.CodexLaunchPlan launchPlan) {
+                Platform.runLater(() -> {
+                    runOutputPresentationState = RunOutputPresentationState.live(
+                            "Streaming " + launchPlan.storyId() + " | RUNNING",
+                            "Run " + launchPlan.runId()
+                                    + " started in "
+                                    + launchPlan.executionProfile().summary()
+                                    + ".",
+                            runOutputPresentationState.assistantSummary(),
+                            runOutputPresentationState.rawOutput()
+                    );
+                    renderRunOutputView();
+                });
+            }
+
+            @Override
+            public void onStdout(String text) {
+                Platform.runLater(() -> {
+                    runOutputPresentationState = runOutputPresentationState.appendRawOutput(text);
+                    renderRunOutputView();
+                });
+            }
+
+            @Override
+            public void onStderr(String text) {
+                Platform.runLater(() -> {
+                    runOutputPresentationState = runOutputPresentationState.appendRawOutput(
+                            formatStderrOutput(text, runOutputPresentationState.rawOutput())
+                    );
+                    renderRunOutputView();
+                });
+            }
+        };
 
         CompletableFuture.supplyAsync(
-                        () -> activeProjectService.startEligibleSingleStory(selectedPresetUseCase()),
+                        () -> activeProjectService.startEligibleSingleStory(selectedPresetUseCase(), runOutputListener),
                         backgroundExecutor
                 )
                 .whenComplete((result, throwable) -> Platform.runLater(() -> {
@@ -1385,6 +1612,9 @@ public class AppShellController {
                         setSingleStorySessionMessage("Single story session failed: " + throwable.getMessage());
                     } else {
                         setSingleStorySessionMessage(result.detail());
+                        if (result.launchResult() != null) {
+                            runOutputPresentationState = loadPersistedRunOutputPresentationState();
+                        }
                     }
                     renderActiveProject(activeProjectService.activeProject().orElse(null));
                 }));
@@ -1394,6 +1624,25 @@ public class AppShellController {
         boolean visible = hasText(message);
         singleStorySessionMessageLabel.setText(visible ? message : "");
         singleStorySessionMessageLabel.setVisible(visible);
+    }
+
+    private String formatStderrOutput(String text, String existingRawOutput) {
+        if (!hasText(text)) {
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        if (!hasText(existingRawOutput) || !existingRawOutput.contains(STDERR_SECTION_HEADER)) {
+            if (hasText(existingRawOutput) && !existingRawOutput.endsWith(System.lineSeparator())) {
+                builder.append(System.lineSeparator());
+            }
+            if (hasText(existingRawOutput)) {
+                builder.append(System.lineSeparator());
+            }
+            builder.append(STDERR_SECTION_HEADER).append(System.lineSeparator());
+        }
+        builder.append(text);
+        return builder.toString();
     }
 
     private boolean hasText(String value) {
@@ -1828,6 +2077,11 @@ public class AppShellController {
     private record ShellSection(String title, String workspaceText, String statusText) {
     }
 
+    private enum RunOutputView {
+        ASSISTANT_SUMMARY,
+        RAW_OUTPUT
+    }
+
     private enum StoryDashboardState {
         PENDING,
         BLOCKED,
@@ -1850,5 +2104,44 @@ public class AppShellController {
                                           int passedCount,
                                           int failedCount,
                                           int pausedCount) {
+    }
+
+    private record RunOutputPresentationState(boolean available,
+                                              boolean active,
+                                              String summary,
+                                              String detail,
+                                              String assistantSummary,
+                                              String rawOutput) {
+        private static RunOutputPresentationState empty() {
+            return new RunOutputPresentationState(
+                    false,
+                    false,
+                    NO_PERSISTED_RUN_OUTPUT_SUMMARY,
+                    NO_PERSISTED_RUN_OUTPUT_DETAIL,
+                    "",
+                    ""
+            );
+        }
+
+        private static RunOutputPresentationState live(String summary,
+                                                       String detail,
+                                                       String assistantSummary,
+                                                       String rawOutput) {
+            return new RunOutputPresentationState(true, true, summary, detail, assistantSummary, rawOutput);
+        }
+
+        private RunOutputPresentationState appendRawOutput(String additionalOutput) {
+            if (additionalOutput == null || additionalOutput.isBlank()) {
+                return this;
+            }
+            return new RunOutputPresentationState(
+                    available,
+                    active,
+                    summary,
+                    detail,
+                    assistantSummary,
+                    rawOutput + additionalOutput
+            );
+        }
     }
 }

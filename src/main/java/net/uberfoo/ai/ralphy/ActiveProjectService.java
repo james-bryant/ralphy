@@ -126,6 +126,15 @@ public class ActiveProjectService {
                 .flatMap(this::toRunRecoveryCandidate);
     }
 
+    public synchronized Optional<LocalMetadataStorage.RunMetadataRecord> latestRunMetadata() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        return localMetadataStorage.projectRecordForRepository(activeProject.repositoryPath())
+                .flatMap(projectRecord -> localMetadataStorage.latestRunMetadataForProject(projectRecord.projectId()));
+    }
+
     public synchronized Optional<ExecutionProfile> executionProfile() {
         if (activeProject == null) {
             return Optional.empty();
@@ -227,6 +236,11 @@ public class ActiveProjectService {
     }
 
     public synchronized SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase) {
+        return startEligibleSingleStory(presetUseCase, CodexLauncherService.RunOutputListener.noop());
+    }
+
+    public synchronized SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase,
+                                                                        CodexLauncherService.RunOutputListener runOutputListener) {
         SingleStorySessionAvailability availability = singleStorySessionAvailability(presetUseCase);
         if (!availability.startable()) {
             return SingleStoryStartResult.failure(availability.summary(), availability.detail());
@@ -277,7 +291,7 @@ public class ActiveProjectService {
         String finalMessage;
         String finishedAt = Instant.now().toString();
         try {
-            launchResult = codexLauncherService.launch(launchPlan);
+            launchResult = codexLauncherService.launch(launchPlan, runOutputListener);
             finalStatus = launchResult.successful() ? PrdTaskStatus.COMPLETED : PrdTaskStatus.FAILED;
             finalMessage = launchResult.successful()
                     ? "Story attempt passed."

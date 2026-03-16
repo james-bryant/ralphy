@@ -117,6 +117,69 @@ class AppShellUiTest {
         assertEquals("Current story: none", harness.text("#storyProgressCurrentStoryLabel"));
         assertEquals("0", harness.text("#storyProgressPendingCountLabel"));
         assertEquals("0", harness.text("#storyProgressPausedCountLabel"));
+        assertEquals("No active project", harness.text("#runOutputSummaryLabel"));
+    }
+
+    @Test
+    void appShellCanSwitchBetweenAssistantSummaryAndRawOutputForPersistedRunArtifacts() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("run-output-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        seedRunOutputArtifacts(
+                activeProject,
+                "run-029-1",
+                "US-029",
+                "{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Planning...\"}",
+                "warning: stderr output",
+                "Implemented US-029. Ran verification."
+        );
+        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(new LocalMetadataStorage.RunMetadataRecord(
+                "run-029-1",
+                projectId,
+                "US-029",
+                "SUCCEEDED",
+                "2026-03-15T22:10:00Z",
+                "2026-03-15T22:12:00Z",
+                "POWERSHELL",
+                repository.toString(),
+                1234L,
+                0,
+                List.of("powershell.exe", "-NoLogo"),
+                new LocalMetadataStorage.RunArtifactPaths(
+                        activeProject.promptsDirectoryPath().resolve("US-029").resolve("run-029-1").resolve("prompt.txt")
+                                .toString(),
+                        activeProject.logsDirectoryPath().resolve("US-029").resolve("run-029-1").resolve("stdout.log")
+                                .toString(),
+                        activeProject.logsDirectoryPath().resolve("US-029").resolve("run-029-1").resolve("stderr.log")
+                                .toString(),
+                        activeProject.logsDirectoryPath().resolve("US-029").resolve("run-029-1")
+                                .resolve("structured-events.jsonl").toString(),
+                        activeProject.artifactsDirectoryPath().resolve("US-029").resolve("run-029-1")
+                                .resolve("attempt-summary.json").toString(),
+                        activeProject.artifactsDirectoryPath().resolve("US-029").resolve("run-029-1")
+                                .resolve("assistant-summary.txt").toString()
+                )
+        )));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertEquals("Latest run: US-029 | SUCCEEDED", harness.text("#runOutputSummaryLabel"));
+        assertTrue(harness.text("#runOutputDetailLabel").contains("run-029-1"));
+        assertEquals("Implemented US-029. Ran verification.", harness.text("#runOutputTextArea"));
+
+        harness.clickOn("#rawOutputViewRadioButton");
+
+        String rawOutput = harness.text("#runOutputTextArea");
+        assertTrue(rawOutput.contains("assistant_message.delta"));
+        assertTrue(rawOutput.contains("[stderr]"));
+        assertTrue(rawOutput.contains("warning: stderr output"));
+
+        harness.clickOn("#assistantSummaryViewRadioButton");
+
+        assertEquals("Implemented US-029. Ran verification.", harness.text("#runOutputTextArea"));
     }
 
     @Test
@@ -1062,6 +1125,32 @@ class AppShellUiTest {
         Files.createDirectories(activeProject.prdJsonDirectoryPath());
         Files.writeString(activeProject.activePrdPath(), markdown);
         Files.writeString(activeProject.activePrdJsonPath(), prdJson);
+    }
+
+    private void seedRunOutputArtifacts(ActiveProject activeProject,
+                                        String runId,
+                                        String storyId,
+                                        String stdout,
+                                        String stderr,
+                                        String assistantSummary) throws IOException {
+        Path promptDirectory = activeProject.promptsDirectoryPath().resolve(storyId).resolve(runId);
+        Path logDirectory = activeProject.logsDirectoryPath().resolve(storyId).resolve(runId);
+        Path artifactDirectory = activeProject.artifactsDirectoryPath().resolve(storyId).resolve(runId);
+        Files.createDirectories(promptDirectory);
+        Files.createDirectories(logDirectory);
+        Files.createDirectories(artifactDirectory);
+        Files.writeString(promptDirectory.resolve("prompt.txt"), "Prompt text");
+        Files.writeString(logDirectory.resolve("stdout.log"), stdout);
+        Files.writeString(logDirectory.resolve("stderr.log"), stderr);
+        Files.writeString(logDirectory.resolve("structured-events.jsonl"), stdout);
+        Files.writeString(artifactDirectory.resolve("assistant-summary.txt"), assistantSummary);
+        Files.writeString(artifactDirectory.resolve("attempt-summary.json"), """
+                {
+                  "runId": "%s",
+                  "storyId": "%s",
+                  "status": "SUCCEEDED"
+                }
+                """.formatted(runId, storyId));
     }
 
     private String storyProgressDashboardMarkdown() {
