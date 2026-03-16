@@ -121,6 +121,49 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellPausesOnlyAfterTheCurrentStoryCompletes() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("pause-after-current-story-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        seedStoryProgressArtifacts(repository, pauseAfterCurrentStoryMarkdown(), pauseAfterCurrentStoryPrdJson());
+
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
+        seedStoredProject(storageDirectory, repository);
+
+        Path fakeCodexCommand = createFakeCodexCommandScript();
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(
+                storageDirectory,
+                "--ralphy.preflight.native.auto-run=false",
+                "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
+        );
+
+        harness.clickOn("#storyImplementationPresetRadioButton");
+        harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to start US-030"));
+        assertFalse(harness.isDisabled("#startSingleStoryButton"));
+
+        harness.clickOn("#startSingleStoryButton");
+        String pauseRequestedSummary = harness.clickWhenEnabledAndReadText(
+                "#pauseSingleStoryButton",
+                "#singleStorySessionSummaryLabel"
+        );
+        assertEquals("Pause requested", pauseRequestedSummary);
+        harness.waitUntil(() -> "Execution paused".equals(harness.text("#storyProgressSummaryLabel")));
+        assertTrue(harness.text("#storyProgressCurrentStoryLabel").contains("Paused | US-031"));
+        assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
+        assertEquals("1", harness.text("#storyProgressPassedCountLabel"));
+        assertEquals("1", harness.text("#storyProgressPausedCountLabel"));
+        assertEquals("Resume Session", harness.text("#startSingleStoryButton"));
+
+        PrdTaskState taskState = harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElseThrow();
+        assertEquals(PrdTaskStatus.COMPLETED, taskState.taskById("US-030").orElseThrow().status());
+        assertEquals(PrdTaskStatus.READY, taskState.taskById("US-031").orElseThrow().status());
+    }
+
+    @Test
     void appShellCanSwitchBetweenAssistantSummaryAndRawOutputForPersistedRunArtifacts() throws Exception {
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("run-output-repo");
@@ -1218,6 +1261,132 @@ class AppShellUiTest {
                 ### Out of Scope
                 - Live log streaming
                 """;
+    }
+
+    private String pauseAfterCurrentStoryMarkdown() {
+        return """
+                # PRD: Pause After Current Story
+
+                ## Overview
+                Pause the execution session only after the active story finishes.
+
+                ## Goals
+                - Keep the repository stable while pause is requested.
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+
+                ## User Stories
+                ### US-030: Finish the active story before pausing
+                **Outcome:** The running story completes before the pause takes effect.
+
+                ### US-031: Keep the next story queued while paused
+                **Outcome:** The next ready story waits for an explicit resume.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Pause-after-current-step behavior
+
+                ### Out of Scope
+                - Retry orchestration
+                """;
+    }
+
+    private String pauseAfterCurrentStoryPrdJson() {
+        return """
+                {
+                  "name": "Pause After Current Story",
+                  "branchName": "ralph/pause-after-current-story",
+                  "description": "Pause only after the running story finishes.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-030",
+                      "title": "Finish the active story before pausing",
+                      "description": "As a user, I want the running story to finish before the pause takes effect.",
+                      "acceptanceCriteria": [
+                        "The running story completes before the pause takes effect.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "The running story completes before the pause takes effect.",
+                      "ralphyStatus": "READY"
+                    },
+                    {
+                      "id": "US-031",
+                      "title": "Keep the next story queued while paused",
+                      "description": "As a user, I want the next story to wait for resume.",
+                      "acceptanceCriteria": [
+                        "The next ready story waits for an explicit resume.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 2,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "The next ready story waits for an explicit resume.",
+                      "ralphyStatus": "READY"
+                    }
+                  ]
+                }
+                """;
+    }
+
+    private NativeWindowsPreflightReport passedNativePreflightReport(Path repository) {
+        return new NativeWindowsPreflightReport(
+                "2026-03-15T23:10:00Z",
+                NativeWindowsPreflightReport.OverallStatus.PASS,
+                List.of(
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "codex_cli",
+                                "Codex CLI",
+                                NativeWindowsPreflightReport.CheckCategory.TOOLING,
+                                NativeWindowsPreflightReport.CheckStatus.PASS,
+                                "Detected fake Codex CLI."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "codex_auth",
+                                "Codex Auth",
+                                NativeWindowsPreflightReport.CheckCategory.AUTHENTICATION,
+                                NativeWindowsPreflightReport.CheckStatus.PASS,
+                                "Detected stored test credentials."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "git_ready",
+                                "Git Readiness",
+                                NativeWindowsPreflightReport.CheckCategory.GIT,
+                                NativeWindowsPreflightReport.CheckStatus.PASS,
+                                "Git can access " + repository.toAbsolutePath().normalize() + "."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "quality_gate",
+                                "Quality Gate Command",
+                                NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
+                                NativeWindowsPreflightReport.CheckStatus.PASS,
+                                "Found mvnw.cmd and pom.xml for .\\mvnw.cmd clean verify jacoco:report."
+                        )
+                )
+        );
+    }
+
+    private Path createFakeCodexCommandScript() throws IOException {
+        Path commandPath = tempDir.resolve("fake-codex.cmd");
+        Files.writeString(commandPath, """
+                @echo off
+                if "%~1"=="--version" (
+                    echo codex-cli 0.114.0
+                    exit /b 0
+                )
+
+                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Start-Sleep -Milliseconds 3000; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
+                exit /b 0
+                """);
+        return commandPath;
     }
 
     private String normalizeLineEndings(String value) {

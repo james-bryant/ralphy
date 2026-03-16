@@ -1311,6 +1311,7 @@ class ActiveProjectServiceTest {
                 presetCatalogService,
                 codexLauncherService,
                 createWslPreflightService(),
+                true,
                 true
         );
     }

@@ -144,7 +144,11 @@ public class AppShellController {
     private boolean renderingPrdDocument;
     private boolean prdDocumentDirty;
     private boolean singleStorySessionInProgress;
+    private boolean pauseRequested;
+    private boolean executionPaused;
     private String singleStorySessionTaskId;
+    private String pausedSessionTaskId;
+    private PresetUseCase activeSessionPresetUseCase;
     private String prdDocumentEditorBaseline = "";
     private String prdDocumentLineSeparator = System.lineSeparator();
     private RunOutputPresentationState runOutputPresentationState = RunOutputPresentationState.empty();
@@ -397,6 +401,9 @@ public class AppShellController {
 
     @FXML
     private Button startSingleStoryButton;
+
+    @FXML
+    private Button pauseSingleStoryButton;
 
     @FXML
     private Button runNativePreflightButton;
@@ -856,6 +863,10 @@ public class AppShellController {
         setNativePreflightMessage("");
         setWslPreflightMessage("");
         if (activeProject == null) {
+            singleStorySessionInProgress = false;
+            pauseRequested = false;
+            singleStorySessionTaskId = null;
+            clearPausedSessionState();
             runOutputPresentationState = RunOutputPresentationState.empty();
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
@@ -939,14 +950,34 @@ public class AppShellController {
     }
 
     private void renderSingleStorySession() {
+        PresetUseCase sessionPresetUseCase = sessionPresetUseCase();
         ActiveProjectService.SingleStorySessionAvailability availability =
-                activeProjectService.singleStorySessionAvailability(selectedPresetUseCase());
-        singleStorySessionSummaryLabel.setText(availability.summary());
-        singleStorySessionDetailLabel.setText(availability.detail());
-        startSingleStoryButton.setText(selectedPresetUseCase() == PresetUseCase.RETRY_FIX
-                ? "Retry Failed Story"
-                : "Start Single Story");
+                activeProjectService.singleStorySessionAvailability(sessionPresetUseCase);
+
+        if (pauseRequested && singleStorySessionInProgress && hasText(singleStorySessionTaskId)) {
+            singleStorySessionSummaryLabel.setText("Pause requested");
+            singleStorySessionDetailLabel.setText(singleStorySessionTaskId
+                    + " is still running. Ralphy will stop before the next story starts.");
+        } else if (singleStorySessionInProgress && hasText(singleStorySessionTaskId)) {
+            singleStorySessionSummaryLabel.setText("Running " + singleStorySessionTaskId);
+            singleStorySessionDetailLabel.setText(singleStorySessionTaskId
+                    + " is running with " + sessionActionLabel(sessionPresetUseCase).toLowerCase() + ".");
+        } else if (executionPaused && hasText(pausedSessionTaskId) && availability.startable()) {
+            singleStorySessionSummaryLabel.setText("Session paused");
+            singleStorySessionDetailLabel.setText(pausedSessionTaskId
+                    + " is waiting for Resume Session.");
+        } else {
+            if (executionPaused && !availability.startable()) {
+                clearPausedSessionState();
+            }
+            singleStorySessionSummaryLabel.setText(availability.summary());
+            singleStorySessionDetailLabel.setText(availability.detail());
+        }
+
+        startSingleStoryButton.setText(executionPaused ? "Resume Session" : sessionActionLabel(sessionPresetUseCase));
         startSingleStoryButton.setDisable(!availability.startable() || singleStorySessionInProgress);
+        pauseSingleStoryButton.setText(pauseRequested ? "Pause Requested" : "Pause");
+        pauseSingleStoryButton.setDisable(!singleStorySessionInProgress || pauseRequested);
     }
 
     private void renderStoryProgressDashboard() {
@@ -1137,7 +1168,7 @@ public class AppShellController {
             );
         }
 
-        String pausedStoryId = pausedStoryIdFromRecovery();
+        String pausedStoryId = pausedStoryId();
         EnumMap<StoryDashboardState, Integer> counts = new EnumMap<>(StoryDashboardState.class);
         for (StoryDashboardState state : StoryDashboardState.values()) {
             counts.put(state, 0);
@@ -1158,7 +1189,11 @@ public class AppShellController {
 
         String summary;
         String detail;
-        if (counts.get(StoryDashboardState.RUNNING) > 0) {
+        if (pauseRequested && singleStorySessionInProgress && hasText(singleStorySessionTaskId)) {
+            summary = "Pause requested";
+            detail = singleStorySessionTaskId
+                    + " is still running. Ralphy will stop after the current step completes.";
+        } else if (counts.get(StoryDashboardState.RUNNING) > 0) {
             summary = "Execution running";
             detail = focusedStory == null
                     ? "A story is in progress and the counts update from persisted task state."
@@ -1167,7 +1202,10 @@ public class AppShellController {
         } else if (counts.get(StoryDashboardState.PAUSED) > 0) {
             summary = "Execution paused";
             detail = focusedStory == null
-                    ? "A resumable story was restored from persisted metadata."
+                    ? "A resumable story is waiting to resume."
+                    : executionPaused
+                    ? focusedStory.task().taskId()
+                    + " is ready but paused before the next step begins."
                     : focusedStory.task().taskId()
                     + " was restored from persisted metadata and is waiting to resume.";
         } else if (passedCount == totalStories) {
@@ -1242,9 +1280,7 @@ public class AppShellController {
                 && task.taskId().equals(singleStorySessionTaskId)) {
             return StoryDashboardState.RUNNING;
         }
-        if (hasText(pausedStoryId)
-                && task.taskId().equals(pausedStoryId)
-                && task.status() == PrdTaskStatus.RUNNING) {
+        if (isPausedStory(task, pausedStoryId)) {
             return StoryDashboardState.PAUSED;
         }
 
@@ -1257,7 +1293,20 @@ public class AppShellController {
         };
     }
 
-    private String pausedStoryIdFromRecovery() {
+    private boolean isPausedStory(PrdTaskRecord task, String pausedStoryId) {
+        if (!hasText(pausedStoryId) || !task.taskId().equals(pausedStoryId)) {
+            return false;
+        }
+        if (executionPaused && pausedStoryId.equals(pausedSessionTaskId)) {
+            return true;
+        }
+        return task.status() == PrdTaskStatus.RUNNING;
+    }
+
+    private String pausedStoryId() {
+        if (executionPaused && hasText(pausedSessionTaskId)) {
+            return pausedSessionTaskId;
+        }
         if (singleStorySessionInProgress) {
             return null;
         }
@@ -1266,6 +1315,12 @@ public class AppShellController {
                 .filter(candidate -> candidate.action() == ActiveProjectService.RunRecoveryAction.RESUMABLE)
                 .map(ActiveProjectService.RunRecoveryCandidate::storyId)
                 .orElse(null);
+    }
+
+    private void clearPausedSessionState() {
+        executionPaused = false;
+        pausedSessionTaskId = null;
+        activeSessionPresetUseCase = null;
     }
 
     private String formatCurrentStory(DashboardStoryState focusedStory) {
@@ -1544,8 +1599,9 @@ public class AppShellController {
             return;
         }
 
+        PresetUseCase presetUseCase = sessionPresetUseCase();
         ActiveProjectService.SingleStorySessionAvailability availability =
-                activeProjectService.singleStorySessionAvailability(selectedPresetUseCase());
+                activeProjectService.singleStorySessionAvailability(presetUseCase);
         if (!availability.startable()) {
             setSingleStorySessionMessage(availability.detail());
             renderSingleStorySession();
@@ -1553,19 +1609,113 @@ public class AppShellController {
             return;
         }
 
+        pauseRequested = false;
+        executionPaused = false;
+        pausedSessionTaskId = null;
+        activeSessionPresetUseCase = presetUseCase;
+        launchStorySessionStep(presetUseCase, availability);
+    }
+
+    @FXML
+    private void pauseSingleStorySession() {
+        if (!singleStorySessionInProgress || pauseRequested) {
+            return;
+        }
+
+        pauseRequested = true;
+        setSingleStorySessionMessage("Pause requested. Ralphy will stop after "
+                + singleStorySessionTaskId
+                + " completes.");
+        renderSingleStorySession();
+        renderStoryProgressDashboard();
+    }
+
+    private void launchStorySessionStep(PresetUseCase presetUseCase,
+                                        ActiveProjectService.SingleStorySessionAvailability availability) {
         singleStorySessionInProgress = true;
         singleStorySessionTaskId = availability.story().taskId();
+        activeSessionPresetUseCase = presetUseCase;
         setSingleStorySessionMessage("Starting " + availability.story().taskId() + "...");
         rawOutputViewRadioButton.setSelected(true);
-        runOutputPresentationState = RunOutputPresentationState.live("Preparing " + availability.story().taskId(),
+        runOutputPresentationState = RunOutputPresentationState.live(
+                "Preparing " + availability.story().taskId(),
                 availability.story().taskId() + " is queued for execution.",
                 "",
-                "");
+                ""
+        );
         renderSingleStorySession();
         renderStoryProgressDashboard();
         renderRunOutputView();
 
-        CodexLauncherService.RunOutputListener runOutputListener = new CodexLauncherService.RunOutputListener() {
+        CodexLauncherService.RunOutputListener runOutputListener = runOutputListener();
+        CompletableFuture.supplyAsync(
+                        () -> activeProjectService.startEligibleSingleStory(presetUseCase, runOutputListener),
+                        backgroundExecutor
+                )
+                .whenComplete((result, throwable) -> Platform.runLater(() ->
+                        handleStorySessionStepCompletion(presetUseCase, result, throwable)
+                ));
+    }
+
+    private void handleStorySessionStepCompletion(PresetUseCase presetUseCase,
+                                                  ActiveProjectService.SingleStoryStartResult result,
+                                                  Throwable throwable) {
+        if (result != null && result.launchResult() != null) {
+            runOutputPresentationState = loadPersistedRunOutputPresentationState();
+        }
+
+        if (throwable != null) {
+            finishStorySession("Single story session failed: " + throwable.getMessage(), false);
+            return;
+        }
+        if (result == null || !result.successful()) {
+            finishStorySession(result == null ? "Single story session failed." : result.detail(), false);
+            return;
+        }
+        if (result.finalStatus() == PrdTaskStatus.FAILED) {
+            finishStorySession(result.detail(), false);
+            return;
+        }
+
+        ActiveProjectService.SingleStorySessionAvailability nextAvailability =
+                activeProjectService.singleStorySessionAvailability(presetUseCase);
+        if (pauseRequested) {
+            pauseRequested = false;
+            if (nextAvailability.startable()) {
+                singleStorySessionInProgress = false;
+                singleStorySessionTaskId = null;
+                executionPaused = true;
+                pausedSessionTaskId = nextAvailability.story().taskId();
+                setSingleStorySessionMessage("Paused before " + pausedSessionTaskId + ". Resume when ready.");
+                renderActiveProject(activeProjectService.activeProject().orElse(null));
+                return;
+            }
+
+            finishStorySession(result.detail(), false);
+            return;
+        }
+
+        if (nextAvailability.startable()) {
+            launchStorySessionStep(presetUseCase, nextAvailability);
+            return;
+        }
+
+        finishStorySession(result.detail(), false);
+    }
+
+    private void finishStorySession(String message, boolean preservePausedState) {
+        singleStorySessionInProgress = false;
+        singleStorySessionTaskId = null;
+        pauseRequested = false;
+        if (!preservePausedState) {
+            clearPausedSessionState();
+        }
+        setSingleStorySessionMessage(message);
+        renderActiveProject(activeProjectService.activeProject().orElse(null));
+    }
+
+    private CodexLauncherService.RunOutputListener runOutputListener() {
+        return new CodexLauncherService.RunOutputListener() {
             @Override
             public void onLaunchStarted(CodexLauncherService.CodexLaunchPlan launchPlan) {
                 Platform.runLater(() -> {
@@ -1600,24 +1750,6 @@ public class AppShellController {
                 });
             }
         };
-
-        CompletableFuture.supplyAsync(
-                        () -> activeProjectService.startEligibleSingleStory(selectedPresetUseCase(), runOutputListener),
-                        backgroundExecutor
-                )
-                .whenComplete((result, throwable) -> Platform.runLater(() -> {
-                    singleStorySessionInProgress = false;
-                    singleStorySessionTaskId = null;
-                    if (throwable != null) {
-                        setSingleStorySessionMessage("Single story session failed: " + throwable.getMessage());
-                    } else {
-                        setSingleStorySessionMessage(result.detail());
-                        if (result.launchResult() != null) {
-                            runOutputPresentationState = loadPersistedRunOutputPresentationState();
-                        }
-                    }
-                    renderActiveProject(activeProjectService.activeProject().orElse(null));
-                }));
     }
 
     private void setSingleStorySessionMessage(String message) {
@@ -1681,6 +1813,17 @@ public class AppShellController {
             return PresetUseCase.PRD_CREATION;
         }
         return (PresetUseCase) presetCatalogToggleGroup.getSelectedToggle().getUserData();
+    }
+
+    private PresetUseCase sessionPresetUseCase() {
+        if ((singleStorySessionInProgress || pauseRequested || executionPaused) && activeSessionPresetUseCase != null) {
+            return activeSessionPresetUseCase;
+        }
+        return selectedPresetUseCase();
+    }
+
+    private String sessionActionLabel(PresetUseCase presetUseCase) {
+        return presetUseCase == PresetUseCase.RETRY_FIX ? "Retry Failed Story" : "Start Story Session";
     }
 
     private void renderPresetPreview(PresetUseCase useCase) {

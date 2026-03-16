@@ -23,6 +23,7 @@ after each iteration and it's included in prompts for context.
 - Persist one-story loop execution on the task record itself: append per-run attempt records to `PrdTaskRecord`, export them as additive `prd.json` fields, and pre-save launcher metadata as `RUNNING` before `codex exec` so queued/running/passed/failed recovery survives restart without scraping raw logs.
 - Build execution dashboards from persisted task state plus persisted run-recovery metadata instead of rewriting task records on startup; that lets the UI show a resumable `RUNNING` story as paused after restart while keeping the underlying tracker state stable for later resume flows.
 - Keep run-output viewing split between ephemeral stream state and persisted artifacts: stream live stdout/stderr chunks straight into controller state while the process is active, but persist the final assistant summary as its own artifact path and reload summary/raw views from those stored files after completion or restart.
+- For JavaFX flows that race background completion, extend the shared UI harness with helpers that wait for a control to become enabled and capture the resulting label text on the same FX-thread pulse; that keeps async state assertions deterministic without hard-coded sleeps.
 
 ---
 ## 2026-03-15 - US-014
@@ -50,6 +51,23 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - `codex exec` accepts `-` as the prompt argument and reads the full instruction payload from stdin, which is the cleanest way to keep preset text and story-specific inputs non-interactive across both Windows and WSL launches.
   - The existing `LocalMetadataStorage` run-metadata stream was already the right seam for launcher diagnostics, so extending that typed record avoided inventing a second persistence path for process metadata.
+---
+## 2026-03-15 - US-030
+- Reworked the execution card into a session-oriented control surface that can continue across ready stories, accept a `Pause` request without killing the active process, and stop before the next story starts once the current step completes.
+- Added distinct JavaFX session/dashboard states for `Pause requested` versus fully `Execution paused`, marking the next eligible story as paused in-memory without mutating persisted task state or interrupting the running attempt.
+- Added deterministic JavaFX regression coverage for pause-after-current-step behavior with a fake Windows Codex command, introduced a native-preflight autorun toggle for test stability, updated the Windows smoke checklist, ran `.\mvnw.cmd clean verify jacoco:report`, and completed a Windows smoke launch by starting `.\mvnw.cmd -q -DskipTests javafx:run` and detecting a live `Ralphy` window.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Keeping `ActiveProjectService` scoped to one story at a time while the controller owns pause/continue orchestration lets the UI add loop-state behavior without weakening the persisted task-store boundary from US-027.
+  - For a fully paused loop, treating the next eligible story as a derived paused UI target is cleaner than writing a synthetic paused task status back into `prd.json`, because the underlying tracker state should still reflect only real queued/running/passed/failed transitions.
+  - JavaFX pause tests need FX-thread-atomic click/assert helpers; otherwise the background completion callback can win the race and hide the transient `Pause requested` state before the assertion reads it.
 ---
 ## 2026-03-15 - US-029
 - Implemented streamed run-output handling in `CodexLauncherService` and `ActiveProjectService`, including live stdout/stderr callbacks during execution plus a separately persisted `assistant-summary.txt` artifact for the final assistant summary.

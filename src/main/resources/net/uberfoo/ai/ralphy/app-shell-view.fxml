@@ -433,12 +433,12 @@
                         <padding>
                             <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
                         </padding>
-                        <Label text="Single Story Session">
+                        <Label text="Story Session">
                             <styleClass>
                                 <String fx:value="card-title"/>
                             </styleClass>
                         </Label>
-                        <Label text="Start exactly one eligible story against the active repository. Story state and attempts are persisted on every transition."
+                        <Label text="Run the next eligible story against the active repository and let the current step finish before pause takes effect. Story state and attempts are persisted on every transition."
                                wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
@@ -454,9 +454,14 @@
                                 <String fx:value="muted-text"/>
                             </styleClass>
                         </Label>
-                        <Button id="startSingleStoryButton" fx:id="startSingleStoryButton"
-                                mnemonicParsing="false" onAction="#startSingleStorySession"
-                                text="Start Single Story"/>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Button id="startSingleStoryButton" fx:id="startSingleStoryButton"
+                                    mnemonicParsing="false" onAction="#startSingleStorySession"
+                                    text="Start Story Session"/>
+                            <Button id="pauseSingleStoryButton" fx:id="pauseSingleStoryButton"
+                                    mnemonicParsing="false" onAction="#pauseSingleStorySession"
+                                    text="Pause"/>
+                        </HBox>
                         <Label id="singleStorySessionMessageLabel" fx:id="singleStorySessionMessageLabel" visible="false"
                                wrapText="true">
                             <styleClass>

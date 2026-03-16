@@ -37,6 +37,7 @@ public class ActiveProjectService {
     private final ProjectStorageInitializer projectStorageInitializer;
     private final WslPreflightService wslPreflightService;
     private final CodexLauncherService codexLauncherService;
+    private final boolean autoRunNativeWindowsPreflight;
     private final boolean autoRunWslPreflight;
     private ActiveProject activeProject;
     private NativeWindowsPreflightReport latestNativeWindowsPreflightReport;
@@ -61,6 +62,7 @@ public class ActiveProjectService {
                                 PresetCatalogService presetCatalogService,
                                 CodexLauncherService codexLauncherService,
                                 WslPreflightService wslPreflightService,
+                                @Value("${ralphy.preflight.native.auto-run:true}") boolean autoRunNativeWindowsPreflight,
                                 @Value("${ralphy.preflight.wsl.auto-run:true}") boolean autoRunWslPreflight) {
         this.gitRepositoryInitializer = gitRepositoryInitializer;
         this.projectMetadataInitializer = projectMetadataInitializer;
@@ -74,6 +76,7 @@ public class ActiveProjectService {
         this.presetCatalogService = presetCatalogService;
         this.codexLauncherService = codexLauncherService;
         this.wslPreflightService = wslPreflightService;
+        this.autoRunNativeWindowsPreflight = autoRunNativeWindowsPreflight;
         this.autoRunWslPreflight = autoRunWslPreflight;
         this.localMetadataStorage.startSession();
         restoreLastActiveProject();
@@ -104,6 +107,7 @@ public class ActiveProjectService {
                 presetCatalogService,
                 codexLauncherService,
                 wslPreflightService,
+                true,
                 true
         );
     }
@@ -880,7 +884,7 @@ public class ActiveProjectService {
         latestNativeWindowsPreflightReport = readStoredNativeWindowsPreflight().orElse(null);
         latestWslPreflightReport = readStoredWslPreflight().orElse(null);
         ExecutionProfile executionProfile = executionProfile().orElse(ExecutionProfile.nativePowerShell());
-        if (executionProfile.type() == ExecutionProfile.ProfileType.POWERSHELL) {
+        if (executionProfile.type() == ExecutionProfile.ProfileType.POWERSHELL && autoRunNativeWindowsPreflight) {
             runNativeWindowsPreflightInternal();
         } else if (autoRunWslPreflight && latestWslPreflightReport == null) {
             runWslPreflightInternal();

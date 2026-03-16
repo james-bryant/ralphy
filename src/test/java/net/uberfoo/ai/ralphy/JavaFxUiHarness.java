@@ -12,6 +12,8 @@ import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -70,10 +72,19 @@ final class JavaFxUiHarness {
     }
 
     void launchPrimaryShell(Path storageDirectory) throws Exception {
+        launchPrimaryShell(storageDirectory, new String[0]);
+    }
+
+    void launchPrimaryShell(Path storageDirectory, String... additionalArgs) throws Exception {
         springBridge = new JavaFxSpringBridge(RalphySpringApplication.class);
-        springBridge.start(storageDirectory == null
-                ? new String[0]
-                : new String[]{"--ralphy.storage.directory=" + storageDirectory.toAbsolutePath().normalize()});
+        List<String> applicationArgs = new ArrayList<>();
+        if (storageDirectory != null) {
+            applicationArgs.add("--ralphy.storage.directory=" + storageDirectory.toAbsolutePath().normalize());
+        }
+        if (additionalArgs != null) {
+            applicationArgs.addAll(List.of(additionalArgs));
+        }
+        springBridge.start(applicationArgs.toArray(String[]::new));
 
         AppShellStageConfigurer stageConfigurer = springBridge.getRequiredBean(AppShellStageConfigurer.class);
         stage = onFxThread(() -> {
@@ -141,6 +152,58 @@ final class JavaFxUiHarness {
         });
     }
 
+    void clickWhenEnabled(String selector) throws Exception {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(FX_TIMEOUT_SECONDS);
+        while (System.nanoTime() < deadlineNanos) {
+            boolean clicked = onFxThread(() -> {
+                ButtonBase button = requiredNode(selector, ButtonBase.class);
+                if (button.isDisable()) {
+                    return false;
+                }
+                button.fire();
+                root().applyCss();
+                root().layout();
+                return true;
+            });
+            if (clicked) {
+                return;
+            }
+            Thread.sleep(50L);
+        }
+        throw new TimeoutException("Button " + selector + " was not enabled within " + FX_TIMEOUT_SECONDS
+                + " seconds.");
+    }
+
+    String clickWhenEnabledAndReadText(String buttonSelector, String textSelector) throws Exception {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(FX_TIMEOUT_SECONDS);
+        while (System.nanoTime() < deadlineNanos) {
+            String capturedText = onFxThread(() -> {
+                ButtonBase button = requiredNode(buttonSelector, ButtonBase.class);
+                if (button.isDisable()) {
+                    return null;
+                }
+                button.fire();
+                root().applyCss();
+                root().layout();
+
+                Node node = requiredNode(textSelector);
+                if (node instanceof Labeled labeled) {
+                    return labeled.getText();
+                }
+                if (node instanceof TextInputControl textInputControl) {
+                    return textInputControl.getText();
+                }
+                throw new IllegalArgumentException("Node does not expose text for selector " + textSelector);
+            });
+            if (capturedText != null) {
+                return capturedText;
+            }
+            Thread.sleep(50L);
+        }
+        throw new TimeoutException("Button " + buttonSelector + " was not enabled within " + FX_TIMEOUT_SECONDS
+                + " seconds.");
+    }
+
     void enterText(String selector, String value) throws Exception {
         onFxThread(() -> {
             TextInputControl textInputControl = requiredNode(selector, TextInputControl.class);
@@ -186,6 +249,17 @@ final class JavaFxUiHarness {
 
     boolean isDisabled(String selector) throws Exception {
         return onFxThread(() -> requiredNode(selector).isDisable());
+    }
+
+    void waitUntil(ThrowingBooleanSupplier condition) throws Exception {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(FX_TIMEOUT_SECONDS);
+        while (System.nanoTime() < deadlineNanos) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(50L);
+        }
+        throw new TimeoutException("Condition was not satisfied within " + FX_TIMEOUT_SECONDS + " seconds.");
     }
 
     Color textFill(String selector) throws Exception {
@@ -252,5 +326,10 @@ final class JavaFxUiHarness {
     @FunctionalInterface
     private interface ThrowingSupplier<T> {
         T get() throws Exception;
+    }
+
+    @FunctionalInterface
+    interface ThrowingBooleanSupplier {
+        boolean getAsBoolean() throws Exception;
     }
 }
