@@ -407,6 +407,69 @@ class ActiveProjectServiceTest {
     }
 
     @Test
+    void importMarkdownPrdCopiesExternalMarkdownIntoTheActiveProjectAndTracksTheSourcePath() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        Path repository = createGitDirectoryRepository("import-prd-repo");
+        Path importSource = tempDir.resolve("external-prd.md");
+        String importedMarkdown = "# PRD: Imported Plan\r\n\r\n## Overview\r\nImported from another tool.\r\n";
+        Files.writeString(importSource, importedMarkdown);
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        ActiveProjectService.MarkdownPrdImportResult importResult =
+                activeProjectService.importMarkdownPrd(importSource);
+
+        assertTrue(importResult.successful());
+        assertEquals(importSource.toAbsolutePath().normalize(), importResult.importedFromPath());
+        assertEquals(importedMarkdown, Files.readString(new ActiveProject(repository).activePrdPath()));
+        assertEquals(importedMarkdown, activeProjectService.activePrdMarkdown().orElseThrow());
+
+        MarkdownPrdExchangeLocations trackedLocations = projectMetadataInitializer
+                .readMarkdownPrdExchangeLocations(new ActiveProject(repository))
+                .orElseThrow();
+        assertEquals(importSource.toAbsolutePath().normalize().toString(), trackedLocations.lastImportedPath());
+        assertEquals(importSource.toAbsolutePath().normalize().toString(),
+                activeProjectService.markdownPrdExchangeLocations().orElseThrow().lastImportedPath());
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        assertEquals(importSource.toAbsolutePath().normalize().toString(),
+                restoredService.markdownPrdExchangeLocations().orElseThrow().lastImportedPath());
+    }
+
+    @Test
+    void exportActivePrdWritesSelectedMarkdownFileAndTracksTheDestinationPath() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        Path repository = createGitDirectoryRepository("export-prd-repo");
+        Path exportDestination = tempDir.resolve("exports").resolve("shared-prd.md");
+        String markdown = "# PRD: Exported Plan\r\n\r\n## Overview\r\nReady to share.\r\n";
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(markdown).successful());
+
+        ActiveProjectService.MarkdownPrdExportResult exportResult =
+                activeProjectService.exportActivePrd(exportDestination);
+
+        assertTrue(exportResult.successful());
+        assertEquals(exportDestination.toAbsolutePath().normalize(), exportResult.exportedToPath());
+        assertEquals(markdown, Files.readString(exportDestination));
+
+        MarkdownPrdExchangeLocations trackedLocations = projectMetadataInitializer
+                .readMarkdownPrdExchangeLocations(new ActiveProject(repository))
+                .orElseThrow();
+        assertEquals(exportDestination.toAbsolutePath().normalize().toString(), trackedLocations.lastExportedPath());
+        assertEquals(exportDestination.toAbsolutePath().normalize().toString(),
+                activeProjectService.markdownPrdExchangeLocations().orElseThrow().lastExportedPath());
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        assertEquals(exportDestination.toAbsolutePath().normalize().toString(),
+                restoredService.markdownPrdExchangeLocations().orElseThrow().lastExportedPath());
+    }
+
+    @Test
     void prdExecutionGateBlocksMalformedPrdsAndClearsWhenTheSavedPrdBecomesValid() throws IOException {
         ActiveProjectService activeProjectService = createService();
         Path repository = createGitDirectoryRepository("prd-validation-repo");

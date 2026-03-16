@@ -14,6 +14,7 @@ after each iteration and it's included in prompts for context.
 - Persist in-progress PRD authoring in `project-metadata.json` as typed question/answer draft state plus the selected step index, so JavaFX authoring screens can restore users to the same interview prompt after restart without inventing a second persistence path.
 - Treat generated PRDs as project-scoped filesystem artifacts: save and restore `.ralph-tui/prds/active-prd.md` through `ActiveProjectService` and render the current file in the UI instead of duplicating Markdown content inside project metadata.
 - Model execution prerequisites as typed service-level reports and let JavaFX render those reports directly; keeping PRD validation and future launch gating in `ActiveProjectService` avoids duplicating parser rules in the controller.
+- Track external PRD exchange paths in `.ralph-tui/project-metadata.json` with a typed metadata record and feed those paths back into JavaFX file choosers, so import/export workflows restore their last-used locations without inventing app-global state.
 
 ---
 
@@ -147,4 +148,23 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - A dedicated structural validator is easier to reuse when it returns typed location/message pairs instead of preformatted UI text, because both service gates and JavaFX views can consume the same report.
   - The existing execution workspace can absorb new prerequisites cleanly by adding a focused validation panel, which preserves the separate meaning of run-recovery state versus start-blocking validation state.
+---
+## 2026-03-15 - US-021
+- Implemented Markdown PRD import/export through a new JavaFX file chooser flow, including `Import PRD` and `Export PRD` actions in the PRD editor plus dirty-state protection before import and automatic save-before-export behavior.
+- Added typed project metadata tracking for the last imported and exported Markdown PRD paths, restored that state through `ActiveProjectService`, and reused it to seed the import/export chooser locations after reopen.
+- Added automated service and JavaFX UI coverage for Markdown PRD import/export, updated the Windows smoke checklist with import/export verification steps, ran `.\mvnw.cmd clean verify jacoco:report`, and completed a Windows smoke launch by starting `.\mvnw.cmd -q -DskipTests javafx:run` and confirming a live `Ralphy` window with visible `Import PRD` and `Export PRD` controls.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/MarkdownPrdExchangeLocations.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/MarkdownPrdFileChooser.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/ProjectMetadataInitializer.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Keeping import/export file locations in project metadata makes chooser defaults restart-safe and repository-scoped, which fits this shell better than storing them in app-session metadata.
+  - Import flows need their own dirty-state guard even when save-on-navigation already exists, because importing a new external PRD is an explicit overwrite path rather than a passive view change.
+  - Export should persist pending editor edits before writing the external file so the shared PRD and the exported copy cannot silently diverge from each other.
 ---

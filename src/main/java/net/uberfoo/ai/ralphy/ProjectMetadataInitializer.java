@@ -11,105 +11,111 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.util.function.Function;
 
 @Component
 public class ProjectMetadataInitializer {
-    private static final int SCHEMA_VERSION = 6;
+    private static final int SCHEMA_VERSION = 7;
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     public void writeMetadata(ActiveProject activeProject) throws IOException {
-        Files.createDirectories(activeProject.ralphyDirectoryPath());
-
-        Path metadataPath = activeProject.projectMetadataPath();
         String timestamp = Instant.now().toString();
-        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
-        ProjectMetadataDocument metadataDocument = new ProjectMetadataDocument(
+        writeDocument(activeProject, existingMetadata -> new ProjectMetadataDocument(
                 SCHEMA_VERSION,
                 activeProject.displayName(),
                 activeProject.displayPath(),
-                metadataPath.toString(),
+                activeProject.projectMetadataPath().toString(),
                 activeProject.storagePaths(),
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
                 existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
                 timestamp
-        );
-        persistMetadata(metadataPath, metadataDocument);
+        ));
     }
 
     public void writeNativeWindowsPreflight(ActiveProject activeProject,
                                             NativeWindowsPreflightReport nativeWindowsPreflight) throws IOException {
-        Files.createDirectories(activeProject.ralphyDirectoryPath());
-
-        Path metadataPath = activeProject.projectMetadataPath();
         String timestamp = Instant.now().toString();
-        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
-        ProjectMetadataDocument metadataDocument = new ProjectMetadataDocument(
+        writeDocument(activeProject, existingMetadata -> new ProjectMetadataDocument(
                 SCHEMA_VERSION,
                 activeProject.displayName(),
                 activeProject.displayPath(),
-                metadataPath.toString(),
+                activeProject.projectMetadataPath().toString(),
                 activeProject.storagePaths(),
                 nativeWindowsPreflight,
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
                 existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
                 timestamp
-        );
-        persistMetadata(metadataPath, metadataDocument);
+        ));
     }
 
     public void writeWslPreflight(ActiveProject activeProject,
                                   WslPreflightReport wslPreflight) throws IOException {
-        Files.createDirectories(activeProject.ralphyDirectoryPath());
-
-        Path metadataPath = activeProject.projectMetadataPath();
         String timestamp = Instant.now().toString();
-        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
-        ProjectMetadataDocument metadataDocument = new ProjectMetadataDocument(
+        writeDocument(activeProject, existingMetadata -> new ProjectMetadataDocument(
                 SCHEMA_VERSION,
                 activeProject.displayName(),
                 activeProject.displayPath(),
-                metadataPath.toString(),
+                activeProject.projectMetadataPath().toString(),
                 activeProject.storagePaths(),
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 wslPreflight,
                 existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
                 timestamp
-        );
-        persistMetadata(metadataPath, metadataDocument);
+        ));
     }
 
     public void writePrdInterviewDraft(ActiveProject activeProject,
                                        PrdInterviewDraft prdInterviewDraft) throws IOException {
-        Files.createDirectories(activeProject.ralphyDirectoryPath());
-
-        Path metadataPath = activeProject.projectMetadataPath();
         String timestamp = Instant.now().toString();
-        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
-        ProjectMetadataDocument metadataDocument = new ProjectMetadataDocument(
+        writeDocument(activeProject, existingMetadata -> new ProjectMetadataDocument(
                 SCHEMA_VERSION,
                 activeProject.displayName(),
                 activeProject.displayPath(),
-                metadataPath.toString(),
+                activeProject.projectMetadataPath().toString(),
                 activeProject.storagePaths(),
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
                 prdInterviewDraft,
+                existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
                 timestamp
-        );
-        persistMetadata(metadataPath, metadataDocument);
+        ));
+    }
+
+    public void writeMarkdownPrdExchangeLocations(ActiveProject activeProject,
+                                                  MarkdownPrdExchangeLocations markdownPrdExchangeLocations)
+            throws IOException {
+        String timestamp = Instant.now().toString();
+        writeDocument(activeProject, existingMetadata -> new ProjectMetadataDocument(
+                SCHEMA_VERSION,
+                activeProject.displayName(),
+                activeProject.displayPath(),
+                activeProject.projectMetadataPath().toString(),
+                activeProject.storagePaths(),
+                existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
+                existingMetadata == null ? null : existingMetadata.wslPreflight(),
+                existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                markdownPrdExchangeLocations,
+                existingMetadata == null || existingMetadata.createdAt() == null
+                        ? timestamp
+                        : existingMetadata.createdAt(),
+                timestamp
+        ));
     }
 
     public java.util.Optional<NativeWindowsPreflightReport> readNativeWindowsPreflight(ActiveProject activeProject)
@@ -140,12 +146,33 @@ public class ProjectMetadataInitializer {
         return java.util.Optional.ofNullable(existingMetadata.prdInterviewDraft());
     }
 
+    public java.util.Optional<MarkdownPrdExchangeLocations> readMarkdownPrdExchangeLocations(ActiveProject activeProject)
+            throws IOException {
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(activeProject.projectMetadataPath());
+        if (existingMetadata == null) {
+            return java.util.Optional.empty();
+        }
+
+        return java.util.Optional.ofNullable(existingMetadata.markdownPrdExchangeLocations());
+    }
+
     private ProjectMetadataDocument readExistingMetadata(Path metadataPath) throws IOException {
         if (!Files.exists(metadataPath)) {
             return null;
         }
 
         return objectMapper.readValue(metadataPath.toFile(), ProjectMetadataDocument.class);
+    }
+
+    private void writeDocument(ActiveProject activeProject,
+                               Function<ProjectMetadataDocument, ProjectMetadataDocument> documentFactory)
+            throws IOException {
+        Files.createDirectories(activeProject.ralphyDirectoryPath());
+
+        Path metadataPath = activeProject.projectMetadataPath();
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
+        ProjectMetadataDocument metadataDocument = documentFactory.apply(existingMetadata);
+        persistMetadata(metadataPath, metadataDocument);
     }
 
     private void persistMetadata(Path metadataPath, ProjectMetadataDocument metadataDocument) throws IOException {
@@ -176,6 +203,7 @@ public class ProjectMetadataInitializer {
                                            NativeWindowsPreflightReport nativeWindowsPreflight,
                                            WslPreflightReport wslPreflight,
                                            PrdInterviewDraft prdInterviewDraft,
+                                           MarkdownPrdExchangeLocations markdownPrdExchangeLocations,
                                            String createdAt,
                                            String updatedAt) {
     }

@@ -14,6 +14,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,15 +62,19 @@ public class AppShellController {
     private static final String NO_ACTIVE_PRD_DOCUMENT_MESSAGE =
             "Open or create a repository before generating a Markdown PRD.";
     private static final String EMPTY_PRD_DOCUMENT_MESSAGE =
-            "No generated PRD yet. Generate one from the latest interview answers or open a project with an existing active-prd.md.";
+            "No active PRD yet. Generate one from the latest interview answers or import an existing Markdown PRD.";
     private static final String READY_PRD_DOCUMENT_MESSAGE =
             "The active project already has a saved Markdown PRD. Edit it below and save when you refine the plan.";
     private static final String PRD_DOCUMENT_UNSAVED_CHANGES_MESSAGE =
             "Markdown PRD has unsaved changes. Save to update .ralph-tui/prds/active-prd.md.";
     private static final String PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_REGENERATE_MESSAGE =
             "Save the current Markdown PRD before regenerating it from interview answers.";
+    private static final String PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_IMPORT_MESSAGE =
+            "Save the current Markdown PRD before importing another Markdown file.";
     private static final String NO_ACTIVE_PRD_TO_SAVE_MESSAGE =
             "Generate or import a Markdown PRD before saving edits.";
+    private static final String NO_ACTIVE_PRD_TO_EXPORT_MESSAGE =
+            "Generate or import a Markdown PRD before exporting it.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -91,6 +96,7 @@ public class AppShellController {
     private final PresetCatalogService presetCatalogService;
     private final PrdMarkdownGenerator prdMarkdownGenerator;
     private final PrdInterviewService prdInterviewService;
+    private final MarkdownPrdFileChooser markdownPrdFileChooser;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
     private final ToggleGroup presetCatalogToggleGroup = new ToggleGroup();
@@ -218,10 +224,16 @@ public class AppShellController {
     private Button generatePrdButton;
 
     @FXML
+    private Button importPrdDocumentButton;
+
+    @FXML
     private VBox prdInterviewCard;
 
     @FXML
     private Button savePrdDocumentButton;
+
+    @FXML
+    private Button exportPrdDocumentButton;
 
     @FXML
     private Label prdInterviewDraftStateLabel;
@@ -333,12 +345,14 @@ public class AppShellController {
                               PresetCatalogService presetCatalogService,
                               PrdMarkdownGenerator prdMarkdownGenerator,
                               PrdInterviewService prdInterviewService,
+                              MarkdownPrdFileChooser markdownPrdFileChooser,
                               RepositoryDirectoryChooser repositoryDirectoryChooser) {
         this.shellDescriptor = shellDescriptor;
         this.activeProjectService = activeProjectService;
         this.presetCatalogService = presetCatalogService;
         this.prdMarkdownGenerator = prdMarkdownGenerator;
         this.prdInterviewService = prdInterviewService;
+        this.markdownPrdFileChooser = markdownPrdFileChooser;
         this.repositoryDirectoryChooser = repositoryDirectoryChooser;
     }
 
@@ -505,6 +519,74 @@ public class AppShellController {
     }
 
     @FXML
+    private void importPrdDocument() {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            setPrdDocumentState(NO_ACTIVE_PRD_DOCUMENT_MESSAGE);
+            return;
+        }
+        if (prdDocumentDirty) {
+            setPrdDocumentState(PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_IMPORT_MESSAGE);
+            return;
+        }
+
+        Optional<Path> selectedPath = markdownPrdFileChooser.chooseImportFile(
+                importPrdDocumentButton.getScene().getWindow(),
+                initialImportPrdPath(activeProject.get())
+        );
+        if (selectedPath.isEmpty()) {
+            return;
+        }
+
+        ActiveProjectService.MarkdownPrdImportResult importResult =
+                activeProjectService.importMarkdownPrd(selectedPath.get());
+        if (importResult.markdown() != null) {
+            renderGeneratedPrd(activeProject.get());
+            renderPrdValidation();
+        }
+        if (!importResult.successful()) {
+            setPrdDocumentState(importResult.message());
+            return;
+        }
+
+        setPrdDocumentState("Imported Markdown PRD from " + importResult.importedFromPath()
+                + " into " + importResult.activePrdPath() + ".");
+    }
+
+    @FXML
+    private void exportPrdDocument() {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            setPrdDocumentState(NO_ACTIVE_PRD_DOCUMENT_MESSAGE);
+            return;
+        }
+        if (!persistCurrentPrdDocument(false)) {
+            return;
+        }
+        if (activeProjectService.activePrdMarkdown().isEmpty()) {
+            setPrdDocumentState(NO_ACTIVE_PRD_TO_EXPORT_MESSAGE);
+            return;
+        }
+
+        Optional<Path> selectedPath = markdownPrdFileChooser.chooseExportFile(
+                exportPrdDocumentButton.getScene().getWindow(),
+                initialExportPrdPath(activeProject.get())
+        );
+        if (selectedPath.isEmpty()) {
+            return;
+        }
+
+        ActiveProjectService.MarkdownPrdExportResult exportResult =
+                activeProjectService.exportActivePrd(selectedPath.get());
+        if (!exportResult.successful()) {
+            setPrdDocumentState(exportResult.message());
+            return;
+        }
+
+        setPrdDocumentState("Exported Markdown PRD to " + exportResult.exportedToPath() + ".");
+    }
+
+    @FXML
     private void generatePrdFromInterviewAnswers() {
         Optional<ActiveProject> activeProject = activeProjectService.activeProject();
         if (activeProject.isEmpty()) {
@@ -556,6 +638,35 @@ public class AppShellController {
                 .map(ActiveProject::repositoryPath)
                 .map(Path::getParent)
                 .orElseGet(this::defaultBrowseDirectory);
+    }
+
+    private Path initialImportPrdPath(ActiveProject activeProject) {
+        return trackedMarkdownPrdPath(MarkdownPrdExchangeLocations::lastImportedPath)
+                .orElse(activeProject.repositoryPath());
+    }
+
+    private Path initialExportPrdPath(ActiveProject activeProject) {
+        return trackedMarkdownPrdPath(MarkdownPrdExchangeLocations::lastExportedPath)
+                .orElse(activeProject.activePrdPath());
+    }
+
+    private Optional<Path> trackedMarkdownPrdPath(
+            java.util.function.Function<MarkdownPrdExchangeLocations, String> valueExtractor) {
+        return activeProjectService.markdownPrdExchangeLocations()
+                .map(valueExtractor)
+                .flatMap(this::toPath);
+    }
+
+    private Optional<Path> toPath(String value) {
+        if (!hasText(value)) {
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(Path.of(value).toAbsolutePath().normalize());
+        } catch (InvalidPathException exception) {
+            return Optional.empty();
+        }
     }
 
     private Path defaultBrowseDirectory() {
@@ -1115,6 +1226,8 @@ public class AppShellController {
         boolean activeProjectPresent = activeProject != null;
         prdDocumentCard.setDisable(!activeProjectPresent);
         generatePrdButton.setDisable(!activeProjectPresent);
+        importPrdDocumentButton.setDisable(!activeProjectPresent);
+        exportPrdDocumentButton.setDisable(true);
         savePrdDocumentButton.setDisable(true);
         setPrdDocumentDirty(false);
 
@@ -1139,6 +1252,7 @@ public class AppShellController {
 
         prdDocumentPreviewArea.setDisable(false);
         prdDocumentPreviewArea.setEditable(true);
+        exportPrdDocumentButton.setDisable(false);
         applyPrdDocumentToEditor(activePrdMarkdown.get());
         setPrdDocumentState(READY_PRD_DOCUMENT_MESSAGE);
     }

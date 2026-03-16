@@ -208,6 +208,46 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellCanImportAndExportMarkdownPrdsThroughThePrdEditor() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("import-export-prd-repo");
+        Path importedMarkdownPath = tempDir.resolve("external-import.md");
+        Path exportedMarkdownPath = tempDir.resolve("exports").resolve("shared-prd.md");
+        Path activePrdPath = repository.resolve(".ralph-tui").resolve("prds").resolve("active-prd.md");
+        String importedMarkdown = "# PRD: External Plan\r\n\r\n## Overview\r\nImported from another tool.\r\n";
+        Files.writeString(importedMarkdownPath, importedMarkdown);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+        MarkdownPrdFileChooser markdownPrdFileChooser = harness.getRequiredBean(MarkdownPrdFileChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+        harness.clickOn("#prdEditorNavButton");
+
+        markdownPrdFileChooser.queueSelectionForTest(importedMarkdownPath);
+        harness.clickOn("#importPrdDocumentButton");
+
+        assertEquals(importedMarkdown.replace("\r\n", "\n"), harness.text("#prdDocumentPreviewArea"));
+        assertTrue(harness.text("#prdDocumentStateLabel").contains("Imported Markdown PRD from"));
+        assertEquals(importedMarkdown, Files.readString(activePrdPath));
+        assertTrue(Files.readString(repository.resolve(".ralph-tui").resolve("project-metadata.json"))
+                .contains(importedMarkdownPath.toAbsolutePath().normalize().toString().replace("\\", "\\\\")));
+
+        markdownPrdFileChooser.queueSelectionForTest(exportedMarkdownPath);
+        harness.clickOn("#exportPrdDocumentButton");
+
+        assertTrue(harness.text("#prdDocumentStateLabel").contains("Exported Markdown PRD to"));
+        assertEquals(importedMarkdown, Files.readString(exportedMarkdownPath));
+        String metadataDocument = Files.readString(repository.resolve(".ralph-tui").resolve("project-metadata.json"));
+        assertTrue(metadataDocument.contains(importedMarkdownPath.toAbsolutePath().normalize().toString().replace("\\", "\\\\")));
+        assertTrue(metadataDocument.contains(exportedMarkdownPath.toAbsolutePath().normalize().toString().replace("\\", "\\\\")));
+    }
+
+    @Test
     void appShellCanEditSaveAndRestoreImportedMarkdownPrdsWithoutReformatting() throws Exception {
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("editable-prd-repo");

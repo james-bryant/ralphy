@@ -33,6 +33,7 @@ public class ActiveProjectService {
     private WslPreflightReport latestWslPreflightReport;
     private PrdInterviewDraft prdInterviewDraft;
     private String activePrdMarkdown;
+    private MarkdownPrdExchangeLocations markdownPrdExchangeLocations;
     private String startupRecoveryMessage = "";
 
     @Autowired
@@ -115,6 +116,10 @@ public class ActiveProjectService {
 
     public synchronized Optional<String> activePrdMarkdown() {
         return Optional.ofNullable(activePrdMarkdown);
+    }
+
+    public synchronized Optional<MarkdownPrdExchangeLocations> markdownPrdExchangeLocations() {
+        return Optional.ofNullable(markdownPrdExchangeLocations);
     }
 
     public synchronized PrdExecutionGate prdExecutionGate() {
@@ -230,6 +235,99 @@ public class ActiveProjectService {
         }
     }
 
+    public synchronized MarkdownPrdImportResult importMarkdownPrd(Path sourcePath) {
+        Objects.requireNonNull(sourcePath, "sourcePath must not be null");
+        if (activeProject == null) {
+            return MarkdownPrdImportResult.failure(
+                    "Open or create a repository before importing a Markdown PRD."
+            );
+        }
+
+        Path normalizedSourcePath = sourcePath.toAbsolutePath().normalize();
+        if (!Files.isRegularFile(normalizedSourcePath)) {
+            return MarkdownPrdImportResult.failure(
+                    "Select an existing Markdown PRD file to import: " + normalizedSourcePath
+            );
+        }
+
+        final String markdown;
+        try {
+            markdown = Files.readString(normalizedSourcePath, StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            return MarkdownPrdImportResult.failure(
+                    "Unable to read the selected Markdown PRD: " + exception.getMessage()
+            );
+        }
+
+        ActivePrdSaveResult saveResult = saveActivePrd(markdown);
+        if (!saveResult.successful()) {
+            return MarkdownPrdImportResult.failure(markdown, saveResult.path(), normalizedSourcePath, saveResult.message());
+        }
+
+        MarkdownPrdExchangeLocations updatedLocations = currentMarkdownPrdExchangeLocations()
+                .withLastImportedPath(normalizedSourcePath.toString());
+        try {
+            projectMetadataInitializer.writeMarkdownPrdExchangeLocations(activeProject, updatedLocations);
+            markdownPrdExchangeLocations = updatedLocations;
+            return MarkdownPrdImportResult.success(markdown, saveResult.path(), normalizedSourcePath);
+        } catch (IOException exception) {
+            return MarkdownPrdImportResult.failure(
+                    markdown,
+                    saveResult.path(),
+                    normalizedSourcePath,
+                    "Imported Markdown PRD saved, but the import location could not be tracked: "
+                            + exception.getMessage()
+            );
+        }
+    }
+
+    public synchronized MarkdownPrdExportResult exportActivePrd(Path destinationPath) {
+        Objects.requireNonNull(destinationPath, "destinationPath must not be null");
+        if (activeProject == null) {
+            return MarkdownPrdExportResult.failure(
+                    "Open or create a repository before exporting a Markdown PRD."
+            );
+        }
+        if (activePrdMarkdown == null) {
+            return MarkdownPrdExportResult.failure(
+                    "Generate or import a Markdown PRD before exporting it."
+            );
+        }
+
+        Path normalizedDestinationPath = destinationPath.toAbsolutePath().normalize();
+        try {
+            Path parentDirectory = normalizedDestinationPath.getParent();
+            if (parentDirectory != null) {
+                Files.createDirectories(parentDirectory);
+            }
+
+            Path temporaryExportPath = normalizedDestinationPath.resolveSibling(
+                    normalizedDestinationPath.getFileName() + ".tmp"
+            );
+            Files.writeString(temporaryExportPath, activePrdMarkdown, StandardCharsets.UTF_8);
+            moveIntoPlace(temporaryExportPath, normalizedDestinationPath);
+        } catch (IOException exception) {
+            return MarkdownPrdExportResult.failure(
+                    normalizedDestinationPath,
+                    "Unable to export the active Markdown PRD: " + exception.getMessage()
+            );
+        }
+
+        MarkdownPrdExchangeLocations updatedLocations = currentMarkdownPrdExchangeLocations()
+                .withLastExportedPath(normalizedDestinationPath.toString());
+        try {
+            projectMetadataInitializer.writeMarkdownPrdExchangeLocations(activeProject, updatedLocations);
+            markdownPrdExchangeLocations = updatedLocations;
+            return MarkdownPrdExportResult.success(normalizedDestinationPath);
+        } catch (IOException exception) {
+            return MarkdownPrdExportResult.failure(
+                    normalizedDestinationPath,
+                    "Exported the active Markdown PRD, but the export location could not be tracked: "
+                            + exception.getMessage()
+            );
+        }
+    }
+
     public synchronized NativeWindowsPreflightRunResult runNativeWindowsPreflight() {
         if (activeProject == null) {
             return NativeWindowsPreflightRunResult.failure(
@@ -340,6 +438,7 @@ public class ActiveProjectService {
         refreshPreflightState();
         refreshPrdInterviewDraft();
         refreshActivePrd();
+        refreshMarkdownPrdExchangeLocations();
         startupRecoveryMessage = "";
         return ProjectActivationResult.success(candidateProject);
     }
@@ -420,6 +519,10 @@ public class ActiveProjectService {
         activePrdMarkdown = readStoredActivePrd().orElse(null);
     }
 
+    private void refreshMarkdownPrdExchangeLocations() {
+        markdownPrdExchangeLocations = readStoredMarkdownPrdExchangeLocations().orElse(null);
+    }
+
     private Optional<PrdInterviewDraft> readStoredPrdInterviewDraft() {
         if (activeProject == null) {
             return Optional.empty();
@@ -442,6 +545,24 @@ public class ActiveProjectService {
         } catch (IOException exception) {
             return Optional.empty();
         }
+    }
+
+    private Optional<MarkdownPrdExchangeLocations> readStoredMarkdownPrdExchangeLocations() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        try {
+            return projectMetadataInitializer.readMarkdownPrdExchangeLocations(activeProject);
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private MarkdownPrdExchangeLocations currentMarkdownPrdExchangeLocations() {
+        return markdownPrdExchangeLocations == null
+                ? new MarkdownPrdExchangeLocations(null, null)
+                : markdownPrdExchangeLocations;
     }
 
     private void moveIntoPlace(Path temporaryPath, Path destinationPath) throws IOException {
@@ -681,6 +802,41 @@ public class ActiveProjectService {
 
         private static ActivePrdSaveResult failure(String markdown, Path path, String message) {
             return new ActivePrdSaveResult(false, markdown, path, message);
+        }
+    }
+
+    public record MarkdownPrdImportResult(boolean successful,
+                                          String markdown,
+                                          Path activePrdPath,
+                                          Path importedFromPath,
+                                          String message) {
+        private static MarkdownPrdImportResult success(String markdown, Path activePrdPath, Path importedFromPath) {
+            return new MarkdownPrdImportResult(true, markdown, activePrdPath, importedFromPath, "");
+        }
+
+        private static MarkdownPrdImportResult failure(String message) {
+            return new MarkdownPrdImportResult(false, null, null, null, message);
+        }
+
+        private static MarkdownPrdImportResult failure(String markdown,
+                                                       Path activePrdPath,
+                                                       Path importedFromPath,
+                                                       String message) {
+            return new MarkdownPrdImportResult(false, markdown, activePrdPath, importedFromPath, message);
+        }
+    }
+
+    public record MarkdownPrdExportResult(boolean successful, Path exportedToPath, String message) {
+        private static MarkdownPrdExportResult success(Path exportedToPath) {
+            return new MarkdownPrdExportResult(true, exportedToPath, "");
+        }
+
+        private static MarkdownPrdExportResult failure(String message) {
+            return new MarkdownPrdExportResult(false, null, message);
+        }
+
+        private static MarkdownPrdExportResult failure(Path exportedToPath, String message) {
+            return new MarkdownPrdExportResult(false, exportedToPath, message);
         }
     }
 
