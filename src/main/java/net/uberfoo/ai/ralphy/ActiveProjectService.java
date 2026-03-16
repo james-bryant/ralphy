@@ -11,6 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -24,6 +26,8 @@ public class ActiveProjectService {
     private final LocalMetadataStorage localMetadataStorage;
     private final NativeWindowsPreflightService nativeWindowsPreflightService;
     private final PrdStructureValidator prdStructureValidator;
+    private final PrdTaskStateStore prdTaskStateStore;
+    private final PrdTaskSynchronizer prdTaskSynchronizer;
     private final ProjectMetadataInitializer projectMetadataInitializer;
     private final ProjectStorageInitializer projectStorageInitializer;
     private final WslPreflightService wslPreflightService;
@@ -33,6 +37,8 @@ public class ActiveProjectService {
     private WslPreflightReport latestWslPreflightReport;
     private PrdInterviewDraft prdInterviewDraft;
     private String activePrdMarkdown;
+    private PrdTaskState prdTaskState;
+    private PrdTaskSyncResult lastPrdTaskSyncResult;
     private MarkdownPrdExchangeLocations markdownPrdExchangeLocations;
     private String startupRecoveryMessage = "";
 
@@ -43,6 +49,8 @@ public class ActiveProjectService {
                                 LocalMetadataStorage localMetadataStorage,
                                 NativeWindowsPreflightService nativeWindowsPreflightService,
                                 PrdStructureValidator prdStructureValidator,
+                                PrdTaskStateStore prdTaskStateStore,
+                                PrdTaskSynchronizer prdTaskSynchronizer,
                                 WslPreflightService wslPreflightService,
                                 @Value("${ralphy.preflight.wsl.auto-run:true}") boolean autoRunWslPreflight) {
         this.gitRepositoryInitializer = gitRepositoryInitializer;
@@ -51,6 +59,8 @@ public class ActiveProjectService {
         this.localMetadataStorage = localMetadataStorage;
         this.nativeWindowsPreflightService = nativeWindowsPreflightService;
         this.prdStructureValidator = prdStructureValidator;
+        this.prdTaskStateStore = prdTaskStateStore;
+        this.prdTaskSynchronizer = prdTaskSynchronizer;
         this.wslPreflightService = wslPreflightService;
         this.autoRunWslPreflight = autoRunWslPreflight;
         this.localMetadataStorage.startSession();
@@ -63,6 +73,8 @@ public class ActiveProjectService {
                          LocalMetadataStorage localMetadataStorage,
                          NativeWindowsPreflightService nativeWindowsPreflightService,
                          PrdStructureValidator prdStructureValidator,
+                         PrdTaskStateStore prdTaskStateStore,
+                         PrdTaskSynchronizer prdTaskSynchronizer,
                          WslPreflightService wslPreflightService) {
         this(
                 gitRepositoryInitializer,
@@ -71,6 +83,8 @@ public class ActiveProjectService {
                 localMetadataStorage,
                 nativeWindowsPreflightService,
                 prdStructureValidator,
+                prdTaskStateStore,
+                prdTaskSynchronizer,
                 wslPreflightService,
                 true
         );
@@ -116,6 +130,14 @@ public class ActiveProjectService {
 
     public synchronized Optional<String> activePrdMarkdown() {
         return Optional.ofNullable(activePrdMarkdown);
+    }
+
+    public synchronized Optional<PrdTaskState> prdTaskState() {
+        return Optional.ofNullable(prdTaskState);
+    }
+
+    public synchronized Optional<PrdTaskSyncResult> lastPrdTaskSyncResult() {
+        return Optional.ofNullable(lastPrdTaskSyncResult);
     }
 
     public synchronized Optional<MarkdownPrdExchangeLocations> markdownPrdExchangeLocations() {
@@ -225,6 +247,7 @@ public class ActiveProjectService {
             Files.writeString(temporaryPrdPath, markdown, StandardCharsets.UTF_8);
             moveIntoPlace(temporaryPrdPath, activePrdPath);
             activePrdMarkdown = markdown;
+            lastPrdTaskSyncResult = syncActivePrdTaskStateInternal(false);
             return ActivePrdSaveResult.success(markdown, activePrdPath);
         } catch (IOException exception) {
             return ActivePrdSaveResult.failure(
@@ -233,6 +256,11 @@ public class ActiveProjectService {
                     "Unable to store the active Markdown PRD: " + exception.getMessage()
             );
         }
+    }
+
+    public synchronized PrdTaskSyncResult syncActivePrdTaskState(boolean confirmDestructiveRemap) {
+        lastPrdTaskSyncResult = syncActivePrdTaskStateInternal(confirmDestructiveRemap);
+        return lastPrdTaskSyncResult;
     }
 
     public synchronized MarkdownPrdImportResult importMarkdownPrd(Path sourcePath) {
@@ -438,7 +466,11 @@ public class ActiveProjectService {
         refreshPreflightState();
         refreshPrdInterviewDraft();
         refreshActivePrd();
+        refreshPrdTaskState();
         refreshMarkdownPrdExchangeLocations();
+        lastPrdTaskSyncResult = activePrdMarkdown == null || activePrdMarkdown.isBlank()
+                ? null
+                : syncActivePrdTaskStateInternal(false);
         startupRecoveryMessage = "";
         return ProjectActivationResult.success(candidateProject);
     }
@@ -519,6 +551,10 @@ public class ActiveProjectService {
         activePrdMarkdown = readStoredActivePrd().orElse(null);
     }
 
+    private void refreshPrdTaskState() {
+        prdTaskState = readStoredPrdTaskState().orElse(null);
+    }
+
     private void refreshMarkdownPrdExchangeLocations() {
         markdownPrdExchangeLocations = readStoredMarkdownPrdExchangeLocations().orElse(null);
     }
@@ -547,6 +583,18 @@ public class ActiveProjectService {
         }
     }
 
+    private Optional<PrdTaskState> readStoredPrdTaskState() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        try {
+            return prdTaskStateStore.read(activeProject);
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+    }
+
     private Optional<MarkdownPrdExchangeLocations> readStoredMarkdownPrdExchangeLocations() {
         if (activeProject == null) {
             return Optional.empty();
@@ -563,6 +611,83 @@ public class ActiveProjectService {
         return markdownPrdExchangeLocations == null
                 ? new MarkdownPrdExchangeLocations(null, null)
                 : markdownPrdExchangeLocations;
+    }
+
+    private PrdTaskSyncResult syncActivePrdTaskStateInternal(boolean confirmDestructiveRemap) {
+        if (activeProject == null) {
+            return PrdTaskSyncResult.failure("Open or create a repository before syncing PRD task state.");
+        }
+        if (activePrdMarkdown == null || activePrdMarkdown.isBlank()) {
+            return PrdTaskSyncResult.failure("Generate, save, or import a Markdown PRD before syncing task state.");
+        }
+
+        PrdValidationReport validationReport = prdStructureValidator.validate(activePrdMarkdown);
+        if (!validationReport.valid()) {
+            return PrdTaskSyncResult.failure(
+                    "Resolve PRD validation errors before syncing internal task state."
+            );
+        }
+
+        PrdTaskSynchronizer.SyncPlan syncPlan = prdTaskSynchronizer.plan(activePrdMarkdown, prdTaskState);
+        if (syncPlan.destructive() && !confirmDestructiveRemap) {
+            return PrdTaskSyncResult.confirmationRequired(
+                    syncPlan,
+                    "Story ID changes would remove existing task records: "
+                            + String.join(", ", syncPlan.removedTaskIds())
+                            + ". Confirm the destructive remap to apply the new task state."
+            );
+        }
+
+        String timestamp = Instant.now().toString();
+        PrdTaskState synchronizedState = prdTaskSynchronizer.synchronize(
+                activeProject,
+                activePrdMarkdown,
+                prdTaskState,
+                timestamp
+        );
+        if (prdTaskState != null
+                && syncPlan.addedTaskIds().isEmpty()
+                && syncPlan.updatedTaskIds().isEmpty()
+                && syncPlan.removedTaskIds().isEmpty()
+                && prdTaskState.qualityGates().equals(synchronizedState.qualityGates())
+                && prdTaskState.sourcePrdPath().equals(synchronizedState.sourcePrdPath())) {
+            return PrdTaskSyncResult.success(prdTaskState, syncPlan, "Internal task state already matches the active PRD.");
+        }
+
+        try {
+            prdTaskStateStore.write(activeProject, synchronizedState);
+            prdTaskState = synchronizedState;
+            return PrdTaskSyncResult.success(
+                    synchronizedState,
+                    syncPlan,
+                    buildPrdTaskSyncMessage(syncPlan, synchronizedState)
+            );
+        } catch (IOException exception) {
+            return PrdTaskSyncResult.failure(
+                    syncPlan,
+                    "Unable to store internal PRD task state: " + exception.getMessage()
+            );
+        }
+    }
+
+    private String buildPrdTaskSyncMessage(PrdTaskSynchronizer.SyncPlan syncPlan, PrdTaskState synchronizedState) {
+        List<String> changeSummary = new ArrayList<>();
+        if (!syncPlan.addedTaskIds().isEmpty()) {
+            changeSummary.add(syncPlan.addedTaskIds().size() + " added");
+        }
+        if (!syncPlan.updatedTaskIds().isEmpty()) {
+            changeSummary.add(syncPlan.updatedTaskIds().size() + " updated");
+        }
+        if (!syncPlan.removedTaskIds().isEmpty()) {
+            changeSummary.add(syncPlan.removedTaskIds().size() + " removed");
+        }
+
+        if (changeSummary.isEmpty()) {
+            return "Internal task state already matches the active PRD.";
+        }
+
+        return "Synced " + synchronizedState.tasks().size() + " PRD task records ("
+                + String.join(", ", changeSummary) + ").";
     }
 
     private void moveIntoPlace(Path temporaryPath, Path destinationPath) throws IOException {
@@ -802,6 +927,34 @@ public class ActiveProjectService {
 
         private static ActivePrdSaveResult failure(String markdown, Path path, String message) {
             return new ActivePrdSaveResult(false, markdown, path, message);
+        }
+    }
+
+    public record PrdTaskSyncResult(boolean successful,
+                                    boolean confirmationRequired,
+                                    PrdTaskState taskState,
+                                    PrdTaskSynchronizer.SyncPlan syncPlan,
+                                    String message) {
+        public boolean destructiveChangesDetected() {
+            return syncPlan != null && syncPlan.destructive();
+        }
+
+        private static PrdTaskSyncResult success(PrdTaskState taskState,
+                                                 PrdTaskSynchronizer.SyncPlan syncPlan,
+                                                 String message) {
+            return new PrdTaskSyncResult(true, false, taskState, syncPlan, message);
+        }
+
+        private static PrdTaskSyncResult confirmationRequired(PrdTaskSynchronizer.SyncPlan syncPlan, String message) {
+            return new PrdTaskSyncResult(false, true, null, syncPlan, message);
+        }
+
+        private static PrdTaskSyncResult failure(String message) {
+            return new PrdTaskSyncResult(false, false, null, null, message);
+        }
+
+        private static PrdTaskSyncResult failure(PrdTaskSynchronizer.SyncPlan syncPlan, String message) {
+            return new PrdTaskSyncResult(false, false, null, syncPlan, message);
         }
     }
 

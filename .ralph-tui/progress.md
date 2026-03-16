@@ -15,6 +15,7 @@ after each iteration and it's included in prompts for context.
 - Treat generated PRDs as project-scoped filesystem artifacts: save and restore `.ralph-tui/prds/active-prd.md` through `ActiveProjectService` and render the current file in the UI instead of duplicating Markdown content inside project metadata.
 - Model execution prerequisites as typed service-level reports and let JavaFX render those reports directly; keeping PRD validation and future launch gating in `ActiveProjectService` avoids duplicating parser rules in the controller.
 - Track external PRD exchange paths in `.ralph-tui/project-metadata.json` with a typed metadata record and feed those paths back into JavaFX file choosers, so import/export workflows restore their last-used locations without inventing app-global state.
+- Keep PRD-derived task state as its own typed `.ralph-tui/prd-json/prd.json` artifact and auto-sync only non-destructive story changes; when a re-sync would remove existing story IDs, preserve the current task file and require explicit confirmation before remapping.
 
 ---
 
@@ -167,4 +168,22 @@ after each iteration and it's included in prompts for context.
   - Keeping import/export file locations in project metadata makes chooser defaults restart-safe and repository-scoped, which fits this shell better than storing them in app-session metadata.
   - Import flows need their own dirty-state guard even when save-on-navigation already exists, because importing a new external PRD is an explicit overwrite path rather than a passive view change.
   - Export should persist pending editor edits before writing the external file so the shared PRD and the exported copy cannot silently diverge from each other.
+---
+## 2026-03-15 - US-022
+- Implemented typed PRD task-state sync through `.ralph-tui/prd-json/prd.json`, parsing valid `US-XXX` story headings and `Outcome` lines into internal task records with stable IDs, default `READY` status, and per-task history.
+- Wired `ActiveProjectService` to restore stored task state, auto-sync safe PRD saves and project reopen flows, preserve status/history when story IDs stay stable, and block destructive ID remaps until an explicit confirmation call is made.
+- Added regression coverage for initial task sync, status/history preservation across re-sync, and confirmation-gated destructive remaps. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskHistoryEntry.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskRecord.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskState.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskStateStore.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskStatus.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskSynchronizer.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+- **Learnings:**
+  - Treating PRD-derived task state as a separate typed file keeps execution-facing task data decoupled from Markdown editing while still letting `ActiveProjectService` restore and sync it from one project-scoped seam.
+  - Using story IDs themselves as task identities makes non-destructive re-sync straightforward: unchanged IDs can safely keep status and history even when titles or outcomes evolve.
+  - Destructive re-sync detection can stay narrow and predictable by keying it off removed story IDs; additions and same-ID content edits can auto-sync safely without forcing user confirmation.
 ---

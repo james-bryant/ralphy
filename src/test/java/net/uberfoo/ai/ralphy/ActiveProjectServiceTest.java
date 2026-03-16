@@ -18,6 +18,8 @@ class ActiveProjectServiceTest {
     private final ProjectStorageInitializer projectStorageInitializer = new ProjectStorageInitializer();
     private final PrdMarkdownGenerator prdMarkdownGenerator = new PrdMarkdownGenerator();
     private final PrdStructureValidator prdStructureValidator = new PrdStructureValidator();
+    private final PrdTaskStateStore prdTaskStateStore = new PrdTaskStateStore();
+    private final PrdTaskSynchronizer prdTaskSynchronizer = new PrdTaskSynchronizer();
 
     @TempDir
     Path tempDir;
@@ -407,6 +409,135 @@ class ActiveProjectServiceTest {
     }
 
     @Test
+    void saveActivePrdSyncsValidStoriesIntoInternalTaskState() throws IOException {
+        Path repository = createGitDirectoryRepository("prd-task-sync-repo");
+        ActiveProjectService activeProjectService = createService();
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories into internal task state
+                **Outcome:** Execution can track stable internal task records.
+
+                ### US-023: Export tracker-compatible prd json
+                **Outcome:** Task state can be shared with external Ralph trackers.
+                """
+        )).successful());
+
+        PrdTaskState taskState = activeProjectService.prdTaskState().orElseThrow();
+
+        assertEquals(2, taskState.tasks().size());
+        assertEquals(List.of(".\\mvnw.cmd clean verify jacoco:report"), taskState.qualityGates());
+        assertEquals("US-022", taskState.tasks().getFirst().taskId());
+        assertEquals(PrdTaskStatus.READY, taskState.tasks().getFirst().status());
+        assertEquals(1, taskState.tasks().getFirst().history().size());
+        assertEquals("US-023", taskState.tasks().get(1).taskId());
+        assertTrue(Files.exists(new ActiveProject(repository).activePrdJsonPath()));
+        assertEquals(2, prdTaskStateStore.read(new ActiveProject(repository)).orElseThrow().tasks().size());
+    }
+
+    @Test
+    void resyncPreservesTaskStatusAndHistoryWhenStoryIdsRemainUnchanged() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        Path repository = createGitDirectoryRepository("prd-task-preserve-repo");
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories
+                **Outcome:** Internal tasks are created from the active PRD.
+
+                ### US-023: Export prd json
+                **Outcome:** Internal task state can be shared outside the app.
+                """
+        )).successful());
+
+        PrdTaskState initialState = activeProjectService.prdTaskState().orElseThrow();
+        PrdTaskRecord completedTask = initialState.taskById("US-022").orElseThrow()
+                .withStatus(PrdTaskStatus.COMPLETED, "2026-03-15T20:15:00Z", "Completed by execution.");
+        PrdTaskState trackedState = new PrdTaskState(
+                initialState.schemaVersion(),
+                initialState.sourcePrdPath(),
+                initialState.qualityGates(),
+                List.of(completedTask, initialState.taskById("US-023").orElseThrow()),
+                initialState.createdAt(),
+                "2026-03-15T20:15:00Z"
+        );
+        prdTaskStateStore.write(new ActiveProject(repository), trackedState);
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        assertEquals(PrdTaskStatus.COMPLETED,
+                restoredService.prdTaskState().orElseThrow().taskById("US-022").orElseThrow().status());
+
+        assertTrue(restoredService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories into internal tracker state
+                **Outcome:** Internal tasks stay aligned without losing prior execution history.
+
+                ### US-023: Export prd json
+                **Outcome:** Internal task state can be shared outside the app.
+                """
+        )).successful());
+
+        PrdTaskRecord resyncedTask = restoredService.prdTaskState().orElseThrow().taskById("US-022").orElseThrow();
+        assertEquals(PrdTaskStatus.COMPLETED, resyncedTask.status());
+        assertEquals("Sync PRD stories into internal tracker state", resyncedTask.title());
+        assertTrue(resyncedTask.history().size() > completedTask.history().size());
+        assertTrue(resyncedTask.history().stream().anyMatch(entry -> entry.type().equals("STATUS_CHANGE")));
+        assertTrue(resyncedTask.history().stream().anyMatch(entry -> entry.type().equals("PRD_SYNC")));
+    }
+
+    @Test
+    void destructiveTaskRemapsRequireExplicitConfirmation() throws IOException {
+        Path repository = createGitDirectoryRepository("prd-task-remap-repo");
+        ActiveProjectService activeProjectService = createService();
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories
+                **Outcome:** Internal tasks are created from the active PRD.
+
+                ### US-023: Export prd json
+                **Outcome:** Internal task state can be shared outside the app.
+                """
+        )).successful());
+
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-022: Sync PRD stories
+                **Outcome:** Internal tasks are created from the active PRD.
+
+                ### US-024: Import prd json safely
+                **Outcome:** External tracker changes reconcile without silent data loss.
+                """
+        )).successful());
+
+        ActiveProjectService.PrdTaskSyncResult blockedSync = activeProjectService.lastPrdTaskSyncResult().orElseThrow();
+        assertFalse(blockedSync.successful());
+        assertTrue(blockedSync.confirmationRequired());
+        assertTrue(blockedSync.destructiveChangesDetected());
+        assertEquals(List.of("US-023"), blockedSync.syncPlan().removedTaskIds());
+        assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-023").isPresent());
+        assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-024").isEmpty());
+
+        ActiveProjectService.PrdTaskSyncResult confirmedSync =
+                activeProjectService.syncActivePrdTaskState(true);
+
+        assertTrue(confirmedSync.successful());
+        assertFalse(confirmedSync.confirmationRequired());
+        assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-023").isEmpty());
+        assertTrue(activeProjectService.prdTaskState().orElseThrow().taskById("US-024").isPresent());
+    }
+
+    @Test
     void importMarkdownPrdCopiesExternalMarkdownIntoTheActiveProjectAndTracksTheSourcePath() throws IOException {
         LocalMetadataStorage localMetadataStorage = createStorage();
         Path repository = createGitDirectoryRepository("import-prd-repo");
@@ -626,6 +757,8 @@ class ActiveProjectServiceTest {
                 localMetadataStorage,
                 createNativePreflightService(),
                 prdStructureValidator,
+                prdTaskStateStore,
+                prdTaskSynchronizer,
                 createWslPreflightService(),
                 true
         );
@@ -691,5 +824,30 @@ class ActiveProjectServiceTest {
         assertTrue(Files.isDirectory(activeProject.promptsDirectoryPath()));
         assertTrue(Files.isDirectory(activeProject.logsDirectoryPath()));
         assertTrue(Files.isDirectory(activeProject.artifactsDirectoryPath()));
+    }
+
+    private String validPrdMarkdown(String qualityGatesSection, String userStoriesSection) {
+        return ("""
+                # PRD: Task Sync Plan
+
+                ## Overview
+                Sync PRD stories into internal task state.
+
+                ## Goals
+                - Keep task records stable across re-syncs.
+
+                ## Quality Gates
+                %s
+
+                ## User Stories
+                %s
+
+                ## Scope Boundaries
+                ### In Scope
+                - Task-state synchronization
+
+                ### Out of Scope
+                - Codex execution orchestration
+                """).formatted(qualityGatesSection, userStoriesSection);
     }
 }
