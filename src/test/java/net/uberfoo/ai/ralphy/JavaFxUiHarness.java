@@ -184,6 +184,10 @@ final class JavaFxUiHarness {
         return onFxThread(() -> requiredNode(selector, TextInputControl.class).isEditable());
     }
 
+    boolean isDisabled(String selector) throws Exception {
+        return onFxThread(() -> requiredNode(selector).isDisable());
+    }
+
     Color textFill(String selector) throws Exception {
         return onFxThread(() -> (Color) requiredNode(selector, Labeled.class).getTextFill());
     }

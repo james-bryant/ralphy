@@ -61,9 +61,15 @@ public class AppShellController {
     private static final String NO_ACTIVE_PRD_DOCUMENT_MESSAGE =
             "Open or create a repository before generating a Markdown PRD.";
     private static final String EMPTY_PRD_DOCUMENT_MESSAGE =
-            "No generated PRD yet. Generate one from the latest interview answers.";
+            "No generated PRD yet. Generate one from the latest interview answers or open a project with an existing active-prd.md.";
     private static final String READY_PRD_DOCUMENT_MESSAGE =
-            "The active project already has a generated Markdown PRD. Regenerate it after updating the interview draft.";
+            "The active project already has a saved Markdown PRD. Edit it below and save when you refine the plan.";
+    private static final String PRD_DOCUMENT_UNSAVED_CHANGES_MESSAGE =
+            "Markdown PRD has unsaved changes. Save to update .ralph-tui/prds/active-prd.md.";
+    private static final String PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_REGENERATE_MESSAGE =
+            "Save the current Markdown PRD before regenerating it from interview answers.";
+    private static final String NO_ACTIVE_PRD_TO_SAVE_MESSAGE =
+            "Generate or import a Markdown PRD before saving edits.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -92,6 +98,10 @@ public class AppShellController {
     private PrdInterviewDraft currentPrdInterviewDraft = PrdInterviewDraft.empty();
     private int currentPrdInterviewQuestionIndex;
     private boolean renderingPrdInterview;
+    private boolean renderingPrdDocument;
+    private boolean prdDocumentDirty;
+    private String prdDocumentEditorBaseline = "";
+    private String prdDocumentLineSeparator = System.lineSeparator();
 
     @FXML
     private Label activeProjectNameLabel;
@@ -200,6 +210,9 @@ public class AppShellController {
 
     @FXML
     private VBox prdInterviewCard;
+
+    @FXML
+    private Button savePrdDocumentButton;
 
     @FXML
     private Label prdInterviewDraftStateLabel;
@@ -344,7 +357,7 @@ public class AppShellController {
         );
         configurePresetCatalog();
         configurePrdInterview();
-        prdDocumentPreviewArea.setEditable(false);
+        configurePrdDocumentEditor();
         prdDocumentPathField.setEditable(false);
         nativeExecutionProfileRadioButton.setSelected(true);
         renderActiveProject(activeProjectService.activeProject().orElse(null));
@@ -371,7 +384,14 @@ public class AppShellController {
 
     @FXML
     private void openExistingRepository() {
-        persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, false);
+        if (activeProjectService.activeProject().isPresent()) {
+            if (!persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, false)) {
+                return;
+            }
+            if (!persistCurrentPrdDocument(false)) {
+                return;
+            }
+        }
         Path initialDirectory = activeProjectService.activeProject()
                 .map(ActiveProject::repositoryPath)
                 .orElseGet(this::defaultBrowseDirectory);
@@ -397,7 +417,14 @@ public class AppShellController {
 
     @FXML
     private void createNewRepository() {
-        persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, false);
+        if (activeProjectService.activeProject().isPresent()) {
+            if (!persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, false)) {
+                return;
+            }
+            if (!persistCurrentPrdDocument(false)) {
+                return;
+            }
+        }
         String requestedProjectName = newProjectNameField.getText();
         if (requestedProjectName == null || requestedProjectName.isBlank()) {
             setProjectValidationMessage("Enter a project folder name.");
@@ -462,10 +489,20 @@ public class AppShellController {
     }
 
     @FXML
+    private void savePrdDocument() {
+        persistCurrentPrdDocument(true);
+    }
+
+    @FXML
     private void generatePrdFromInterviewAnswers() {
         Optional<ActiveProject> activeProject = activeProjectService.activeProject();
         if (activeProject.isEmpty()) {
             renderGeneratedPrd(null);
+            return;
+        }
+
+        if (prdDocumentDirty) {
+            setPrdDocumentState(PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_REGENERATE_MESSAGE);
             return;
         }
 
@@ -481,7 +518,8 @@ public class AppShellController {
         }
 
         renderGeneratedPrd(activeProject.get());
-        setPrdDocumentState("Generated PRD saved to " + saveResult.path() + ".");
+        setPrdDocumentState("Generated PRD saved to " + saveResult.path()
+                + ". Edit it below and save when you refine the plan.");
     }
 
     @FXML
@@ -911,6 +949,25 @@ public class AppShellController {
                 : activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
     }
 
+    private void configurePrdDocumentEditor() {
+        prdDocumentPreviewArea.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (renderingPrdDocument || activeProjectService.activeProject().isEmpty()) {
+                return;
+            }
+            if (activeProjectService.activePrdMarkdown().isEmpty()) {
+                return;
+            }
+
+            boolean dirty = !normalizeEditorLineEndings(newValue).equals(prdDocumentEditorBaseline);
+            setPrdDocumentDirty(dirty);
+            if (dirty) {
+                setPrdDocumentState(PRD_DOCUMENT_UNSAVED_CHANGES_MESSAGE);
+            } else {
+                setPrdDocumentState(READY_PRD_DOCUMENT_MESSAGE);
+            }
+        });
+    }
+
     private void navigateToPrdInterviewQuestion(int targetQuestionIndex) {
         if (activeProjectService.activeProject().isEmpty()) {
             return;
@@ -983,15 +1040,56 @@ public class AppShellController {
         }
     }
 
+    private boolean persistCurrentPrdDocument(boolean manualSave) {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            if (manualSave) {
+                setPrdDocumentState(NO_ACTIVE_PRD_DOCUMENT_MESSAGE);
+                return false;
+            }
+            return true;
+        }
+
+        if (activeProjectService.activePrdMarkdown().isEmpty()) {
+            if (manualSave) {
+                setPrdDocumentState(NO_ACTIVE_PRD_TO_SAVE_MESSAGE);
+                return false;
+            }
+            return true;
+        }
+
+        if (!prdDocumentDirty) {
+            if (manualSave) {
+                setPrdDocumentState("Markdown PRD already matches the saved file.");
+            }
+            return true;
+        }
+
+        String markdown = restoreDocumentLineEndings(prdDocumentPreviewArea.getText(), prdDocumentLineSeparator);
+        ActiveProjectService.ActivePrdSaveResult saveResult = activeProjectService.saveActivePrd(markdown);
+        if (!saveResult.successful()) {
+            setPrdDocumentState(saveResult.message());
+            return false;
+        }
+
+        renderGeneratedPrd(activeProject.get());
+        setPrdDocumentState((manualSave ? "Markdown PRD saved to " : "Pending Markdown PRD edits saved to ")
+                + saveResult.path() + ".");
+        return true;
+    }
+
     private void renderGeneratedPrd(ActiveProject activeProject) {
         boolean activeProjectPresent = activeProject != null;
         prdDocumentCard.setDisable(!activeProjectPresent);
         generatePrdButton.setDisable(!activeProjectPresent);
-        prdDocumentPreviewArea.setDisable(!activeProjectPresent);
+        savePrdDocumentButton.setDisable(true);
+        setPrdDocumentDirty(false);
 
         if (!activeProjectPresent) {
             prdDocumentPathField.clear();
-            prdDocumentPreviewArea.clear();
+            applyPrdDocumentToEditor("");
+            prdDocumentPreviewArea.setDisable(true);
+            prdDocumentPreviewArea.setEditable(false);
             setPrdDocumentState(NO_ACTIVE_PRD_DOCUMENT_MESSAGE);
             return;
         }
@@ -999,13 +1097,34 @@ public class AppShellController {
         prdDocumentPathField.setText(activeProject.activePrdPath().toString());
         Optional<String> activePrdMarkdown = activeProjectService.activePrdMarkdown();
         if (activePrdMarkdown.isEmpty()) {
-            prdDocumentPreviewArea.clear();
+            applyPrdDocumentToEditor("");
+            prdDocumentPreviewArea.setDisable(true);
+            prdDocumentPreviewArea.setEditable(false);
             setPrdDocumentState(EMPTY_PRD_DOCUMENT_MESSAGE);
             return;
         }
 
-        prdDocumentPreviewArea.setText(activePrdMarkdown.get());
+        prdDocumentPreviewArea.setDisable(false);
+        prdDocumentPreviewArea.setEditable(true);
+        applyPrdDocumentToEditor(activePrdMarkdown.get());
         setPrdDocumentState(READY_PRD_DOCUMENT_MESSAGE);
+    }
+
+    private void applyPrdDocumentToEditor(String markdown) {
+        String value = markdown == null ? "" : markdown;
+        prdDocumentLineSeparator = detectLineSeparator(value);
+        prdDocumentEditorBaseline = normalizeEditorLineEndings(value);
+        renderingPrdDocument = true;
+        prdDocumentPreviewArea.setText(value);
+        renderingPrdDocument = false;
+        setPrdDocumentDirty(false);
+    }
+
+    private void setPrdDocumentDirty(boolean dirty) {
+        prdDocumentDirty = dirty;
+        boolean hasSavedPrd = activeProjectService.activeProject().isPresent()
+                && activeProjectService.activePrdMarkdown().isPresent();
+        savePrdDocumentButton.setDisable(!hasSavedPrd || !dirty);
     }
 
     private void renderCurrentPrdInterviewQuestion() {
@@ -1080,6 +1199,35 @@ public class AppShellController {
 
     private String valueOrEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String normalizeEditorLineEndings(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        return value.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private String restoreDocumentLineEndings(String value, String lineSeparator) {
+        String normalizedValue = normalizeEditorLineEndings(value);
+        String targetLineSeparator = hasText(lineSeparator) ? lineSeparator : System.lineSeparator();
+        return normalizedValue.replace("\n", targetLineSeparator);
+    }
+
+    private String detectLineSeparator(String value) {
+        if (value == null || value.isEmpty()) {
+            return System.lineSeparator();
+        }
+        if (value.contains("\r\n")) {
+            return "\r\n";
+        }
+        if (value.contains("\n")) {
+            return "\n";
+        }
+        if (value.contains("\r")) {
+            return "\r";
+        }
+        return System.lineSeparator();
     }
 
     private void setProjectValidationMessage(String message) {

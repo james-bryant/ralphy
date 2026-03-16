@@ -502,7 +502,7 @@
                                 <String fx:value="card-title"/>
                             </styleClass>
                         </Label>
-                        <Label text="Generate a repository-owned Markdown PRD from the latest interview answers. Regenerating overwrites the saved `active-prd.md` draft."
+                        <Label text="Generate a repository-owned Markdown PRD from the latest interview answers, then refine the saved Markdown directly in the editor below. Regenerating overwrites the saved `active-prd.md` draft."
                                wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
@@ -512,6 +512,9 @@
                             <Button id="generatePrdButton" fx:id="generatePrdButton"
                                     mnemonicParsing="false" onAction="#generatePrdFromInterviewAnswers"
                                     text="Generate PRD"/>
+                            <Button id="savePrdDocumentButton" fx:id="savePrdDocumentButton"
+                                    mnemonicParsing="false" onAction="#savePrdDocument"
+                                    text="Save PRD"/>
                             <Region HBox.hgrow="ALWAYS"/>
                             <Label text="Active PRD Path">
                                 <styleClass>
@@ -520,13 +523,13 @@
                             </Label>
                         </HBox>
                         <TextField id="prdDocumentPathField" fx:id="prdDocumentPathField"/>
-                        <Label text="Preview">
+                        <Label text="Markdown Editor">
                             <styleClass>
                                 <String fx:value="section-title"/>
                             </styleClass>
                         </Label>
                         <TextArea id="prdDocumentPreviewArea" fx:id="prdDocumentPreviewArea"
-                                  editable="false" prefRowCount="18" wrapText="true">
+                                  prefRowCount="18" wrapText="true">
                             <styleClass>
                                 <String fx:value="prd-preview-area"/>
                             </styleClass>

@@ -185,6 +185,8 @@ class AppShellUiTest {
         String initialPreview = harness.text("#prdDocumentPreviewArea");
         assertTrue(harness.text("#prdDocumentStateLabel").contains("Generated PRD saved to"));
         assertTrue(harness.text("#prdDocumentPathField").endsWith("active-prd.md"));
+        assertTrue(harness.isEditable("#prdDocumentPreviewArea"));
+        assertTrue(harness.isDisabled("#savePrdDocumentButton"));
         assertTrue(initialPreview.contains("## Overview"));
         assertTrue(initialPreview.contains("## Goals"));
         assertTrue(initialPreview.contains("## Quality Gates"));
@@ -203,6 +205,58 @@ class AppShellUiTest {
         String regeneratedPreview = harness.text("#prdDocumentPreviewArea");
         assertTrue(regeneratedPreview.contains("### US-019: Validate the regenerated PRD"));
         assertEquals(normalizeLineEndings(regeneratedPreview), normalizeLineEndings(Files.readString(generatedPrdPath)));
+    }
+
+    @Test
+    void appShellCanEditSaveAndRestoreImportedMarkdownPrdsWithoutReformatting() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("editable-prd-repo");
+        Path importedPrdPath = repository.resolve(".ralph-tui").resolve("prds").resolve("active-prd.md");
+        Files.createDirectories(importedPrdPath.getParent());
+        Files.writeString(importedPrdPath,
+                "# PRD: Imported Plan\r\n"
+                        + "\r\n"
+                        + "## Overview\r\n"
+                        + "Keep the existing paragraph spacing exactly as written.\r\n"
+                        + "\r\n"
+                        + "### Notes\r\n"
+                        + "- Preserve manual bullet wording\r\n");
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+        harness.clickOn("#prdEditorNavButton");
+
+        assertTrue(harness.isEditable("#prdDocumentPreviewArea"));
+        assertTrue(harness.text("#prdDocumentStateLabel").contains("saved Markdown PRD"));
+        assertTrue(harness.isDisabled("#savePrdDocumentButton"));
+
+        String importedPreview = harness.text("#prdDocumentPreviewArea");
+        String editedPreview = importedPreview + "\n### Manual Notes\n- Keep appended formatting";
+        harness.enterText("#prdDocumentPreviewArea", editedPreview);
+
+        assertTrue(harness.text("#prdDocumentStateLabel").contains("unsaved changes"));
+        assertFalse(harness.isDisabled("#savePrdDocumentButton"));
+
+        harness.clickOn("#savePrdDocumentButton");
+
+        assertTrue(harness.text("#prdDocumentStateLabel").contains("Markdown PRD saved to"));
+        assertTrue(harness.isDisabled("#savePrdDocumentButton"));
+        assertEquals(editedPreview.replace("\n", "\r\n"), Files.readString(importedPrdPath));
+
+        harness.closeShell();
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertEquals("editable-prd-repo", harness.text("#activeProjectNameLabel"));
+        assertEquals(editedPreview, harness.text("#prdDocumentPreviewArea"));
+        assertTrue(harness.isEditable("#prdDocumentPreviewArea"));
+        assertTrue(harness.text("#prdDocumentStateLabel").contains("saved Markdown PRD"));
     }
 
     @Test

@@ -7,6 +7,7 @@ after each iteration and it's included in prompts for context.
 
 *Add reusable patterns discovered during development here.*
 
+- When round-tripping repository files through JavaFX `TextArea` controls, keep the source document's line-ending style as separate state and restore it on save; JavaFX normalizes line breaks in-memory, so raw save logic alone will silently rewrite CRLF files.
 - Persist execution diagnostics in `.ralph-tui/project-metadata.json` and restore them through `ActiveProjectService`; when a stored report already exists, render that report on reopen and offer an explicit rerun action instead of immediately overwriting it during startup.
 - Put remediation commands on each failed preflight check record and keep the UI passive: render those commands in a dedicated remediation panel with copy buttons and rerun actions, but never execute install or authentication commands from the app itself.
 - Keep built-in workflow presets as typed catalog records in code and render previews directly from that catalog; until customization exists, avoid persisting or editing raw prompt bodies in project metadata.
@@ -112,4 +113,18 @@ after each iteration and it's included in prompts for context.
   - Generated Markdown belongs with the other repository-owned artifacts under `.ralph-tui/`; restoring it from disk on project activation keeps preview state accurate without creating a second PRD persistence model.
   - Saving the currently edited interview answer before generation is necessary so regeneration always reflects the latest draft, not only the last explicitly saved question transition.
   - JavaFX text controls can normalize line endings differently from the filesystem on Windows, so UI assertions should compare normalized content when verifying saved Markdown previews.
+---
+## 2026-03-15 - US-019
+- Replaced the read-only PRD preview with an editable Markdown surface that opens the active `active-prd.md` after generation or project restore, adds an explicit `Save PRD` action, and shows dirty-state messaging while users refine the document.
+- Preserved user-authored Markdown without destructive reformatting by tracking each loaded document's original line-ending style in the controller and restoring that style on save instead of regenerating Markdown from structured data.
+- Added JavaFX coverage for editable-after-generation behavior plus imported-PRD edit/save/reopen round-tripping, and updated the Windows smoke checklist to include dirty-state/save verification for manual Markdown edits.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - JavaFX `TextArea` is a workable Markdown editor for this shell as long as dirty tracking compares against a normalized in-memory baseline rather than the raw file bytes.
+  - Blocking PRD regeneration while the editor is dirty avoids silently discarding unsaved manual refinements, which keeps the generated-flow overwrite behavior explicit instead of surprising.
 ---
