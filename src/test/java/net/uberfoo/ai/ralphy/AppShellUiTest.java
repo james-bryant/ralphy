@@ -105,6 +105,54 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellCanCaptureRevisitAndRestorePrdInterviewDraftAnswers() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("prd-interview-repo");
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("0 of 7 questions answered"));
+        assertEquals("Question 1 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
+        assertEquals("Product Context", harness.text("#prdInterviewTitleLabel"));
+        assertTrue(harness.textContent("#prdInterviewQuestionsContainer").contains("Quality Gates"));
+        assertTrue(harness.textContent("#prdInterviewQuestionsContainer").contains("User Stories"));
+        assertTrue(harness.textContent("#prdInterviewQuestionsContainer").contains("In Scope"));
+        assertTrue(harness.text("#prdInterviewDraftStateLabel")
+                .contains(".ralph-tui/project-metadata.json"));
+
+        harness.enterText("#prdInterviewAnswerArea", "Ralphy should guide users through PRD drafting.");
+        harness.clickOn("#prdInterviewNextButton");
+
+        assertEquals("Question 2 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("1 of 7 questions answered"));
+        assertTrue(harness.text("#prdInterviewDraftStateLabel").contains("Answer saved."));
+
+        harness.enterText("#prdInterviewAnswerArea", "Primary users are developers running one repository at a time.");
+        harness.clickOn("#prdInterviewQuestionOverviewContext");
+
+        assertEquals("Question 1 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
+        assertEquals("Ralphy should guide users through PRD drafting.", harness.text("#prdInterviewAnswerArea"));
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("2 of 7 questions answered"));
+
+        harness.closeShell();
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertEquals("prd-interview-repo", harness.text("#activeProjectNameLabel"));
+        assertEquals("Question 1 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
+        assertEquals("Ralphy should guide users through PRD drafting.", harness.text("#prdInterviewAnswerArea"));
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("2 of 7 questions answered"));
+        assertTrue(harness.text("#prdInterviewDraftStateLabel").contains("Draft restored."));
+    }
+
+    @Test
     void appShellCanOpenGitRepositoriesAndRejectNonGitFolders() throws Exception {
         Path nonGitDirectory = Files.createDirectory(tempDir.resolve("plain-folder"));
         Path gitRepository = createGitRepository("sample-repo");

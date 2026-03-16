@@ -73,6 +73,20 @@
     -fx-background-color: -color-surface-primary;
 }
 
+.ralphy-shell .workspace-scroll-pane,
+.ralphy-shell .workspace-scroll-pane > .viewport {
+    -fx-background-color: -color-surface-primary;
+}
+
+.ralphy-shell .workspace-scroll-pane {
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+.ralphy-shell .workspace-scroll-pane > .corner {
+    -fx-background-color: -color-surface-primary;
+}
+
 .ralphy-shell .shell-status-bar {
     -fx-background-color: -color-surface-sidebar;
     -fx-border-color: -color-border-muted transparent transparent transparent;
@@ -139,6 +153,25 @@
 }
 
 .ralphy-shell .preflight-command-field {
+    -fx-font-family: "Consolas";
+}
+
+.ralphy-shell .interview-step-button {
+    -fx-alignment: center-left;
+    -fx-wrap-text: true;
+}
+
+.ralphy-shell .interview-step-button-complete {
+    -fx-border-color: -color-accent;
+}
+
+.ralphy-shell .interview-step-button-active {
+    -fx-background-color: -color-accent;
+    -fx-border-color: -color-accent;
+    -fx-text-fill: #020617;
+}
+
+.ralphy-shell .interview-answer-area {
     -fx-font-family: "Consolas";
 }
 

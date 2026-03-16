@@ -14,7 +14,7 @@ import java.time.Instant;
 
 @Component
 public class ProjectMetadataInitializer {
-    private static final int SCHEMA_VERSION = 5;
+    private static final int SCHEMA_VERSION = 6;
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     public void writeMetadata(ActiveProject activeProject) throws IOException {
@@ -31,6 +31,7 @@ public class ProjectMetadataInitializer {
                 activeProject.storagePaths(),
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
+                existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
@@ -54,6 +55,7 @@ public class ProjectMetadataInitializer {
                 activeProject.storagePaths(),
                 nativeWindowsPreflight,
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
+                existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
@@ -77,6 +79,31 @@ public class ProjectMetadataInitializer {
                 activeProject.storagePaths(),
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 wslPreflight,
+                existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null || existingMetadata.createdAt() == null
+                        ? timestamp
+                        : existingMetadata.createdAt(),
+                timestamp
+        );
+        persistMetadata(metadataPath, metadataDocument);
+    }
+
+    public void writePrdInterviewDraft(ActiveProject activeProject,
+                                       PrdInterviewDraft prdInterviewDraft) throws IOException {
+        Files.createDirectories(activeProject.ralphyDirectoryPath());
+
+        Path metadataPath = activeProject.projectMetadataPath();
+        String timestamp = Instant.now().toString();
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(metadataPath);
+        ProjectMetadataDocument metadataDocument = new ProjectMetadataDocument(
+                SCHEMA_VERSION,
+                activeProject.displayName(),
+                activeProject.displayPath(),
+                metadataPath.toString(),
+                activeProject.storagePaths(),
+                existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
+                existingMetadata == null ? null : existingMetadata.wslPreflight(),
+                prdInterviewDraft,
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
                         : existingMetadata.createdAt(),
@@ -102,6 +129,15 @@ public class ProjectMetadataInitializer {
         }
 
         return java.util.Optional.ofNullable(existingMetadata.wslPreflight());
+    }
+
+    public java.util.Optional<PrdInterviewDraft> readPrdInterviewDraft(ActiveProject activeProject) throws IOException {
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(activeProject.projectMetadataPath());
+        if (existingMetadata == null) {
+            return java.util.Optional.empty();
+        }
+
+        return java.util.Optional.ofNullable(existingMetadata.prdInterviewDraft());
     }
 
     private ProjectMetadataDocument readExistingMetadata(Path metadataPath) throws IOException {
@@ -139,6 +175,7 @@ public class ProjectMetadataInitializer {
                                            ActiveProject.ProjectStoragePaths storage,
                                            NativeWindowsPreflightReport nativeWindowsPreflight,
                                            WslPreflightReport wslPreflight,
+                                           PrdInterviewDraft prdInterviewDraft,
                                            String createdAt,
                                            String updatedAt) {
     }

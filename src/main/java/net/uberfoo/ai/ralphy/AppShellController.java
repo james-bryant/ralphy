@@ -15,11 +15,14 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 public class AppShellController {
     private static final String ACTIVE_NAV_STYLE_CLASS = "shell-nav-button-active";
+    private static final String ACTIVE_INTERVIEW_STEP_STYLE_CLASS = "interview-step-button-active";
+    private static final String COMPLETE_INTERVIEW_STEP_STYLE_CLASS = "interview-step-button-complete";
     private static final String NO_ACTIVE_PROJECT_NAME = "No active repository selected.";
     private static final String NO_ACTIVE_PROJECT_PATH =
             "Open an existing repository or create a new one to make it the active project.";
@@ -47,6 +50,14 @@ public class AppShellController {
     private static final String WSL_PREFLIGHT_PROFILE_REQUIRED_SUMMARY = "WSL profile not selected";
     private static final String WSL_PREFLIGHT_PROFILE_REQUIRED_DETAIL =
             "Save a WSL execution profile before running WSL preflight.";
+    private static final String NO_ACTIVE_PRD_INTERVIEW_SUMMARY =
+            "Open or create a repository to start a PRD interview draft.";
+    private static final String NO_ACTIVE_PRD_INTERVIEW_PROMPT =
+            "Choose or restore an active repository before answering sequenced PRD interview questions.";
+    private static final String PRD_INTERVIEW_DRAFT_LOCATION_DETAIL =
+            "Draft answers are stored per project in .ralph-tui/project-metadata.json.";
+    private static final String PRD_INTERVIEW_UNSAVED_CHANGES_MESSAGE =
+            "Draft has unsaved changes. Save or move to another question to persist them.";
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -66,9 +77,14 @@ public class AppShellController {
     private final AppShellDescriptor shellDescriptor;
     private final ActiveProjectService activeProjectService;
     private final PresetCatalogService presetCatalogService;
+    private final PrdInterviewService prdInterviewService;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
     private final ToggleGroup presetCatalogToggleGroup = new ToggleGroup();
+    private final List<Button> prdInterviewQuestionButtons = new ArrayList<>();
+    private PrdInterviewDraft currentPrdInterviewDraft = PrdInterviewDraft.empty();
+    private int currentPrdInterviewQuestionIndex;
+    private boolean renderingPrdInterview;
 
     @FXML
     private Label activeProjectNameLabel;
@@ -158,6 +174,45 @@ public class AppShellController {
     private RadioButton prdCreationPresetRadioButton;
 
     @FXML
+    private TextArea prdInterviewAnswerArea;
+
+    @FXML
+    private VBox prdInterviewCard;
+
+    @FXML
+    private Label prdInterviewDraftStateLabel;
+
+    @FXML
+    private Label prdInterviewGuidanceLabel;
+
+    @FXML
+    private Button prdInterviewNextButton;
+
+    @FXML
+    private Button prdInterviewPreviousButton;
+
+    @FXML
+    private Label prdInterviewPromptLabel;
+
+    @FXML
+    private VBox prdInterviewQuestionsContainer;
+
+    @FXML
+    private Button prdInterviewSaveButton;
+
+    @FXML
+    private Label prdInterviewSectionLabel;
+
+    @FXML
+    private Label prdInterviewSummaryLabel;
+
+    @FXML
+    private Label prdInterviewTitleLabel;
+
+    @FXML
+    private Label prdInterviewQuestionCounterLabel;
+
+    @FXML
     private Label presetRequiredSkillsValueLabel;
 
     @FXML
@@ -232,10 +287,12 @@ public class AppShellController {
     public AppShellController(AppShellDescriptor shellDescriptor,
                               ActiveProjectService activeProjectService,
                               PresetCatalogService presetCatalogService,
+                              PrdInterviewService prdInterviewService,
                               RepositoryDirectoryChooser repositoryDirectoryChooser) {
         this.shellDescriptor = shellDescriptor;
         this.activeProjectService = activeProjectService;
         this.presetCatalogService = presetCatalogService;
+        this.prdInterviewService = prdInterviewService;
         this.repositoryDirectoryChooser = repositoryDirectoryChooser;
     }
 
@@ -254,12 +311,14 @@ public class AppShellController {
         wslPreflightMessageLabel.managedProperty().bind(wslPreflightMessageLabel.visibleProperty());
         nativePreflightRemediationSection.managedProperty().bind(nativePreflightRemediationSection.visibleProperty());
         wslPreflightRemediationSection.managedProperty().bind(wslPreflightRemediationSection.visibleProperty());
+        prdInterviewDraftStateLabel.managedProperty().bind(prdInterviewDraftStateLabel.visibleProperty());
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
                 updateExecutionProfileFieldState()
         );
         configurePresetCatalog();
+        configurePrdInterview();
         nativeExecutionProfileRadioButton.setSelected(true);
         renderActiveProject(activeProjectService.activeProject().orElse(null));
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
@@ -285,6 +344,7 @@ public class AppShellController {
 
     @FXML
     private void openExistingRepository() {
+        persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, false);
         Path initialDirectory = activeProjectService.activeProject()
                 .map(ActiveProject::repositoryPath)
                 .orElseGet(this::defaultBrowseDirectory);
@@ -310,6 +370,7 @@ public class AppShellController {
 
     @FXML
     private void createNewRepository() {
+        persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, false);
         String requestedProjectName = newProjectNameField.getText();
         if (requestedProjectName == null || requestedProjectName.isBlank()) {
             setProjectValidationMessage("Enter a project folder name.");
@@ -368,6 +429,21 @@ public class AppShellController {
         setWslPreflightMessage(runResult.message());
     }
 
+    @FXML
+    private void savePrdInterviewDraft() {
+        persistCurrentPrdInterviewDraft(currentPrdInterviewQuestionIndex, true);
+    }
+
+    @FXML
+    private void showPreviousPrdInterviewQuestion() {
+        navigateToPrdInterviewQuestion(currentPrdInterviewQuestionIndex - 1);
+    }
+
+    @FXML
+    private void showNextPrdInterviewQuestion() {
+        navigateToPrdInterviewQuestion(currentPrdInterviewQuestionIndex + 1);
+    }
+
     private void activateSection(ShellSection section, Button activeButton) {
         workspaceTitleLabel.setText(section.title());
         workspacePlaceholderLabel.setText(section.workspaceText());
@@ -419,6 +495,7 @@ public class AppShellController {
             renderExecutionOverview(null);
             renderNativeWindowsPreflight();
             renderWslPreflight();
+            renderPrdInterview(null);
             return;
         }
 
@@ -429,6 +506,7 @@ public class AppShellController {
         renderExecutionOverview(activeProject);
         renderNativeWindowsPreflight();
         renderWslPreflight();
+        renderPrdInterview(activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
     }
 
     private void renderExecutionProfile(ExecutionProfile executionProfile) {
@@ -752,6 +830,154 @@ public class AppShellController {
         presetPromptPreviewArea.setText(preset.promptPreview());
     }
 
+    private void configurePrdInterview() {
+        prdInterviewAnswerArea.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (renderingPrdInterview || activeProjectService.activeProject().isEmpty()) {
+                return;
+            }
+            setPrdInterviewDraftState(PRD_INTERVIEW_UNSAVED_CHANGES_MESSAGE);
+        });
+
+        List<Button> questionButtons = new ArrayList<>();
+        for (int questionIndex = 0; questionIndex < prdInterviewService.questionCount(); questionIndex++) {
+            PrdInterviewQuestion question = prdInterviewService.questionForIndex(questionIndex);
+            Button questionButton = new Button();
+            questionButton.setId("prdInterviewQuestion" + capitalize(question.questionId()));
+            questionButton.getStyleClass().add("interview-step-button");
+            questionButton.setMaxWidth(Double.MAX_VALUE);
+            questionButton.setWrapText(true);
+            int targetQuestionIndex = questionIndex;
+            questionButton.setOnAction(event -> navigateToPrdInterviewQuestion(targetQuestionIndex));
+            questionButtons.add(questionButton);
+        }
+
+        prdInterviewQuestionButtons.clear();
+        prdInterviewQuestionButtons.addAll(questionButtons);
+        prdInterviewQuestionsContainer.getChildren().setAll(questionButtons);
+        renderPrdInterview(activeProjectService.activeProject().orElse(null) == null
+                ? null
+                : activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
+    }
+
+    private void navigateToPrdInterviewQuestion(int targetQuestionIndex) {
+        if (activeProjectService.activeProject().isEmpty()) {
+            return;
+        }
+
+        persistCurrentPrdInterviewDraft(targetQuestionIndex, false);
+    }
+
+    private boolean persistCurrentPrdInterviewDraft(int targetQuestionIndex, boolean manualSave) {
+        if (activeProjectService.activeProject().isEmpty()) {
+            return false;
+        }
+
+        int normalizedTargetQuestionIndex = prdInterviewService.normalizeQuestionIndex(targetQuestionIndex);
+        PrdInterviewQuestion currentQuestion = prdInterviewService.questionForIndex(currentPrdInterviewQuestionIndex);
+        PrdInterviewDraft replacementDraft = currentPrdInterviewDraft.withAnswer(
+                currentQuestion,
+                prdInterviewAnswerArea.getText(),
+                normalizedTargetQuestionIndex
+        );
+
+        ActiveProjectService.PrdInterviewDraftSaveResult saveResult =
+                activeProjectService.savePrdInterviewDraft(replacementDraft);
+        if (!saveResult.successful()) {
+            setPrdInterviewDraftState(saveResult.message());
+            return false;
+        }
+
+        currentPrdInterviewDraft = prdInterviewService.normalizeDraft(saveResult.draft());
+        currentPrdInterviewQuestionIndex = currentPrdInterviewDraft.selectedQuestionIndex();
+        renderCurrentPrdInterviewQuestion();
+        setPrdInterviewDraftState((manualSave ? "Draft saved." : "Answer saved.")
+                + " Last updated " + currentPrdInterviewDraft.updatedAt() + ".");
+        return true;
+    }
+
+    private void renderPrdInterview(PrdInterviewDraft draft) {
+        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
+        prdInterviewCard.setDisable(!activeProjectPresent);
+        prdInterviewAnswerArea.setDisable(!activeProjectPresent);
+        prdInterviewSaveButton.setDisable(!activeProjectPresent);
+
+        if (!activeProjectPresent) {
+            currentPrdInterviewDraft = PrdInterviewDraft.empty();
+            currentPrdInterviewQuestionIndex = 0;
+            prdInterviewSummaryLabel.setText(NO_ACTIVE_PRD_INTERVIEW_SUMMARY);
+            prdInterviewQuestionCounterLabel.setText("Question sequence ready");
+            prdInterviewSectionLabel.setText("PRD Interview");
+            prdInterviewTitleLabel.setText("Active project required");
+            prdInterviewPromptLabel.setText(NO_ACTIVE_PRD_INTERVIEW_PROMPT);
+            prdInterviewGuidanceLabel.setText(PRD_INTERVIEW_DRAFT_LOCATION_DETAIL);
+            renderingPrdInterview = true;
+            prdInterviewAnswerArea.clear();
+            renderingPrdInterview = false;
+            prdInterviewPreviousButton.setDisable(true);
+            prdInterviewNextButton.setDisable(true);
+            refreshPrdInterviewQuestionButtons(false);
+            setPrdInterviewDraftState(NO_ACTIVE_PRD_INTERVIEW_SUMMARY);
+            return;
+        }
+
+        currentPrdInterviewDraft = prdInterviewService.normalizeDraft(draft == null ? PrdInterviewDraft.empty() : draft);
+        currentPrdInterviewQuestionIndex =
+                prdInterviewService.normalizeQuestionIndex(currentPrdInterviewDraft.selectedQuestionIndex());
+        renderCurrentPrdInterviewQuestion();
+        if (currentPrdInterviewDraft.answeredQuestionCount() == 0) {
+            setPrdInterviewDraftState(PRD_INTERVIEW_DRAFT_LOCATION_DETAIL);
+        } else {
+            setPrdInterviewDraftState("Draft restored. Last updated " + currentPrdInterviewDraft.updatedAt() + ".");
+        }
+    }
+
+    private void renderCurrentPrdInterviewQuestion() {
+        PrdInterviewQuestion question = prdInterviewService.questionForIndex(currentPrdInterviewQuestionIndex);
+        prdInterviewSummaryLabel.setText(currentPrdInterviewDraft.answeredQuestionCount()
+                + " of "
+                + prdInterviewService.questionCount()
+                + " questions answered. Draft answers can be revisited before PRD generation.");
+        prdInterviewQuestionCounterLabel.setText("Question "
+                + (currentPrdInterviewQuestionIndex + 1)
+                + " of "
+                + prdInterviewService.questionCount());
+        prdInterviewSectionLabel.setText(question.sectionTitle());
+        prdInterviewTitleLabel.setText(question.title());
+        prdInterviewPromptLabel.setText(question.prompt());
+        prdInterviewGuidanceLabel.setText(question.guidance());
+        renderingPrdInterview = true;
+        prdInterviewAnswerArea.setText(currentPrdInterviewDraft.answerFor(question.questionId()));
+        renderingPrdInterview = false;
+        prdInterviewPreviousButton.setDisable(currentPrdInterviewQuestionIndex == 0);
+        prdInterviewNextButton.setDisable(currentPrdInterviewQuestionIndex >= prdInterviewService.questionCount() - 1);
+        refreshPrdInterviewQuestionButtons(true);
+    }
+
+    private void refreshPrdInterviewQuestionButtons(boolean activeProjectPresent) {
+        for (int questionIndex = 0; questionIndex < prdInterviewQuestionButtons.size(); questionIndex++) {
+            PrdInterviewQuestion question = prdInterviewService.questionForIndex(questionIndex);
+            Button questionButton = prdInterviewQuestionButtons.get(questionIndex);
+            boolean answered = activeProjectPresent && currentPrdInterviewDraft.hasAnswerFor(question.questionId());
+            boolean activeQuestion = activeProjectPresent && questionIndex == currentPrdInterviewQuestionIndex;
+            questionButton.setDisable(!activeProjectPresent);
+            questionButton.setText((answered ? "Complete" : "Pending")
+                    + " | "
+                    + (questionIndex + 1)
+                    + ". "
+                    + question.title());
+            questionButton.getStyleClass().removeAll(
+                    ACTIVE_INTERVIEW_STEP_STYLE_CLASS,
+                    COMPLETE_INTERVIEW_STEP_STYLE_CLASS
+            );
+            if (answered) {
+                questionButton.getStyleClass().add(COMPLETE_INTERVIEW_STEP_STYLE_CLASS);
+            }
+            if (activeQuestion) {
+                questionButton.getStyleClass().add(ACTIVE_INTERVIEW_STEP_STYLE_CLASS);
+            }
+        }
+    }
+
     private String formatMetadataList(List<String> values, String emptyMessage) {
         if (values == null || values.isEmpty()) {
             return emptyMessage;
@@ -801,6 +1027,19 @@ public class AppShellController {
         boolean hasMessage = message != null && !message.isBlank();
         wslPreflightMessageLabel.setText(hasMessage ? message : "");
         wslPreflightMessageLabel.setVisible(hasMessage);
+    }
+
+    private void setPrdInterviewDraftState(String message) {
+        boolean hasMessage = message != null && !message.isBlank();
+        prdInterviewDraftStateLabel.setText(hasMessage ? message : "");
+        prdInterviewDraftStateLabel.setVisible(hasMessage);
+    }
+
+    private String capitalize(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
     }
 
     private record ShellSection(String title, String workspaceText, String statusText) {

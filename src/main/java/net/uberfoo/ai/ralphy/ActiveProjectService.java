@@ -26,6 +26,7 @@ public class ActiveProjectService {
     private ActiveProject activeProject;
     private NativeWindowsPreflightReport latestNativeWindowsPreflightReport;
     private WslPreflightReport latestWslPreflightReport;
+    private PrdInterviewDraft prdInterviewDraft;
     private String startupRecoveryMessage = "";
 
     @Autowired
@@ -98,6 +99,10 @@ public class ActiveProjectService {
         return Optional.ofNullable(latestWslPreflightReport);
     }
 
+    public synchronized Optional<PrdInterviewDraft> prdInterviewDraft() {
+        return Optional.ofNullable(prdInterviewDraft);
+    }
+
     public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
         Objects.requireNonNull(executionProfile, "executionProfile must not be null");
         if (activeProject == null) {
@@ -130,6 +135,26 @@ public class ActiveProjectService {
             }
         }
         return ExecutionProfileSaveResult.success(savedProfile);
+    }
+
+    public synchronized PrdInterviewDraftSaveResult savePrdInterviewDraft(PrdInterviewDraft replacementDraft) {
+        Objects.requireNonNull(replacementDraft, "replacementDraft must not be null");
+        if (activeProject == null) {
+            return PrdInterviewDraftSaveResult.failure(
+                    "Open or create a repository before saving PRD interview answers."
+            );
+        }
+
+        try {
+            projectMetadataInitializer.writePrdInterviewDraft(activeProject, replacementDraft);
+            prdInterviewDraft = replacementDraft;
+            return PrdInterviewDraftSaveResult.success(replacementDraft);
+        } catch (IOException exception) {
+            return PrdInterviewDraftSaveResult.failure(
+                    replacementDraft,
+                    "Unable to store PRD interview answers: " + exception.getMessage()
+            );
+        }
     }
 
     public synchronized NativeWindowsPreflightRunResult runNativeWindowsPreflight() {
@@ -240,6 +265,7 @@ public class ActiveProjectService {
         activeProject = candidateProject;
         localMetadataStorage.recordProjectActivation(candidateProject);
         refreshPreflightState();
+        refreshPrdInterviewDraft();
         startupRecoveryMessage = "";
         return ProjectActivationResult.success(candidateProject);
     }
@@ -307,6 +333,22 @@ public class ActiveProjectService {
 
         try {
             return projectMetadataInitializer.readWslPreflight(activeProject);
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private void refreshPrdInterviewDraft() {
+        prdInterviewDraft = readStoredPrdInterviewDraft().orElse(null);
+    }
+
+    private Optional<PrdInterviewDraft> readStoredPrdInterviewDraft() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        try {
+            return projectMetadataInitializer.readPrdInterviewDraft(activeProject);
         } catch (IOException exception) {
             return Optional.empty();
         }
@@ -508,6 +550,20 @@ public class ActiveProjectService {
 
         private static ExecutionProfileSaveResult failure(String message) {
             return new ExecutionProfileSaveResult(false, null, message);
+        }
+    }
+
+    public record PrdInterviewDraftSaveResult(boolean successful, PrdInterviewDraft draft, String message) {
+        private static PrdInterviewDraftSaveResult success(PrdInterviewDraft draft) {
+            return new PrdInterviewDraftSaveResult(true, draft, "");
+        }
+
+        private static PrdInterviewDraftSaveResult failure(String message) {
+            return new PrdInterviewDraftSaveResult(false, null, message);
+        }
+
+        private static PrdInterviewDraftSaveResult failure(PrdInterviewDraft draft, String message) {
+            return new PrdInterviewDraftSaveResult(false, draft, message);
         }
     }
 

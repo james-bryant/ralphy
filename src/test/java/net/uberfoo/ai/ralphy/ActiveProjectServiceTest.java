@@ -289,6 +289,58 @@ class ActiveProjectServiceTest {
     }
 
     @Test
+    void savePrdInterviewDraftPersistsAnswersAndReloadsThemOnStartup() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        Path repository = createGitDirectoryRepository("prd-interview-repo");
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        PrdInterviewDraft draft = PrdInterviewDraft.empty()
+                .withAnswer(
+                        new PrdInterviewQuestion(
+                                "overviewContext",
+                                "overview",
+                                "Overview",
+                                "Product Context",
+                                "What product, workflow, or repository initiative is this PRD defining?",
+                                "Describe the current context, the problem being addressed, and why the work matters now."
+                        ),
+                        "Interactive PRD drafting for local Ralph workflows.",
+                        1
+                )
+                .withAnswer(
+                        new PrdInterviewQuestion(
+                                "qualityGates",
+                                "quality-gates",
+                                "Quality Gates",
+                                "Quality Gates",
+                                "What automated or manual quality gates must every implementation story satisfy?",
+                                "List the commands, validations, smoke checks, or review expectations that should stay true story by story."
+                        ),
+                        ".\\mvnw.cmd clean verify jacoco:report and Windows smoke.",
+                        3
+                );
+
+        ActiveProjectService.PrdInterviewDraftSaveResult saveResult = activeProjectService.savePrdInterviewDraft(draft);
+
+        assertTrue(saveResult.successful());
+        assertEquals(2, saveResult.draft().answeredQuestionCount());
+        assertTrue(Files.readString(new ActiveProject(repository).projectMetadataPath())
+                .contains("\"prdInterviewDraft\""));
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        PrdInterviewDraft restoredDraft = restoredService.prdInterviewDraft().orElseThrow();
+
+        assertEquals("Interactive PRD drafting for local Ralph workflows.",
+                restoredDraft.answerFor("overviewContext"));
+        assertEquals(".\\mvnw.cmd clean verify jacoco:report and Windows smoke.",
+                restoredDraft.answerFor("qualityGates"));
+        assertEquals(3, restoredDraft.selectedQuestionIndex());
+    }
+
+    @Test
     void openRepositoryRunsAndStoresNativeWindowsPreflightForPowerShellProjects() throws IOException {
         ActiveProjectService activeProjectService = createService();
         Path repository = createGitDirectoryRepository("preflight-repo");
