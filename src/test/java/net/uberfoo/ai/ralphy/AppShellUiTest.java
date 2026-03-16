@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -78,6 +79,29 @@ class AppShellUiTest {
                 harness.text("#workspacePlaceholderLabel"));
         assertEquals("Execution workspace ready.", harness.text("#statusLabel"));
         assertTrue(harness.hasStyleClass("#executionNavButton", "shell-nav-button-active"));
+    }
+
+    @Test
+    void appShellShowsBuiltInPresetCatalogWithReadOnlyPreview() throws Exception {
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(tempDir.resolve("storage"));
+
+        assertEquals("Ralph/Codex PRD Creation", harness.text("#presetPreviewNameLabel"));
+        assertTrue(harness.text("#presetPreviewVersionLabel").contains("v1"));
+        assertTrue(harness.text("#presetRequiredSkillsValueLabel").contains("ralph-tui-prd"));
+        assertTrue(harness.text("#presetPromptPreviewArea")
+                .contains("repository-owned Product Requirements Document"));
+        assertFalse(harness.isEditable("#presetPromptPreviewArea"));
+        assertTrue(harness.textContent("#presetCatalogCard")
+                .contains("Preset preview is read-only in v1"));
+
+        harness.clickOn("#storyImplementationPresetRadioButton");
+
+        assertEquals("Ralph/Codex Story Implementation", harness.text("#presetPreviewNameLabel"));
+        assertTrue(harness.text("#presetRequiredSkillsValueLabel").contains("springboot-tdd"));
+        assertTrue(harness.text("#presetAssumptionsValueLabel")
+                .contains(".\\mvnw.cmd clean verify jacoco:report"));
+        assertTrue(harness.text("#presetPromptPreviewArea").contains("Implement exactly one approved story"));
     }
 
     @Test

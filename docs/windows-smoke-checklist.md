@@ -41,8 +41,11 @@ Run this baseline even when later workflow stories are still incomplete. For any
 20. Confirm the `Execution Overview` card shows either `No persisted run state` or a resumable/reviewable message when seeded run metadata exists.
 21. Using a disposable test repository, move the active repository or temporarily remove/rename its `.git` marker, relaunch the app, and confirm a clear recovery message explains that the last active repository could not be restored.
 22. Open `PRD Editor` and confirm the workspace title becomes `PRD Editor` and the status bar reads `PRD Editor workspace ready.`
-23. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
-24. Close the app cleanly.
+23. In the `Built-In Preset Catalog`, confirm the workflow list shows `PRD Creation`, `Story Implementation`, `Retry/Fix`, and `Run Summary`.
+24. Confirm the default preview shows the `Ralph/Codex PRD Creation` preset, includes a version identifier, and displays recorded skills and operating assumptions.
+25. Select `Story Implementation` and confirm the preview updates in place with the implementation preset details while the prompt preview remains read-only.
+26. Open `Execution` and confirm the workspace title becomes `Execution` and the status bar reads `Execution workspace ready.`
+27. Close the app cleanly.
 
 ## Scenario A: Native Windows Execution Profile
 
@@ -51,7 +54,7 @@ Use this scenario now for profile selection, native preflight, and save verifica
 | Area | Action | Expected Result |
 | --- | --- | --- |
 | Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the native Windows profile. | The project becomes active, the repository path is shown with a Windows path, new projects gain initial `.ralph-tui/project-metadata.json`, and native preflight reports readiness or clear remediation. |
-| PRD Editing | Open the active PRD in `PRD Editor`, make a small Markdown edit, save, and reopen it. | The edit persists without destructive reformatting and dirty-state/save behavior is clear. |
+| PRD Editing | Open `PRD Editor`, switch between the built-in presets, then open the active PRD, make a small Markdown edit, save, and reopen it. | Preset selection updates the preview without enabling prompt editing, and PRD edits persist without destructive reformatting while dirty-state/save behavior is clear. |
 | Loop Start | Start one eligible story from `Execution`. | The story moves into a queued or running state, live output begins, and the launcher uses the native Windows profile. |
 | Pause | Request `Pause` while a story is running. | The current step is allowed to finish, the UI distinguishes pause requested from fully paused, and the next story does not start. |
 | Log Viewing | Open the latest run artifacts after the story stops. | Raw output, summary, and any linked files remain viewable from the app and on disk after restart. |
@@ -63,7 +66,7 @@ Use this scenario now for WSL profile selection, path-mapping validation, and WS
 | Area | Action | Expected Result |
 | --- | --- | --- |
 | Onboarding | Open or create a Git-backed project from the `Projects` workspace. Select the WSL profile, choose a distro, save any Windows-to-WSL path mapping, and review the WSL preflight section. | The project becomes active, the selected distro is shown, new projects gain initial `.ralph-tui/project-metadata.json`, path mapping resolves correctly, and WSL preflight reports readiness or actionable remediation. |
-| PRD Editing | Open the active PRD in `PRD Editor`, make a small Markdown edit, save, and reopen it. | PRD editing behavior matches the native Windows flow because authoring still happens in the Windows desktop UI. |
+| PRD Editing | Open `PRD Editor`, review the built-in preset catalog, then open the active PRD, make a small Markdown edit, save, and reopen it. | Preset previews remain read-only, and PRD editing behavior matches the native Windows flow because authoring still happens in the Windows desktop UI. |
 | Loop Start | Start one eligible story from `Execution` while the WSL profile is selected. | The story moves into a queued or running state, live output begins, and the launcher runs through the saved WSL profile and mapped repository path. |
 | Pause | Request `Pause` while a story is running through WSL. | The current step is allowed to finish inside WSL, the UI reaches a paused state, and the next story does not start. |
 | Log Viewing | Open the latest run artifacts after the story stops. | Raw output, summary, distro/profile details, and linked files remain viewable from the app and on disk after restart. |

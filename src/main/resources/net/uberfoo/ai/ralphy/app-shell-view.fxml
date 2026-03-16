@@ -6,6 +6,7 @@
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.RadioButton?>
 <?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.TextArea?>
 <?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.BorderPane?>
 <?import javafx.scene.layout.HBox?>
@@ -312,19 +313,92 @@
                     </Label>
                 </VBox>
             </HBox>
-            <StackPane>
+            <VBox id="presetCatalogCard" fx:id="presetCatalogCard" spacing="16.0">
                 <styleClass>
                     <String fx:value="shell-card"/>
                 </styleClass>
                 <padding>
-                    <Insets bottom="40.0" left="18.0" right="18.0" top="40.0"/>
+                    <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
                 </padding>
-                <Label text="Editor surface placeholder">
+                <Label text="Built-In Preset Catalog">
                     <styleClass>
                         <String fx:value="card-title"/>
                     </styleClass>
                 </Label>
-            </StackPane>
+                <Label text="Select a built-in Ralph/Codex preset and inspect its versioned prompt preview. v1 intentionally keeps the prompt text read-only."
+                       wrapText="true">
+                    <styleClass>
+                        <String fx:value="muted-text"/>
+                    </styleClass>
+                </Label>
+                <HBox spacing="18.0">
+                    <VBox prefWidth="250.0" spacing="10.0">
+                        <Label text="Workflow Step">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <RadioButton id="prdCreationPresetRadioButton" fx:id="prdCreationPresetRadioButton"
+                                     mnemonicParsing="false" text="PRD Creation"/>
+                        <RadioButton id="storyImplementationPresetRadioButton"
+                                     fx:id="storyImplementationPresetRadioButton"
+                                     mnemonicParsing="false" text="Story Implementation"/>
+                        <RadioButton id="retryFixPresetRadioButton" fx:id="retryFixPresetRadioButton"
+                                     mnemonicParsing="false" text="Retry/Fix"/>
+                        <RadioButton id="runSummaryPresetRadioButton" fx:id="runSummaryPresetRadioButton"
+                                     mnemonicParsing="false" text="Run Summary"/>
+                    </VBox>
+                    <Separator orientation="VERTICAL"/>
+                    <VBox HBox.hgrow="ALWAYS" spacing="8.0">
+                        <Label id="presetPreviewNameLabel" fx:id="presetPreviewNameLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="presetPreviewVersionLabel" fx:id="presetPreviewVersionLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="presetPreviewOverviewLabel" fx:id="presetPreviewOverviewLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Required Skills">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="presetRequiredSkillsValueLabel" fx:id="presetRequiredSkillsValueLabel"
+                               wrapText="true"/>
+                        <Label text="Operating Assumptions">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="presetAssumptionsValueLabel" fx:id="presetAssumptionsValueLabel"
+                               wrapText="true"/>
+                        <Label text="Prompt Preview">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Preset preview is read-only in v1. Arbitrary prompt editing stays disabled."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <TextArea id="presetPromptPreviewArea" fx:id="presetPromptPreviewArea"
+                                  editable="false" prefRowCount="10" wrapText="true">
+                            <styleClass>
+                                <String fx:value="preset-preview-area"/>
+                            </styleClass>
+                        </TextArea>
+                    </VBox>
+                </HBox>
+            </VBox>
         </VBox>
     </center>
     <bottom>

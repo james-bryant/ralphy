@@ -9,6 +9,7 @@ after each iteration and it's included in prompts for context.
 
 - Persist execution diagnostics in `.ralph-tui/project-metadata.json` and restore them through `ActiveProjectService`; when a stored report already exists, render that report on reopen and offer an explicit rerun action instead of immediately overwriting it during startup.
 - Put remediation commands on each failed preflight check record and keep the UI passive: render those commands in a dedicated remediation panel with copy buttons and rerun actions, but never execute install or authentication commands from the app itself.
+- Keep built-in workflow presets as typed catalog records in code and render previews directly from that catalog; until customization exists, avoid persisting or editing raw prompt bodies in project metadata.
 
 ---
 
@@ -48,4 +49,24 @@ after each iteration and it's included in prompts for context.
   - Persisting remediation commands alongside check results keeps restored diagnostics and freshly rerun diagnostics consistent without adding UI-only remediation heuristics.
   - Native preflight still auto-runs on restore, so remediation rerun tests need to compare the live detail text before and after the rerun instead of assuming a seeded native report survives startup.
   - Copyable command fields plus explicit copy buttons are a safer fit for this shell than action buttons that would directly launch setup commands, because the acceptance criteria require passive guidance only.
+---
+## 2026-03-15 - US-016
+- Implemented a typed built-in preset catalog with versioned presets for PRD creation, story implementation, retry/fix, and run summary, including metadata for required skills and operating assumptions.
+- Replaced the placeholder editor surface with a read-only JavaFX preset catalog that lets users switch between workflow presets and preview the selected prompt without arbitrary editing.
+- Added catalog unit coverage, JavaFX UI assertions for preset switching and read-only previews, and updated the Windows smoke checklist to include preset-catalog verification steps.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/PresetUseCase.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/BuiltInPreset.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PresetCatalogService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`
+  - `src/test/java/net/uberfoo/ai/ralphy/PresetCatalogServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/JavaFxUiHarness.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - A typed preset catalog keeps prompt text, versioning, and metadata consistent across UI and later execution features without embedding large prompt literals directly in controllers or FXML.
+  - Extending the shared JavaFX harness with small capability checks like `isEditable` is enough to cover read-only UI requirements without introducing heavier UI testing frameworks.
+  - For this shell, swapping the placeholder workspace card for a catalog surface was the least disruptive way to land new PRD-authoring functionality while preserving the existing navigation and controller structure.
 ---

@@ -5,6 +5,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.input.Clipboard;
@@ -64,8 +65,10 @@ public class AppShellController {
 
     private final AppShellDescriptor shellDescriptor;
     private final ActiveProjectService activeProjectService;
+    private final PresetCatalogService presetCatalogService;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
+    private final ToggleGroup presetCatalogToggleGroup = new ToggleGroup();
 
     @FXML
     private Label activeProjectNameLabel;
@@ -134,10 +137,43 @@ public class AppShellController {
     private Button prdEditorNavButton;
 
     @FXML
+    private Label presetAssumptionsValueLabel;
+
+    @FXML
+    private VBox presetCatalogCard;
+
+    @FXML
+    private Label presetPreviewNameLabel;
+
+    @FXML
+    private Label presetPreviewOverviewLabel;
+
+    @FXML
+    private Label presetPreviewVersionLabel;
+
+    @FXML
+    private TextArea presetPromptPreviewArea;
+
+    @FXML
+    private RadioButton prdCreationPresetRadioButton;
+
+    @FXML
+    private Label presetRequiredSkillsValueLabel;
+
+    @FXML
     private Button projectsNavButton;
 
     @FXML
+    private RadioButton retryFixPresetRadioButton;
+
+    @FXML
     private Label statusLabel;
+
+    @FXML
+    private RadioButton runSummaryPresetRadioButton;
+
+    @FXML
+    private RadioButton storyImplementationPresetRadioButton;
 
     @FXML
     private Label taglineLabel;
@@ -195,9 +231,11 @@ public class AppShellController {
 
     public AppShellController(AppShellDescriptor shellDescriptor,
                               ActiveProjectService activeProjectService,
+                              PresetCatalogService presetCatalogService,
                               RepositoryDirectoryChooser repositoryDirectoryChooser) {
         this.shellDescriptor = shellDescriptor;
         this.activeProjectService = activeProjectService;
+        this.presetCatalogService = presetCatalogService;
         this.repositoryDirectoryChooser = repositoryDirectoryChooser;
     }
 
@@ -221,6 +259,7 @@ public class AppShellController {
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
                 updateExecutionProfileFieldState()
         );
+        configurePresetCatalog();
         nativeExecutionProfileRadioButton.setSelected(true);
         renderActiveProject(activeProjectService.activeProject().orElse(null));
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
@@ -670,6 +709,57 @@ public class AppShellController {
         wslDistributionField.setDisable(!enableWslFields);
         windowsPathPrefixField.setDisable(!enableWslFields);
         wslPathPrefixField.setDisable(!enableWslFields);
+    }
+
+    private void configurePresetCatalog() {
+        configurePresetToggle(prdCreationPresetRadioButton, PresetUseCase.PRD_CREATION);
+        configurePresetToggle(storyImplementationPresetRadioButton, PresetUseCase.STORY_IMPLEMENTATION);
+        configurePresetToggle(retryFixPresetRadioButton, PresetUseCase.RETRY_FIX);
+        configurePresetToggle(runSummaryPresetRadioButton, PresetUseCase.RUN_SUMMARY);
+        presetCatalogToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
+                renderPresetPreview(selectedPresetUseCase())
+        );
+        presetPromptPreviewArea.setEditable(false);
+        prdCreationPresetRadioButton.setSelected(true);
+        renderPresetPreview(PresetUseCase.PRD_CREATION);
+    }
+
+    private void configurePresetToggle(RadioButton radioButton, PresetUseCase useCase) {
+        radioButton.setToggleGroup(presetCatalogToggleGroup);
+        radioButton.setUserData(useCase);
+    }
+
+    private PresetUseCase selectedPresetUseCase() {
+        if (presetCatalogToggleGroup.getSelectedToggle() == null) {
+            return PresetUseCase.PRD_CREATION;
+        }
+        return (PresetUseCase) presetCatalogToggleGroup.getSelectedToggle().getUserData();
+    }
+
+    private void renderPresetPreview(PresetUseCase useCase) {
+        BuiltInPreset preset = presetCatalogService.defaultPreset(useCase);
+        presetPreviewNameLabel.setText(preset.displayName());
+        presetPreviewVersionLabel.setText("Preset ID " + preset.presetId() + " | Version " + preset.version());
+        presetPreviewOverviewLabel.setText(preset.overview());
+        presetRequiredSkillsValueLabel.setText(formatMetadataList(
+                preset.requiredSkills(),
+                "No required skills recorded for this preset."
+        ));
+        presetAssumptionsValueLabel.setText(formatMetadataList(
+                preset.operatingAssumptions(),
+                "No operating assumptions recorded for this preset."
+        ));
+        presetPromptPreviewArea.setText(preset.promptPreview());
+    }
+
+    private String formatMetadataList(List<String> values, String emptyMessage) {
+        if (values == null || values.isEmpty()) {
+            return emptyMessage;
+        }
+        return values.stream()
+                .map(value -> "- " + value)
+                .reduce((left, right) -> left + System.lineSeparator() + right)
+                .orElse(emptyMessage);
     }
 
     private ExecutionProfile buildExecutionProfileFromForm() {

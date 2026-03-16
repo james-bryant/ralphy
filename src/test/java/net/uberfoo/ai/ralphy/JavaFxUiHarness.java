@@ -5,8 +5,8 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ButtonBase;
-import javafx.scene.control.Labeled;
 import javafx.scene.control.TextInputControl;
+import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
@@ -178,6 +178,10 @@ final class JavaFxUiHarness {
 
     boolean isVisible(String selector) throws Exception {
         return onFxThread(() -> requiredNode(selector).isVisible());
+    }
+
+    boolean isEditable(String selector) throws Exception {
+        return onFxThread(() -> requiredNode(selector, TextInputControl.class).isEditable());
     }
 
     Color textFill(String selector) throws Exception {

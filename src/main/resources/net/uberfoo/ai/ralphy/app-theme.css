@@ -141,3 +141,7 @@
 .ralphy-shell .preflight-command-field {
     -fx-font-family: "Consolas";
 }
+
+.ralphy-shell .preset-preview-area {
+    -fx-font-family: "Consolas";
+}
