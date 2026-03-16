@@ -12,6 +12,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,6 +23,7 @@ public class ActiveProjectService {
     private final GitRepositoryInitializer gitRepositoryInitializer;
     private final LocalMetadataStorage localMetadataStorage;
     private final NativeWindowsPreflightService nativeWindowsPreflightService;
+    private final PrdStructureValidator prdStructureValidator;
     private final ProjectMetadataInitializer projectMetadataInitializer;
     private final ProjectStorageInitializer projectStorageInitializer;
     private final WslPreflightService wslPreflightService;
@@ -39,6 +41,7 @@ public class ActiveProjectService {
                                 ProjectStorageInitializer projectStorageInitializer,
                                 LocalMetadataStorage localMetadataStorage,
                                 NativeWindowsPreflightService nativeWindowsPreflightService,
+                                PrdStructureValidator prdStructureValidator,
                                 WslPreflightService wslPreflightService,
                                 @Value("${ralphy.preflight.wsl.auto-run:true}") boolean autoRunWslPreflight) {
         this.gitRepositoryInitializer = gitRepositoryInitializer;
@@ -46,6 +49,7 @@ public class ActiveProjectService {
         this.projectStorageInitializer = projectStorageInitializer;
         this.localMetadataStorage = localMetadataStorage;
         this.nativeWindowsPreflightService = nativeWindowsPreflightService;
+        this.prdStructureValidator = prdStructureValidator;
         this.wslPreflightService = wslPreflightService;
         this.autoRunWslPreflight = autoRunWslPreflight;
         this.localMetadataStorage.startSession();
@@ -57,6 +61,7 @@ public class ActiveProjectService {
                          ProjectStorageInitializer projectStorageInitializer,
                          LocalMetadataStorage localMetadataStorage,
                          NativeWindowsPreflightService nativeWindowsPreflightService,
+                         PrdStructureValidator prdStructureValidator,
                          WslPreflightService wslPreflightService) {
         this(
                 gitRepositoryInitializer,
@@ -64,6 +69,7 @@ public class ActiveProjectService {
                 projectStorageInitializer,
                 localMetadataStorage,
                 nativeWindowsPreflightService,
+                prdStructureValidator,
                 wslPreflightService,
                 true
         );
@@ -109,6 +115,42 @@ public class ActiveProjectService {
 
     public synchronized Optional<String> activePrdMarkdown() {
         return Optional.ofNullable(activePrdMarkdown);
+    }
+
+    public synchronized PrdExecutionGate prdExecutionGate() {
+        if (activeProject == null) {
+            return PrdExecutionGate.blocked(
+                    "No active project",
+                    "Open or create a repository before validating a PRD for execution.",
+                    PrdValidationReport.empty()
+            );
+        }
+
+        if (activePrdMarkdown == null || activePrdMarkdown.isBlank()) {
+            return PrdExecutionGate.blocked(
+                    "No active PRD",
+                    "Execution is blocked until the active project has a saved Markdown PRD.",
+                    PrdValidationReport.failure(List.of(new PrdValidationError(
+                            "Active PRD",
+                            "Generate or save `.ralph-tui/prds/active-prd.md` before execution."
+                    )))
+            );
+        }
+
+        PrdValidationReport validationReport = prdStructureValidator.validate(activePrdMarkdown);
+        if (!validationReport.valid()) {
+            return PrdExecutionGate.blocked(
+                    "PRD validation failed",
+                    "Execution is blocked while structural validation errors remain.",
+                    validationReport
+            );
+        }
+
+        return PrdExecutionGate.ready(
+                "PRD ready for execution",
+                "The active PRD has the required sections, a Quality Gates section, and valid story headers.",
+                validationReport
+        );
     }
 
     public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
@@ -639,6 +681,23 @@ public class ActiveProjectService {
 
         private static ActivePrdSaveResult failure(String markdown, Path path, String message) {
             return new ActivePrdSaveResult(false, markdown, path, message);
+        }
+    }
+
+    public record PrdExecutionGate(boolean executionBlocked,
+                                   String summary,
+                                   String detail,
+                                   PrdValidationReport validationReport) {
+        private static PrdExecutionGate blocked(String summary,
+                                                String detail,
+                                                PrdValidationReport validationReport) {
+            return new PrdExecutionGate(true, summary, detail, validationReport);
+        }
+
+        private static PrdExecutionGate ready(String summary,
+                                              String detail,
+                                              PrdValidationReport validationReport) {
+            return new PrdExecutionGate(false, summary, detail, validationReport);
         }
     }
 

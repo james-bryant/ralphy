@@ -260,6 +260,82 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellShowsPrdValidationErrorsInExecutionAndClearsThemAfterSavingAValidPrd() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("prd-validation-ui-repo");
+        Path importedPrdPath = repository.resolve(".ralph-tui").resolve("prds").resolve("active-prd.md");
+        Files.createDirectories(importedPrdPath.getParent());
+        Files.writeString(importedPrdPath, """
+                # PRD: Broken execution plan
+
+                ## Overview
+                Missing validation prerequisites.
+
+                ## User Stories
+                ### Story 1: Missing US identifier
+                **Outcome:** This should be blocked.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Structural validation
+
+                ### Out of Scope
+                - Execution launcher work
+                """);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        RepositoryDirectoryChooser repositoryDirectoryChooser = harness.getRequiredBean(RepositoryDirectoryChooser.class);
+
+        harness.clickOn("#projectsNavButton");
+        repositoryDirectoryChooser.queueSelectionForTest(repository);
+        harness.clickOn("#openRepositoryButton");
+        harness.clickOn("#executionNavButton");
+
+        assertEquals("PRD validation failed", harness.text("#prdValidationSummaryLabel"));
+        assertTrue(harness.text("#prdValidationDetailLabel")
+                .contains("Execution is blocked while structural validation errors remain."));
+        String validationErrors = harness.text("#prdValidationErrorsLabel");
+        assertTrue(validationErrors.contains("Section Goals"));
+        assertTrue(validationErrors.contains("Section Quality Gates"));
+        assertTrue(validationErrors.contains("Story heading `### Story 1: Missing US identifier`"));
+
+        harness.clickOn("#prdEditorNavButton");
+        harness.enterText("#prdDocumentPreviewArea", """
+                # PRD: Valid execution plan
+
+                ## Overview
+                Validate PRDs before execution starts.
+
+                ## Goals
+                - Block malformed PRDs before execution
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+                - Automated JavaFX UI tests
+
+                ## User Stories
+                ### US-020: Validate PRD structure before execution
+                **Outcome:** Malformed task definitions do not reach the execution loop.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Structural PRD validation
+
+                ### Out of Scope
+                - Codex launch orchestration
+                """);
+        harness.clickOn("#savePrdDocumentButton");
+        harness.clickOn("#executionNavButton");
+
+        assertEquals("PRD ready for execution", harness.text("#prdValidationSummaryLabel"));
+        assertTrue(harness.text("#prdValidationDetailLabel")
+                .contains("required sections, a Quality Gates section, and valid story headers"));
+        assertFalse(harness.isVisible("#prdValidationErrorsLabel"));
+    }
+
+    @Test
     void appShellCanOpenGitRepositoriesAndRejectNonGitFolders() throws Exception {
         Path nonGitDirectory = Files.createDirectory(tempDir.resolve("plain-folder"));
         Path gitRepository = createGitRepository("sample-repo");

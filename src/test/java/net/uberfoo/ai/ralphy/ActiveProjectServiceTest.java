@@ -17,6 +17,7 @@ class ActiveProjectServiceTest {
     private final ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
     private final ProjectStorageInitializer projectStorageInitializer = new ProjectStorageInitializer();
     private final PrdMarkdownGenerator prdMarkdownGenerator = new PrdMarkdownGenerator();
+    private final PrdStructureValidator prdStructureValidator = new PrdStructureValidator();
 
     @TempDir
     Path tempDir;
@@ -406,6 +407,89 @@ class ActiveProjectServiceTest {
     }
 
     @Test
+    void prdExecutionGateBlocksMalformedPrdsAndClearsWhenTheSavedPrdBecomesValid() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path repository = createGitDirectoryRepository("prd-validation-repo");
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd("""
+                # PRD: Broken plan
+
+                ## Overview
+                Broken structure for validation coverage.
+
+                ## User Stories
+                ### Story 1: Missing US identifier
+                **Outcome:** This story header is malformed.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Validate PRD structure
+
+                ### Out of Scope
+                - Execution launcher work
+                """).successful());
+
+        ActiveProjectService.PrdExecutionGate blockedGate = activeProjectService.prdExecutionGate();
+
+        assertTrue(blockedGate.executionBlocked());
+        assertEquals("PRD validation failed", blockedGate.summary());
+        assertTrue(blockedGate.validationReport().errors().stream().anyMatch(error ->
+                error.location().equals("Section Goals")));
+        assertTrue(blockedGate.validationReport().errors().stream().anyMatch(error ->
+                error.location().equals("Section Quality Gates")));
+        assertTrue(blockedGate.validationReport().errors().stream().anyMatch(error ->
+                error.location().contains("Story heading `### Story 1: Missing US identifier`")));
+
+        PrdInterviewDraft validDraft = new PrdInterviewDraft(
+                0,
+                List.of(
+                        new PrdInterviewDraft.Answer(
+                                "overviewContext",
+                                "overview",
+                                "Validated execution gating for active PRDs."
+                        ),
+                        new PrdInterviewDraft.Answer(
+                                "goalsOutcomes",
+                                "goals",
+                                "Block malformed PRDs before execution."
+                        ),
+                        new PrdInterviewDraft.Answer(
+                                "qualityGates",
+                                "quality-gates",
+                                ".\\mvnw.cmd clean verify jacoco:report\nAutomated JavaFX UI tests"
+                        ),
+                        new PrdInterviewDraft.Answer(
+                                "userStories",
+                                "user-stories",
+                                "US-020: Validate PRD structure before execution | Block malformed task definitions before the loop starts."
+                        ),
+                        new PrdInterviewDraft.Answer(
+                                "scopeIn",
+                                "scope-boundaries",
+                                "Execution gating\nValidation feedback"
+                        ),
+                        new PrdInterviewDraft.Answer(
+                                "scopeOut",
+                                "scope-boundaries",
+                                "Codex launch orchestration"
+                        )
+                ),
+                "2026-03-15T20:00:00Z",
+                "2026-03-15T20:05:00Z"
+        );
+        assertTrue(activeProjectService.saveActivePrd(
+                prdMarkdownGenerator.generate(new ActiveProject(repository), validDraft)
+        ).successful());
+
+        ActiveProjectService.PrdExecutionGate readyGate = activeProjectService.prdExecutionGate();
+
+        assertFalse(readyGate.executionBlocked());
+        assertEquals("PRD ready for execution", readyGate.summary());
+        assertTrue(readyGate.validationReport().valid());
+    }
+
+    @Test
     void openRepositoryRunsAndStoresNativeWindowsPreflightForPowerShellProjects() throws IOException {
         ActiveProjectService activeProjectService = createService();
         Path repository = createGitDirectoryRepository("preflight-repo");
@@ -478,6 +562,7 @@ class ActiveProjectServiceTest {
                 projectStorageInitializer,
                 localMetadataStorage,
                 createNativePreflightService(),
+                prdStructureValidator,
                 createWslPreflightService(),
                 true
         );

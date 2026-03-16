@@ -209,6 +209,28 @@
                                 </styleClass>
                             </Label>
                             <Separator/>
+                            <Label text="PRD Validation">
+                                <styleClass>
+                                    <String fx:value="card-title"/>
+                                </styleClass>
+                            </Label>
+                            <Label id="prdValidationSummaryLabel" fx:id="prdValidationSummaryLabel" wrapText="true">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <Label id="prdValidationDetailLabel" fx:id="prdValidationDetailLabel" wrapText="true">
+                                <styleClass>
+                                    <String fx:value="muted-text"/>
+                                </styleClass>
+                            </Label>
+                            <Label id="prdValidationErrorsLabel" fx:id="prdValidationErrorsLabel" visible="false"
+                                   wrapText="true">
+                                <styleClass>
+                                    <String fx:value="validation-text"/>
+                                </styleClass>
+                            </Label>
+                            <Separator/>
                             <Label text="Native Windows Preflight">
                                 <styleClass>
                                     <String fx:value="card-title"/>

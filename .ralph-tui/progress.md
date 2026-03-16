@@ -13,6 +13,7 @@ after each iteration and it's included in prompts for context.
 - Keep built-in workflow presets as typed catalog records in code and render previews directly from that catalog; until customization exists, avoid persisting or editing raw prompt bodies in project metadata.
 - Persist in-progress PRD authoring in `project-metadata.json` as typed question/answer draft state plus the selected step index, so JavaFX authoring screens can restore users to the same interview prompt after restart without inventing a second persistence path.
 - Treat generated PRDs as project-scoped filesystem artifacts: save and restore `.ralph-tui/prds/active-prd.md` through `ActiveProjectService` and render the current file in the UI instead of duplicating Markdown content inside project metadata.
+- Model execution prerequisites as typed service-level reports and let JavaFX render those reports directly; keeping PRD validation and future launch gating in `ActiveProjectService` avoids duplicating parser rules in the controller.
 
 ---
 
@@ -127,4 +128,23 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - JavaFX `TextArea` is a workable Markdown editor for this shell as long as dirty tracking compares against a normalized in-memory baseline rather than the raw file bytes.
   - Blocking PRD regeneration while the editor is dirty avoids silently discarding unsaved manual refinements, which keeps the generated-flow overwrite behavior explicit instead of surprising.
+---
+## 2026-03-15 - US-020
+- Implemented `PrdStructureValidator` plus a shared `ActiveProjectService` execution gate that validates saved PRDs for required sections, a `Quality Gates` section, and `### US-XXX: ...` story headers before execution.
+- Added an `Execution > PRD Validation` panel that surfaces blocked vs ready state and shows section/story-specific validation errors directly from the shared validation report.
+- Added unit and JavaFX UI coverage for invalid-to-valid PRD transitions, updated the Windows smoke checklist for PRD validation, and completed a Windows smoke launch by starting `.\mvnw.cmd -q -DskipTests javafx:run` and confirming a live `Ralphy` window.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdValidationError.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdValidationReport.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdStructureValidator.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/test/java/net/uberfoo/ai/ralphy/PrdStructureValidatorTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - A dedicated structural validator is easier to reuse when it returns typed location/message pairs instead of preformatted UI text, because both service gates and JavaFX views can consume the same report.
+  - The existing execution workspace can absorb new prerequisites cleanly by adding a focused validation panel, which preserves the separate meaning of run-recovery state versus start-blocking validation state.
 ---

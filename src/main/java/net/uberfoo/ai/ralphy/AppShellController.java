@@ -134,6 +134,15 @@ public class AppShellController {
     private Label executionProfileSummaryLabel;
 
     @FXML
+    private Label prdValidationDetailLabel;
+
+    @FXML
+    private Label prdValidationErrorsLabel;
+
+    @FXML
+    private Label prdValidationSummaryLabel;
+
+    @FXML
     private Label navigationPlaceholderLabel;
 
     @FXML
@@ -350,6 +359,7 @@ public class AppShellController {
         wslPreflightRemediationSection.managedProperty().bind(wslPreflightRemediationSection.visibleProperty());
         prdInterviewDraftStateLabel.managedProperty().bind(prdInterviewDraftStateLabel.visibleProperty());
         prdDocumentStateLabel.managedProperty().bind(prdDocumentStateLabel.visibleProperty());
+        prdValidationErrorsLabel.managedProperty().bind(prdValidationErrorsLabel.visibleProperty());
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
@@ -466,6 +476,7 @@ public class AppShellController {
         renderExecutionProfile(saveResult.executionProfile());
         renderNativeWindowsPreflight();
         renderWslPreflight();
+        renderPrdValidation();
         setExecutionProfileMessage("");
     }
 
@@ -518,6 +529,7 @@ public class AppShellController {
         }
 
         renderGeneratedPrd(activeProject.get());
+        renderPrdValidation();
         setPrdDocumentState("Generated PRD saved to " + saveResult.path()
                 + ". Edit it below and save when you refine the plan.");
     }
@@ -583,6 +595,7 @@ public class AppShellController {
             renderExecutionOverview(null);
             renderNativeWindowsPreflight();
             renderWslPreflight();
+            renderPrdValidation();
             renderPrdInterview(null);
             renderGeneratedPrd(null);
             return;
@@ -595,6 +608,7 @@ public class AppShellController {
         renderExecutionOverview(activeProject);
         renderNativeWindowsPreflight();
         renderWslPreflight();
+        renderPrdValidation();
         renderPrdInterview(activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
         renderGeneratedPrd(activeProject);
     }
@@ -744,6 +758,24 @@ public class AppShellController {
                 + ". WSL runs stay blocked until every check passes.");
         wslPreflightChecksLabel.setText(formatWslPreflightChecks(report));
         renderWslPreflightRemediation(report);
+    }
+
+    private void renderPrdValidation() {
+        ActiveProjectService.PrdExecutionGate executionGate = activeProjectService.prdExecutionGate();
+        prdValidationSummaryLabel.setText(executionGate.summary());
+        prdValidationDetailLabel.setText(executionGate.detail());
+
+        String validationErrors = formatPrdValidationErrors(executionGate.validationReport());
+        boolean hasValidationErrors = !validationErrors.isBlank();
+        prdValidationErrorsLabel.setText(hasValidationErrors ? validationErrors : "");
+        prdValidationErrorsLabel.setVisible(hasValidationErrors);
+    }
+
+    private String formatPrdValidationErrors(PrdValidationReport validationReport) {
+        return validationReport.errors().stream()
+                .map(PrdValidationError::description)
+                .reduce((left, right) -> left + System.lineSeparator() + right)
+                .orElse("");
     }
 
     private String formatNativeWindowsPreflightChecks(NativeWindowsPreflightReport report) {
@@ -1073,6 +1105,7 @@ public class AppShellController {
         }
 
         renderGeneratedPrd(activeProject.get());
+        renderPrdValidation();
         setPrdDocumentState((manualSave ? "Markdown PRD saved to " : "Pending Markdown PRD edits saved to ")
                 + saveResult.path() + ".");
         return true;
