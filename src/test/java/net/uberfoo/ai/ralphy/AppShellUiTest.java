@@ -121,6 +121,93 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellPlayAutoAdvancesAcrossReadyStoriesAndShowsSkippedBlockedReasons() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("play-auto-advance-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        seedStoryProgressArtifacts(repository, playAutoAdvanceMarkdown(), playAutoAdvancePrdJson());
+
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
+        seedStoredProject(storageDirectory, repository);
+
+        Path fakeCodexCommand = createFakeCodexCommandScript(400L);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(
+                storageDirectory,
+                "--ralphy.preflight.native.auto-run=false",
+                "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
+        );
+
+        harness.clickOn("#storyImplementationPresetRadioButton");
+        harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to play US-031"));
+        assertEquals("Play", harness.text("#startSingleStoryButton"));
+        assertTrue(harness.text("#singleStorySessionDetailLabel").contains("US-030 (status is BLOCKED)"));
+
+        harness.clickOn("#startSingleStoryButton");
+        harness.waitUntil(() -> harness.text("#singleStorySessionMessageLabel").contains("Play complete.")
+                && "2".equals(harness.text("#storyProgressPassedCountLabel")));
+
+        assertEquals("1", harness.text("#storyProgressBlockedCountLabel"));
+        assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
+        assertTrue(harness.text("#singleStorySessionMessageLabel").contains("US-030 (status is BLOCKED)"));
+        assertEquals("Play", harness.text("#startSingleStoryButton"));
+
+        PrdTaskState taskState = harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElseThrow();
+        assertEquals(PrdTaskStatus.BLOCKED, taskState.taskById("US-030").orElseThrow().status());
+        assertEquals(PrdTaskStatus.COMPLETED, taskState.taskById("US-031").orElseThrow().status());
+        assertEquals(PrdTaskStatus.COMPLETED, taskState.taskById("US-032").orElseThrow().status());
+    }
+
+    @Test
+    void appShellPlayRetriesOnceAutomaticallyBeforeContinuing() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("play-retry-once-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        seedStoryProgressArtifacts(repository, playRetryOnceMarkdown(), playRetryOncePrdJson());
+
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
+        seedStoredProject(storageDirectory, repository);
+
+        Path invocationCounterPath = tempDir.resolve("flaky-codex-count.txt");
+        Path fakeCodexCommand = createFlakyCodexCommandScript(invocationCounterPath);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(
+                storageDirectory,
+                "--ralphy.preflight.native.auto-run=false",
+                "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
+        );
+
+        harness.clickOn("#storyImplementationPresetRadioButton");
+        harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to play US-032"));
+
+        harness.clickOn("#startSingleStoryButton");
+        harness.waitUntil(() -> {
+            PrdTaskState currentTaskState =
+                    harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElseThrow();
+            return currentTaskState.taskById("US-032")
+                    .map(task -> task.attempts().size() == 2)
+                    .orElse(false);
+        });
+        harness.waitUntil(() -> harness.text("#singleStorySessionMessageLabel").contains("Play complete."));
+
+        PrdTaskState taskState = harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElseThrow();
+        PrdTaskRecord retriedTask = taskState.taskById("US-032").orElseThrow();
+        assertEquals(PrdTaskStatus.COMPLETED, retriedTask.status());
+        assertEquals(2, retriedTask.attempts().size());
+        assertEquals(PrdTaskStatus.FAILED, retriedTask.attempts().get(0).outcome());
+        assertEquals(PrdTaskStatus.COMPLETED, retriedTask.attempts().get(1).outcome());
+        assertEquals(PrdTaskStatus.COMPLETED, taskState.taskById("US-033").orElseThrow().status());
+        assertEquals("2", harness.text("#storyProgressPassedCountLabel"));
+        assertEquals("3", Files.readString(invocationCounterPath).trim());
+    }
+
+    @Test
     void appShellPausesOnlyAfterTheCurrentStoryCompletes() throws Exception {
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("pause-after-current-story-repo");
@@ -142,7 +229,7 @@ class AppShellUiTest {
         );
 
         harness.clickOn("#storyImplementationPresetRadioButton");
-        harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to start US-030"));
+        harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to play US-030"));
         assertFalse(harness.isDisabled("#startSingleStoryButton"));
 
         harness.clickOn("#startSingleStoryButton");
@@ -156,7 +243,7 @@ class AppShellUiTest {
         assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
         assertEquals("1", harness.text("#storyProgressPassedCountLabel"));
         assertEquals("1", harness.text("#storyProgressPausedCountLabel"));
-        assertEquals("Resume Session", harness.text("#startSingleStoryButton"));
+        assertEquals("Resume Play", harness.text("#startSingleStoryButton"));
 
         PrdTaskState taskState = harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElseThrow();
         assertEquals(PrdTaskStatus.COMPLETED, taskState.taskById("US-030").orElseThrow().status());
@@ -1263,6 +1350,39 @@ class AppShellUiTest {
                 """;
     }
 
+    private String playAutoAdvanceMarkdown() {
+        return """
+                # PRD: Play Auto Advance
+
+                ## Overview
+                Continue across ready stories and skip blocked stories with a visible reason.
+
+                ## Goals
+                - Start from the next eligible story.
+                - Surface why blocked stories are skipped.
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+
+                ## User Stories
+                ### US-030: Skip blocked stories during Play
+                **Outcome:** Blocked stories are skipped with a visible reason.
+
+                ### US-031: Continue from the next ready story
+                **Outcome:** Play starts from the next eligible story.
+
+                ### US-032: Continue automatically after each pass
+                **Outcome:** Play continues across ready stories without another click.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Play loop orchestration
+
+                ### Out of Scope
+                - Retry automation
+                """;
+    }
+
     private String pauseAfterCurrentStoryMarkdown() {
         return """
                 # PRD: Pause After Current Story
@@ -1289,6 +1409,141 @@ class AppShellUiTest {
 
                 ### Out of Scope
                 - Retry orchestration
+                """;
+    }
+
+    private String playRetryOnceMarkdown() {
+        return """
+                # PRD: Retry Once and Continue
+
+                ## Overview
+                Retry a transient failure once and continue the loop when the retry passes.
+
+                ## Goals
+                - Recover from one transient failure automatically.
+                - Continue with the next ready story after the retry passes.
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+
+                ## User Stories
+                ### US-032: Retry once after a transient failure
+                **Outcome:** A failed story is retried automatically one time.
+
+                ### US-033: Continue after the recovered retry
+                **Outcome:** Play continues with the next ready story after the retry succeeds.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Automatic one-time retry during Play
+
+                ### Out of Scope
+                - Manual repair workflows after a repeated failure
+                """;
+    }
+
+    private String playAutoAdvancePrdJson() {
+        return """
+                {
+                  "name": "Play Auto Advance",
+                  "branchName": "ralph/play-auto-advance",
+                  "description": "Continue across ready stories and skip blocked stories with a visible reason.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-030",
+                      "title": "Skip blocked stories during Play",
+                      "description": "As a user, I want blocked stories skipped with a visible reason.",
+                      "acceptanceCriteria": [
+                        "Blocked stories are skipped with a visible reason.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Blocked stories are skipped with a visible reason.",
+                      "ralphyStatus": "BLOCKED"
+                    },
+                    {
+                      "id": "US-031",
+                      "title": "Continue from the next ready story",
+                      "description": "As a user, I want Play to start from the next eligible story.",
+                      "acceptanceCriteria": [
+                        "Play starts from the next eligible story.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 2,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Play starts from the next eligible story.",
+                      "ralphyStatus": "READY"
+                    },
+                    {
+                      "id": "US-032",
+                      "title": "Continue automatically after each pass",
+                      "description": "As a user, I want Play to continue across ready stories automatically.",
+                      "acceptanceCriteria": [
+                        "Play continues automatically across ready stories.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 3,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Play continues automatically across ready stories.",
+                      "ralphyStatus": "READY"
+                    }
+                  ]
+                }
+                """;
+    }
+
+    private String playRetryOncePrdJson() {
+        return """
+                {
+                  "name": "Retry Once and Continue",
+                  "branchName": "ralph/retry-once-and-continue",
+                  "description": "Retry a transient failure once and continue when the retry passes.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-032",
+                      "title": "Retry once after a transient failure",
+                      "description": "As a user, I want a transient failure retried automatically once.",
+                      "acceptanceCriteria": [
+                        "A failed story is retried automatically one time.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "A failed story is retried automatically one time.",
+                      "ralphyStatus": "READY"
+                    },
+                    {
+                      "id": "US-033",
+                      "title": "Continue after the recovered retry",
+                      "description": "As a user, I want Play to continue after the retry succeeds.",
+                      "acceptanceCriteria": [
+                        "Play continues with the next ready story after the retry succeeds.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 2,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Play continues with the next ready story after the retry succeeds.",
+                      "ralphyStatus": "READY"
+                    }
+                  ]
+                }
                 """;
     }
 
@@ -1375,6 +1630,10 @@ class AppShellUiTest {
     }
 
     private Path createFakeCodexCommandScript() throws IOException {
+        return createFakeCodexCommandScript(3000L);
+    }
+
+    private Path createFakeCodexCommandScript(long sleepMilliseconds) throws IOException {
         Path commandPath = tempDir.resolve("fake-codex.cmd");
         Files.writeString(commandPath, """
                 @echo off
@@ -1383,9 +1642,28 @@ class AppShellUiTest {
                     exit /b 0
                 )
 
-                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Start-Sleep -Milliseconds 3000; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
+                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Start-Sleep -Milliseconds __SLEEP_MS__; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
                 exit /b 0
-                """);
+                """.replace("__SLEEP_MS__", Long.toString(sleepMilliseconds)));
+        return commandPath;
+    }
+
+    private Path createFlakyCodexCommandScript(Path invocationCounterPath) throws IOException {
+        Path commandPath = tempDir.resolve("fake-codex-flaky.cmd");
+        Files.writeString(commandPath, """
+                @echo off
+                if "%~1"=="--version" (
+                    echo codex-cli 0.114.0
+                    exit /b 0
+                )
+
+                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); $counterPath = '__COUNTER_PATH__'; $count = 0; if (Test-Path $counterPath) { $count = [int](Get-Content $counterPath -Raw) }; $count++; Set-Content -Path $counterPath -Value $count -NoNewline -Encoding ascii; if ($count -eq 1) { [Console]::Error.WriteLine('Transient failure.'); exit 1 }; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
+                set "EXITCODE=%ERRORLEVEL%"
+                exit /b %EXITCODE%
+                """.replace(
+                "__COUNTER_PATH__",
+                invocationCounterPath.toAbsolutePath().normalize().toString().replace("'", "''")
+        ));
         return commandPath;
     }
 

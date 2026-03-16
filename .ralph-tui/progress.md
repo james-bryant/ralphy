@@ -24,6 +24,8 @@ after each iteration and it's included in prompts for context.
 - Build execution dashboards from persisted task state plus persisted run-recovery metadata instead of rewriting task records on startup; that lets the UI show a resumable `RUNNING` story as paused after restart while keeping the underlying tracker state stable for later resume flows.
 - Keep run-output viewing split between ephemeral stream state and persisted artifacts: stream live stdout/stderr chunks straight into controller state while the process is active, but persist the final assistant summary as its own artifact path and reload summary/raw views from those stored files after completion or restart.
 - For JavaFX flows that race background completion, extend the shared UI harness with helpers that wait for a control to become enabled and capture the resulting label text on the same FX-thread pulse; that keeps async state assertions deterministic without hard-coded sleeps.
+- Keep loop story selection in `ActiveProjectService` as a typed availability/report that includes skipped-story metadata and stop-state semantics; the controller can then render `Play`, pause, completion, and skip messaging without re-implementing eligibility rules in JavaFX code.
+- Keep automatic retry inside `ActiveProjectService` as a loop over persisted single-attempt executions for the same story ID; each retry should create a fresh run ID and queued/running/finalized attempt record so audit artifacts, restart-safe resume state, and Play-loop behavior stay aligned without teaching JavaFX about retry internals.
 
 ---
 ## 2026-03-15 - US-014
@@ -51,6 +53,22 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - `codex exec` accepts `-` as the prompt argument and reads the full instruction payload from stdin, which is the cleanest way to keep preset text and story-specific inputs non-interactive across both Windows and WSL launches.
   - The existing `LocalMetadataStorage` run-metadata stream was already the right seam for launcher diagnostics, so extending that typed record avoided inventing a second persistence path for process metadata.
+---
+## 2026-03-15 - US-031
+- Reworked story-loop selection in `ActiveProjectService` so `Play` starts from the next eligible ready story, skips blocked or invalid stories with typed skip metadata, and stops with explicit review-required or no-more-eligible states instead of silently jumping past failed work.
+- Updated the JavaFX execution card to expose `Play` / `Resume Play`, surface skipped-story reasons in the session detail/message area, auto-advance across later ready stories after a pass, and report a clear completion message when no more eligible stories remain.
+- Added service and JavaFX regression coverage for skipping blocked stories, stopping at failed stories instead of skipping ahead, one-click auto-advance across multiple ready stories, and the renamed `Play` / `Resume Play` controls. Updated the Windows smoke checklist, ran `.\mvnw.cmd clean verify jacoco:report`, and completed a Windows smoke launch by starting `.\mvnw.cmd -q -DskipTests javafx:run` and detecting a live `Ralphy` window.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Auto-advance rules get brittle quickly if the controller infers them from labels or raw task status scans; keeping stop-vs-skip decisions in the service avoids letting JavaFX drift from the persisted execution model.
+  - Failed stories should block `Play` instead of being treated like another non-ready item, otherwise a later click can silently skip review-required work and break the loop semantics promised by the PRD.
+  - Windows batch helpers used in JavaFX tests should avoid `String.formatted(...)` when the script contains `%~1`-style tokens, because Java formatting will treat those `%` sequences as conversion markers.
 ---
 ## 2026-03-15 - US-030
 - Reworked the execution card into a session-oriented control surface that can continue across ready stories, accept a `Pause` request without killing the active process, and stop before the next story starts once the current step completes.
@@ -343,4 +361,17 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - `codex exec` accepts `-` as the prompt argument and reads the full instruction payload from stdin, which is the cleanest way to keep preset text and story-specific inputs non-interactive across both Windows and WSL launches.
   - The existing `LocalMetadataStorage` run-metadata stream was already the right seam for launcher diagnostics, so extending that typed record avoided inventing a second persistence path for process metadata.
+---
+## 2026-03-15 - US-032
+- Implemented one-time automatic retry in `ActiveProjectService` so a failed story gets one immediate second attempt before the loop stops, while each attempt still persists its own queued/running/finalized task state and Codex run metadata.
+- Kept repeated failures resumable by leaving the story in `FAILED` state after the second miss, preserving the persisted task/attempt history so `Retry Failed Story` remains available after reopen without rebuilding project state.
+- Added service regressions for retry-success and retry-exhausted flows, added a JavaFX `Play` regression with a flaky fake Codex command, and updated the Windows smoke checklist to cover the new retry-once loop behavior. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `docs/windows-smoke-checklist.md`
+- **Learnings:**
+  - Automatic retry belongs at the single-story service seam, not in the controller, because the retry has to reuse the same persisted task-state and run-artifact pipeline as any other attempt.
+  - Reopen-safe resume after a double failure falls out naturally when each retry writes a normal attempt record and leaves the final story status as `FAILED`; no separate "resumable failed" tracker state is needed.
 ---

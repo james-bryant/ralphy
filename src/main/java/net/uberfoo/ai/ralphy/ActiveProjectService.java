@@ -25,6 +25,8 @@ import java.util.stream.Stream;
 
 @Component
 public class ActiveProjectService {
+    private static final int MAX_AUTOMATIC_ATTEMPTS_PER_STORY = 2;
+
     private final GitRepositoryInitializer gitRepositoryInitializer;
     private final LocalMetadataStorage localMetadataStorage;
     private final NativeWindowsPreflightService nativeWindowsPreflightService;
@@ -178,6 +180,7 @@ public class ActiveProjectService {
     public synchronized SingleStorySessionAvailability singleStorySessionAvailability(PresetUseCase presetUseCase) {
         if (activeProject == null) {
             return SingleStorySessionAvailability.unavailable(
+                    SingleStorySessionState.BLOCKED,
                     "No active project",
                     "Open a repository before starting a single story session."
             );
@@ -186,6 +189,7 @@ public class ActiveProjectService {
         BuiltInPreset preset = presetForSingleStorySession(presetUseCase);
         if (preset == null) {
             return SingleStorySessionAvailability.unavailable(
+                    SingleStorySessionState.BLOCKED,
                     "Preset unavailable",
                     "Select Story Implementation or Retry/Fix before starting a single story session."
             );
@@ -193,7 +197,11 @@ public class ActiveProjectService {
 
         PrdExecutionGate executionGate = prdExecutionGate();
         if (executionGate.executionBlocked()) {
-            return SingleStorySessionAvailability.unavailable(executionGate.summary(), executionGate.detail());
+            return SingleStorySessionAvailability.unavailable(
+                    SingleStorySessionState.BLOCKED,
+                    executionGate.summary(),
+                    executionGate.detail()
+            );
         }
 
         SingleStorySessionAvailability preflightAvailability = preflightAvailability(executionProfile()
@@ -204,6 +212,7 @@ public class ActiveProjectService {
 
         if (prdTaskState == null || prdTaskState.tasks().isEmpty()) {
             return SingleStorySessionAvailability.unavailable(
+                    SingleStorySessionState.BLOCKED,
                     "No task state",
                     "Save a valid PRD so Ralphy can create queued story records before starting execution."
             );
@@ -214,28 +223,43 @@ public class ActiveProjectService {
                 .findFirst();
         if (runningTask.isPresent()) {
             return SingleStorySessionAvailability.unavailable(
+                    SingleStorySessionState.BLOCKED,
                     "Story already running",
                     runningTask.get().taskId() + " is already marked RUNNING and must be reviewed before another story starts."
             );
         }
 
-        Optional<PrdTaskRecord> eligibleTask = eligibleStoryForPreset(presetUseCase);
-        if (eligibleTask.isEmpty()) {
+        StorySelection storySelection = selectStoryForPreset(presetUseCase);
+        if (storySelection.state() == SingleStorySessionState.NO_ELIGIBLE_STORY) {
             return SingleStorySessionAvailability.unavailable(
-                    presetUseCase == PresetUseCase.RETRY_FIX ? "No failed story available" : "No queued story available",
+                    SingleStorySessionState.NO_ELIGIBLE_STORY,
                     presetUseCase == PresetUseCase.RETRY_FIX
-                            ? "Select a story with a failed attempt before running Retry/Fix."
-                            : "All synced stories are either passed, blocked, or already running."
+                            ? "No failed story available"
+                            : "No eligible story available",
+                    formatNoEligibleStoryDetail(presetUseCase, storySelection.skippedStories()),
+                    storySelection.skippedStories()
+            );
+        }
+        if (storySelection.state() != SingleStorySessionState.READY) {
+            return SingleStorySessionAvailability.unavailable(
+                    storySelection.state(),
+                    storySelection.summary(),
+                    prependSkippedStoriesDetail(storySelection.detail(), storySelection.skippedStories()),
+                    storySelection.skippedStories()
             );
         }
 
-        PrdTaskRecord task = eligibleTask.get();
-        String action = presetUseCase == PresetUseCase.RETRY_FIX ? "retry" : "start";
+        PrdTaskRecord task = storySelection.story();
+        String action = presetUseCase == PresetUseCase.RETRY_FIX ? "retry" : "play";
         return SingleStorySessionAvailability.ready(
                 "Ready to " + action + " " + task.taskId(),
-                task.taskId() + ": " + task.title() + " will run with " + preset.displayName() + ".",
+                prependSkippedStoriesDetail(
+                        task.taskId() + ": " + task.title() + " will run with " + preset.displayName() + ".",
+                        storySelection.skippedStories()
+                ),
                 task,
-                preset
+                preset,
+                storySelection.skippedStories()
         );
     }
 
@@ -251,14 +275,52 @@ public class ActiveProjectService {
         }
 
         ExecutionProfile executionProfile = executionProfile().orElse(ExecutionProfile.nativePowerShell());
-        PrdTaskRecord eligibleTask = availability.story();
+        String storyId = availability.story().taskId();
+        SingleStoryStartResult latestResult = null;
+        String initialFailureDetail = "";
+
+        for (int attemptNumber = 1; attemptNumber <= MAX_AUTOMATIC_ATTEMPTS_PER_STORY; attemptNumber++) {
+            boolean automaticRetry = attemptNumber > 1;
+            latestResult = executeStoryAttempt(
+                    storyId,
+                    availability.preset(),
+                    executionProfile,
+                    runOutputListener,
+                    automaticRetry
+            );
+            if (!latestResult.successful()) {
+                return latestResult;
+            }
+            if (latestResult.finalStatus() == PrdTaskStatus.COMPLETED) {
+                return automaticRetry
+                        ? rewriteStoryAttemptResult(
+                        latestResult,
+                        automaticRetrySuccessDetail(initialFailureDetail, latestResult.detail())
+                )
+                        : latestResult;
+            }
+            if (!automaticRetry) {
+                initialFailureDetail = latestResult.detail();
+            }
+        }
+
+        return rewriteStoryAttemptResult(
+                latestResult,
+                automaticRetryFailureDetail(initialFailureDetail, latestResult == null ? "" : latestResult.detail())
+        );
+    }
+
+    private SingleStoryStartResult executeStoryAttempt(String storyId,
+                                                       BuiltInPreset preset,
+                                                       ExecutionProfile executionProfile,
+                                                       CodexLauncherService.RunOutputListener runOutputListener,
+                                                       boolean automaticRetry) {
+        PrdTaskRecord task = prdTaskState.taskById(storyId)
+                .orElseThrow(() -> new IllegalStateException("Missing story state for " + storyId + "."));
+
         CodexLauncherService.CodexLaunchPlan launchPlan;
         try {
-            launchPlan = codexLauncherService.buildLaunch(buildLaunchRequest(
-                    eligibleTask,
-                    availability.preset(),
-                    executionProfile
-            ));
+            launchPlan = codexLauncherService.buildLaunch(buildLaunchRequest(task, preset, executionProfile));
         } catch (IllegalArgumentException exception) {
             return SingleStoryStartResult.failure(
                     "Unable to start story",
@@ -267,22 +329,24 @@ public class ActiveProjectService {
         }
 
         try {
-            PrdTaskRecord queuedTask = eligibleTask.queueAttempt(
+            String queuedAt = Instant.now().toString();
+            PrdTaskRecord queuedTask = task.queueAttempt(
                     launchPlan.runId(),
-                    availability.preset(),
-                    Instant.now().toString(),
-                    "Queued " + availability.preset().displayName() + " for " + eligibleTask.taskId() + "."
+                    preset,
+                    queuedAt,
+                    queueMessage(preset, storyId, automaticRetry)
             );
-            persistPrdTaskState(prdTaskState.replaceTask(queuedTask, queuedTask.updatedAt()));
+            persistPrdTaskState(prdTaskState.replaceTask(queuedTask, queuedAt));
 
-            PrdTaskRecord runningTask = prdTaskState.taskById(eligibleTask.taskId())
+            String startedAt = Instant.now().toString();
+            PrdTaskRecord runningTask = prdTaskState.taskById(storyId)
                     .orElseThrow()
                     .startAttempt(
                             launchPlan.runId(),
-                            Instant.now().toString(),
-                            "Started " + availability.preset().displayName() + " for " + eligibleTask.taskId() + "."
+                            startedAt,
+                            startMessage(preset, storyId, automaticRetry)
                     );
-            persistPrdTaskState(prdTaskState.replaceTask(runningTask, runningTask.updatedAt()));
+            persistPrdTaskState(prdTaskState.replaceTask(runningTask, startedAt));
         } catch (IOException exception) {
             return SingleStoryStartResult.failure(
                     "Unable to persist story state",
@@ -297,21 +361,21 @@ public class ActiveProjectService {
         try {
             launchResult = codexLauncherService.launch(launchPlan, runOutputListener);
             finalStatus = launchResult.successful() ? PrdTaskStatus.COMPLETED : PrdTaskStatus.FAILED;
-            finalMessage = launchResult.successful()
-                    ? "Story attempt passed."
-                    : firstNonBlank(launchResult.message(), "Story attempt failed.");
             finishedAt = launchResult.endedAt();
+            finalMessage = attemptCompletionMessage(launchResult, automaticRetry);
         } catch (RuntimeException exception) {
-            finalMessage = "Codex launch failed: " + exception.getMessage();
+            finalMessage = automaticRetry
+                    ? "Automatic retry launch failed: " + exception.getMessage()
+                    : "Codex launch failed: " + exception.getMessage();
         }
 
         try {
-            PrdTaskRecord finalizedTask = prdTaskState.taskById(eligibleTask.taskId())
+            PrdTaskRecord finalizedTask = prdTaskState.taskById(storyId)
                     .orElseThrow()
                     .finishAttempt(launchPlan.runId(), finalStatus, finishedAt, finalMessage);
             persistPrdTaskState(prdTaskState.replaceTask(finalizedTask, finalizedTask.updatedAt()));
             return SingleStoryStartResult.success(
-                    eligibleTask.taskId(),
+                    storyId,
                     finalStatus,
                     finalMessage,
                     finalizedTask.attempts().get(finalizedTask.attempts().size() - 1),
@@ -366,32 +430,36 @@ public class ActiveProjectService {
         if (executionProfile.type() == ExecutionProfile.ProfileType.WSL) {
             if (latestWslPreflightReport == null) {
                 return SingleStorySessionAvailability.unavailable(
+                        SingleStorySessionState.BLOCKED,
                         "WSL preflight not run",
                         "Run WSL preflight before starting a WSL story session."
                 );
             }
             if (!latestWslPreflightReport.passed()) {
                 return SingleStorySessionAvailability.unavailable(
+                        SingleStorySessionState.BLOCKED,
                         "WSL preflight blocked",
                         "WSL execution stays blocked until every WSL preflight check passes."
                 );
             }
-            return SingleStorySessionAvailability.ready("", "", null, null);
+            return SingleStorySessionAvailability.ready("", "", null, null, List.of());
         }
 
         if (latestNativeWindowsPreflightReport == null) {
             return SingleStorySessionAvailability.unavailable(
+                    SingleStorySessionState.BLOCKED,
                     "Native preflight not run",
                     "Run native preflight before starting a PowerShell story session."
             );
         }
         if (!latestNativeWindowsPreflightReport.passed()) {
             return SingleStorySessionAvailability.unavailable(
+                    SingleStorySessionState.BLOCKED,
                     "Native preflight blocked",
                     "Native PowerShell execution stays blocked until every native preflight check passes."
             );
         }
-        return SingleStorySessionAvailability.ready("", "", null, null);
+        return SingleStorySessionAvailability.ready("", "", null, null, List.of());
     }
 
     private BuiltInPreset presetForSingleStorySession(PresetUseCase presetUseCase) {
@@ -401,20 +469,150 @@ public class ActiveProjectService {
         return presetCatalogService.defaultPreset(presetUseCase);
     }
 
-    private Optional<PrdTaskRecord> eligibleStoryForPreset(PresetUseCase presetUseCase) {
+    private StorySelection selectStoryForPreset(PresetUseCase presetUseCase) {
         if (prdTaskState == null) {
-            return Optional.empty();
+            return StorySelection.none(List.of());
         }
 
-        return switch (presetUseCase) {
-            case RETRY_FIX -> prdTaskState.tasks().stream()
-                    .filter(task -> task.status() == PrdTaskStatus.FAILED)
-                    .findFirst();
-            case STORY_IMPLEMENTATION -> prdTaskState.tasks().stream()
-                    .filter(task -> task.status() == PrdTaskStatus.READY)
-                    .findFirst();
-            default -> Optional.empty();
-        };
+        List<StorySkip> skippedStories = new ArrayList<>();
+        for (PrdTaskRecord task : prdTaskState.tasks()) {
+            StorySkip invalidStorySkip = invalidStorySkip(task);
+            if (invalidStorySkip != null) {
+                skippedStories.add(invalidStorySkip);
+                continue;
+            }
+
+            if (presetUseCase == PresetUseCase.RETRY_FIX) {
+                if (task.status() == PrdTaskStatus.FAILED) {
+                    return StorySelection.eligible(task, skippedStories);
+                }
+                continue;
+            }
+
+            if (presetUseCase != PresetUseCase.STORY_IMPLEMENTATION) {
+                return StorySelection.none(skippedStories);
+            }
+
+            switch (task.status()) {
+                case COMPLETED -> {
+                    // Already done; continue scanning for the next actionable story.
+                }
+                case BLOCKED -> skippedStories.add(new StorySkip(task.taskId(), task.title(), "status is BLOCKED"));
+                case READY -> {
+                    return StorySelection.eligible(task, skippedStories);
+                }
+                case FAILED -> {
+                    return StorySelection.reviewRequired(task, skippedStories);
+                }
+                case RUNNING -> {
+                    return StorySelection.blocked(
+                            "Story already running",
+                            task.taskId() + " is already marked RUNNING and must be reviewed before another story starts.",
+                            skippedStories
+                    );
+                }
+            }
+        }
+
+        return StorySelection.none(skippedStories);
+    }
+
+    private StorySkip invalidStorySkip(PrdTaskRecord task) {
+        if (task == null || task.status() == PrdTaskStatus.COMPLETED) {
+            return null;
+        }
+        if (!hasText(task.taskId())) {
+            return new StorySkip("(missing story ID)", "", "story ID is missing");
+        }
+        if (!hasText(task.title())) {
+            return new StorySkip(task.taskId(), "", "story title is missing");
+        }
+        if (!hasText(task.outcome())) {
+            return new StorySkip(task.taskId(), task.title(), "story outcome is missing");
+        }
+        return null;
+    }
+
+    private String formatNoEligibleStoryDetail(PresetUseCase presetUseCase, List<StorySkip> skippedStories) {
+        if (presetUseCase == PresetUseCase.RETRY_FIX) {
+            return "Select a story with a failed attempt before running Retry/Fix.";
+        }
+        if (skippedStories == null || skippedStories.isEmpty()) {
+            return "All synced stories are either passed, blocked, or already running.";
+        }
+        return prependSkippedStoriesDetail(
+                "No additional eligible stories remain.",
+                skippedStories
+        );
+    }
+
+    private String prependSkippedStoriesDetail(String detail, List<StorySkip> skippedStories) {
+        if (skippedStories == null || skippedStories.isEmpty()) {
+            return detail;
+        }
+
+        List<String> skippedDetails = new ArrayList<>(skippedStories.size());
+        for (StorySkip skippedStory : skippedStories) {
+            skippedDetails.add(skippedStory.taskId() + " (" + skippedStory.reason() + ")");
+        }
+        String skippedPrefix = "Blocked or invalid stories will be skipped: " + String.join(", ", skippedDetails) + ".";
+        if (!hasText(detail)) {
+            return skippedPrefix;
+        }
+        return skippedPrefix + " " + detail;
+    }
+
+    private SingleStoryStartResult rewriteStoryAttemptResult(SingleStoryStartResult result, String detail) {
+        if (result == null) {
+            return SingleStoryStartResult.failure("Story failed", detail);
+        }
+        return new SingleStoryStartResult(
+                result.successful(),
+                result.summary(),
+                detail,
+                result.storyId(),
+                result.finalStatus(),
+                result.attempt(),
+                result.launchResult()
+        );
+    }
+
+    private String queueMessage(BuiltInPreset preset, String storyId, boolean automaticRetry) {
+        if (automaticRetry) {
+            return "Queued automatic retry with " + preset.displayName() + " for " + storyId + ".";
+        }
+        return "Queued " + preset.displayName() + " for " + storyId + ".";
+    }
+
+    private String startMessage(BuiltInPreset preset, String storyId, boolean automaticRetry) {
+        if (automaticRetry) {
+            return "Started automatic retry with " + preset.displayName() + " for " + storyId + ".";
+        }
+        return "Started " + preset.displayName() + " for " + storyId + ".";
+    }
+
+    private String attemptCompletionMessage(CodexLauncherService.CodexLaunchResult launchResult, boolean automaticRetry) {
+        if (launchResult.successful()) {
+            return automaticRetry ? "Automatic retry passed." : "Story attempt passed.";
+        }
+
+        String launchMessage = firstNonBlank(launchResult.message(), "Story attempt failed.");
+        if (automaticRetry) {
+            return "Automatic retry failed: " + launchMessage;
+        }
+        return launchMessage;
+    }
+
+    private String automaticRetrySuccessDetail(String firstFailureDetail, String finalDetail) {
+        return "Automatic retry passed after an initial failure. "
+                + "First attempt: " + firstNonBlank(firstFailureDetail, "Story attempt failed.") + " "
+                + "Final attempt: " + firstNonBlank(finalDetail, "Automatic retry passed.");
+    }
+
+    private String automaticRetryFailureDetail(String firstFailureDetail, String finalDetail) {
+        return "Automatic retry failed and the story remains resumable. "
+                + "First attempt: " + firstNonBlank(firstFailureDetail, "Story attempt failed.") + " "
+                + "Final attempt: " + firstNonBlank(finalDetail, "Automatic retry failed.");
     }
 
     private CodexLauncherService.CodexLaunchRequest buildLaunchRequest(PrdTaskRecord task,
@@ -1499,20 +1697,86 @@ public class ActiveProjectService {
     }
 
     public record SingleStorySessionAvailability(boolean startable,
+                                                 SingleStorySessionState state,
                                                  String summary,
                                                  String detail,
                                                  PrdTaskRecord story,
-                                                 BuiltInPreset preset) {
+                                                 BuiltInPreset preset,
+                                                 List<StorySkip> skippedStories) {
+        public SingleStorySessionAvailability {
+            skippedStories = skippedStories == null ? List.of() : List.copyOf(skippedStories);
+        }
+
         private static SingleStorySessionAvailability ready(String summary,
                                                             String detail,
                                                             PrdTaskRecord story,
-                                                            BuiltInPreset preset) {
-            return new SingleStorySessionAvailability(true, summary, detail, story, preset);
+                                                            BuiltInPreset preset,
+                                                            List<StorySkip> skippedStories) {
+            return new SingleStorySessionAvailability(
+                    true,
+                    SingleStorySessionState.READY,
+                    summary,
+                    detail,
+                    story,
+                    preset,
+                    skippedStories
+            );
         }
 
-        private static SingleStorySessionAvailability unavailable(String summary, String detail) {
-            return new SingleStorySessionAvailability(false, summary, detail, null, null);
+        private static SingleStorySessionAvailability unavailable(SingleStorySessionState state,
+                                                                  String summary,
+                                                                  String detail) {
+            return unavailable(state, summary, detail, List.of());
         }
+
+        private static SingleStorySessionAvailability unavailable(SingleStorySessionState state,
+                                                                  String summary,
+                                                                  String detail,
+                                                                  List<StorySkip> skippedStories) {
+            return new SingleStorySessionAvailability(false, state, summary, detail, null, null, skippedStories);
+        }
+    }
+
+    public record StorySkip(String taskId, String title, String reason) {
+    }
+
+    private record StorySelection(SingleStorySessionState state,
+                                  PrdTaskRecord story,
+                                  List<StorySkip> skippedStories,
+                                  String summary,
+                                  String detail) {
+        private StorySelection {
+            skippedStories = skippedStories == null ? List.of() : List.copyOf(skippedStories);
+        }
+
+        private static StorySelection eligible(PrdTaskRecord story, List<StorySkip> skippedStories) {
+            return new StorySelection(SingleStorySessionState.READY, story, skippedStories, "", "");
+        }
+
+        private static StorySelection none(List<StorySkip> skippedStories) {
+            return new StorySelection(SingleStorySessionState.NO_ELIGIBLE_STORY, null, skippedStories, "", "");
+        }
+
+        private static StorySelection blocked(String summary, String detail, List<StorySkip> skippedStories) {
+            return new StorySelection(SingleStorySessionState.BLOCKED, null, skippedStories, summary, detail);
+        }
+
+        private static StorySelection reviewRequired(PrdTaskRecord story, List<StorySkip> skippedStories) {
+            return new StorySelection(
+                    SingleStorySessionState.REVIEW_REQUIRED,
+                    null,
+                    skippedStories,
+                    "Execution needs review",
+                    story.taskId() + " failed and must be retried before Play can continue."
+            );
+        }
+    }
+
+    public enum SingleStorySessionState {
+        READY,
+        BLOCKED,
+        NO_ELIGIBLE_STORY,
+        REVIEW_REQUIRED
     }
 
     public record SingleStoryStartResult(boolean successful,

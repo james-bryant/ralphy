@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -358,6 +359,91 @@ class ActiveProjectServiceTest {
     }
 
     @Test
+    void singleStorySessionAvailabilitySkipsBlockedStoriesBeforeTheNextReadyStory() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path repository = createGitDirectoryRepository("single-story-skip-blocked-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-030: Skip blocked stories during Play
+                **Outcome:** Blocked stories are skipped with a visible reason.
+
+                ### US-031: Continue from the next ready story
+                **Outcome:** Play starts from the next eligible story.
+                """
+        )).successful());
+
+        PrdTaskState initialTaskState = activeProjectService.prdTaskState().orElseThrow();
+        PrdTaskRecord blockedTask = initialTaskState.taskById("US-030")
+                .orElseThrow()
+                .withStatus(
+                        PrdTaskStatus.BLOCKED,
+                        "2026-03-15T23:10:00Z",
+                        "Blocked while waiting on an earlier prerequisite."
+                );
+        prdTaskStateStore.write(
+                activeProjectService.activeProject().orElseThrow(),
+                initialTaskState.replaceTask(blockedTask, blockedTask.updatedAt())
+        );
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        ActiveProjectService.SingleStorySessionAvailability availability =
+                activeProjectService.singleStorySessionAvailability(PresetUseCase.STORY_IMPLEMENTATION);
+
+        assertTrue(availability.startable());
+        assertEquals(ActiveProjectService.SingleStorySessionState.READY, availability.state());
+        assertEquals("US-031", availability.story().taskId());
+        assertEquals(1, availability.skippedStories().size());
+        assertEquals("US-030", availability.skippedStories().getFirst().taskId());
+        assertTrue(availability.detail().contains("US-030 (status is BLOCKED)"));
+        assertTrue(availability.detail().contains("US-031"));
+    }
+
+    @Test
+    void singleStorySessionAvailabilityStopsPlayAtFailedStoriesInsteadOfSkippingAhead() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path repository = createGitDirectoryRepository("single-story-stop-at-failed-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-031: Stop Play after a failed story
+                **Outcome:** Failed stories stop forward progress.
+
+                ### US-032: Do not skip to later ready stories
+                **Outcome:** Play waits for retry before moving on.
+                """
+        )).successful());
+
+        PrdTaskState initialTaskState = activeProjectService.prdTaskState().orElseThrow();
+        PrdTaskRecord failedTask = initialTaskState.taskById("US-031")
+                .orElseThrow()
+                .withStatus(
+                        PrdTaskStatus.FAILED,
+                        "2026-03-15T23:15:00Z",
+                        "The previous attempt failed and requires review."
+                );
+        prdTaskStateStore.write(
+                activeProjectService.activeProject().orElseThrow(),
+                initialTaskState.replaceTask(failedTask, failedTask.updatedAt())
+        );
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        ActiveProjectService.SingleStorySessionAvailability availability =
+                activeProjectService.singleStorySessionAvailability(PresetUseCase.STORY_IMPLEMENTATION);
+
+        assertFalse(availability.startable());
+        assertEquals(ActiveProjectService.SingleStorySessionState.REVIEW_REQUIRED, availability.state());
+        assertEquals("Execution needs review", availability.summary());
+        assertTrue(availability.detail().contains("US-031 failed and must be retried before Play can continue."));
+    }
+
+    @Test
     void startEligibleSingleStoryForwardsLiveOutputCallbacks() throws IOException {
         LocalMetadataStorage localMetadataStorage = createStorage();
         List<String> streamedStdout = new ArrayList<>();
@@ -414,12 +500,84 @@ class ActiveProjectServiceTest {
     }
 
     @Test
-    void startEligibleSingleStoryMarksFailedAttemptsAndMakesThemRetryable() throws IOException {
+    void startEligibleSingleStoryRetriesOnceAutomaticallyAndPassesStoryOnSecondAttempt() throws IOException {
         LocalMetadataStorage localMetadataStorage = createStorage();
+        AtomicInteger launchCount = new AtomicInteger();
+        AtomicInteger runIdSequence = new AtomicInteger();
         ActiveProjectService activeProjectService = createService(
                 localMetadataStorage,
-                launchPlan -> CodexLauncherService.ProcessExecution.failure("Access is denied."),
-                () -> "run-fail-1"
+                launchPlan -> launchCount.getAndIncrement() == 0
+                        ? CodexLauncherService.ProcessExecution.failure("Transient Codex failure.")
+                        : CodexLauncherService.ProcessExecution.completed(
+                        6789L,
+                        0,
+                        """
+                        {"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Retried successfully."}]}
+                        """.trim(),
+                        ""
+                ),
+                () -> "run-retry-" + runIdSequence.incrementAndGet()
+        );
+        Path repository = createGitDirectoryRepository("single-story-auto-retry-pass-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-032: Retry Once and Support Resume
+                **Outcome:** Transient failures are retried automatically once.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStoryStartResult startResult =
+                activeProjectService.startEligibleSingleStory(PresetUseCase.STORY_IMPLEMENTATION);
+
+        assertTrue(startResult.successful());
+        assertEquals("US-032", startResult.storyId());
+        assertEquals(PrdTaskStatus.COMPLETED, startResult.finalStatus());
+        assertTrue(startResult.detail().contains("retry"));
+        assertEquals(2, launchCount.get());
+
+        PrdTaskRecord completedTask = activeProjectService.prdTaskState()
+                .orElseThrow()
+                .taskById("US-032")
+                .orElseThrow();
+        assertEquals(PrdTaskStatus.COMPLETED, completedTask.status());
+        assertEquals(2, completedTask.attempts().size());
+        assertEquals("run-retry-1", completedTask.attempts().get(0).runId());
+        assertEquals(PrdTaskStatus.FAILED, completedTask.attempts().get(0).outcome());
+        assertEquals("run-retry-2", completedTask.attempts().get(1).runId());
+        assertEquals(PrdTaskStatus.COMPLETED, completedTask.attempts().get(1).outcome());
+
+        JsonNode persistedTaskState = objectMapper.readTree(Files.readString(repository
+                .resolve(".ralph-tui")
+                .resolve("prd-json")
+                .resolve("prd.json")));
+        JsonNode persistedStory = persistedTaskState.path("userStories").get(0);
+        assertEquals("PASSED", persistedStory.path("ralphyStatus").asText());
+        assertTrue(persistedStory.path("passes").asBoolean());
+        assertEquals(2, persistedStory.path("attempts").size());
+        assertEquals("FAILED", persistedStory.path("attempts").get(0).path("outcome").asText());
+        assertEquals("PASSED", persistedStory.path("attempts").get(1).path("outcome").asText());
+    }
+
+    @Test
+    void startEligibleSingleStoryStopsAfterSecondFailureAndMakesStoryRetryableAfterReopen() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        AtomicInteger launchCount = new AtomicInteger();
+        AtomicInteger runIdSequence = new AtomicInteger();
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                launchPlan -> {
+                    int attemptIndex = launchCount.incrementAndGet();
+                    return CodexLauncherService.ProcessExecution.failure(
+                            attemptIndex == 1
+                                    ? "Transient Codex failure."
+                                    : "Persistent Codex failure."
+                    );
+                },
+                () -> "run-fail-" + runIdSequence.incrementAndGet()
         );
         Path repository = createGitDirectoryRepository("single-story-fail-repo");
         seedQualityGateFiles(repository);
@@ -428,7 +586,7 @@ class ActiveProjectServiceTest {
         assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
                 "- .\\mvnw.cmd clean verify jacoco:report",
                 """
-                ### US-012: Retry a Failed Story
+                ### US-032: Retry Once and Support Resume
                 **Outcome:** Leave failed attempts resumable and reviewable.
                 """
         )).successful());
@@ -437,31 +595,44 @@ class ActiveProjectServiceTest {
                 activeProjectService.startEligibleSingleStory(PresetUseCase.STORY_IMPLEMENTATION);
 
         assertTrue(startResult.successful());
-        assertEquals("US-012", startResult.storyId());
+        assertEquals("US-032", startResult.storyId());
+        assertEquals(PrdTaskStatus.FAILED, startResult.finalStatus());
         assertNotNull(startResult.launchResult());
         assertFalse(startResult.launchResult().successful());
+        assertTrue(startResult.detail().contains("retry"));
+        assertEquals(2, launchCount.get());
 
         PrdTaskRecord failedTask = activeProjectService.prdTaskState()
                 .orElseThrow()
-                .taskById("US-012")
+                .taskById("US-032")
                 .orElseThrow();
         assertEquals(PrdTaskStatus.FAILED, failedTask.status());
-        assertEquals(1, failedTask.attempts().size());
-
-        PrdStoryAttemptRecord failedAttempt = failedTask.attempts().getFirst();
-        assertEquals("run-fail-1", failedAttempt.runId());
-        assertEquals(PrdTaskStatus.FAILED, failedAttempt.outcome());
+        assertEquals(2, failedTask.attempts().size());
+        assertEquals("run-fail-1", failedTask.attempts().get(0).runId());
+        assertEquals(PrdTaskStatus.FAILED, failedTask.attempts().get(0).outcome());
+        assertEquals("run-fail-2", failedTask.attempts().get(1).runId());
+        assertEquals(PrdTaskStatus.FAILED, failedTask.attempts().get(1).outcome());
+        PrdStoryAttemptRecord failedAttempt = failedTask.attempts().get(1);
         assertFalse(failedAttempt.queuedAt().isBlank());
         assertFalse(failedAttempt.startedAt().isBlank());
         assertFalse(failedAttempt.endedAt().isBlank());
         assertTrue(failedTask.history().stream()
                 .anyMatch(entry -> entry.status() == PrdTaskStatus.FAILED
-                        && entry.message().contains("Access is denied")));
+                        && entry.message().contains("Persistent Codex failure")));
 
         ActiveProjectService.SingleStorySessionAvailability retryAvailability =
                 activeProjectService.singleStorySessionAvailability(PresetUseCase.RETRY_FIX);
         assertTrue(retryAvailability.startable());
-        assertEquals("US-012", retryAvailability.story().taskId());
+        assertEquals("US-032", retryAvailability.story().taskId());
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        assertEquals(repository.toAbsolutePath().normalize(),
+                restoredService.activeProject().orElseThrow().repositoryPath());
+        ActiveProjectService.SingleStorySessionAvailability restoredRetryAvailability =
+                restoredService.singleStorySessionAvailability(PresetUseCase.RETRY_FIX);
+        assertTrue(restoredRetryAvailability.startable());
+        assertEquals("US-032", restoredRetryAvailability.story().taskId());
 
         JsonNode persistedTaskState = objectMapper.readTree(Files.readString(repository
                 .resolve(".ralph-tui")
@@ -470,7 +641,9 @@ class ActiveProjectServiceTest {
         JsonNode persistedStory = persistedTaskState.path("userStories").get(0);
         assertEquals("FAILED", persistedStory.path("ralphyStatus").asText());
         assertFalse(persistedStory.path("passes").asBoolean());
+        assertEquals(2, persistedStory.path("attempts").size());
         assertEquals("FAILED", persistedStory.path("attempts").get(0).path("outcome").asText());
+        assertEquals("FAILED", persistedStory.path("attempts").get(1).path("outcome").asText());
     }
 
     @Test

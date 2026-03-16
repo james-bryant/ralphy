@@ -573,11 +573,12 @@
         "Manual smoke verification on Windows completed"
       ],
       "priority": 31,
-      "passes": false,
+      "passes": true,
       "dependsOn": [
         "US-027",
         "US-030"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-032",
@@ -590,11 +591,12 @@
         ".\\mvnw.cmd clean verify jacoco:report passes"
       ],
       "priority": 32,
-      "passes": false,
+      "passes": true,
       "dependsOn": [
         "US-027",
         "US-031"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-033",
@@ -653,6 +655,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-16T04:24:39.064Z"
+    "updatedAt": "2026-03-16T04:57:37.678Z"
   }
 }
