@@ -2,6 +2,7 @@ package net.uberfoo.ai.ralphy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -13,21 +14,44 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 @Component
 public class NativeWindowsPreflightService {
     static final String QUALITY_GATE_COMMAND = ".\\mvnw.cmd clean verify jacoco:report";
-    private static final String CODEX_INSTALL_COMMAND = "npm install -g @openai/codex";
-    private static final String CODEX_LOGIN_COMMAND = "codex login";
-    private static final String CODEX_LOGIN_STATUS_COMMAND = "codex login status";
-
+    static final String GRADLE_QUALITY_GATE_COMMAND = ".\\gradlew.bat test";
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, String> environmentVariables;
     private final Path codexHomeDirectory;
     private final CommandExecutor commandExecutor;
+    private final String codexCommand;
 
-    public NativeWindowsPreflightService() {
+    public NativeWindowsPreflightService(
+            @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}") String codexCommand) {
         this(
+                codexCommand,
+                System.getenv(),
+                resolveCodexHomeDirectory(System.getenv(), System.getProperty("user.home")),
+                new SystemCommandExecutor()
+        );
+    }
+
+    NativeWindowsPreflightService(String codexCommand,
+                                  Map<String, String> environmentVariables,
+                                  Path codexHomeDirectory,
+                                  CommandExecutor commandExecutor) {
+        this.codexCommand = hasText(codexCommand) ? codexCommand.trim() : CodexCliSupport.DEFAULT_COMMAND;
+        this.environmentVariables = Map.copyOf(Objects.requireNonNull(environmentVariables,
+                "environmentVariables must not be null"));
+        this.codexHomeDirectory = Objects.requireNonNull(codexHomeDirectory, "codexHomeDirectory must not be null")
+                .toAbsolutePath()
+                .normalize();
+        this.commandExecutor = Objects.requireNonNull(commandExecutor, "commandExecutor must not be null");
+    }
+
+    NativeWindowsPreflightService() {
+        this(
+                CodexCliSupport.DEFAULT_COMMAND,
                 System.getenv(),
                 resolveCodexHomeDirectory(System.getenv(), System.getProperty("user.home")),
                 new SystemCommandExecutor()
@@ -37,12 +61,7 @@ public class NativeWindowsPreflightService {
     NativeWindowsPreflightService(Map<String, String> environmentVariables,
                                   Path codexHomeDirectory,
                                   CommandExecutor commandExecutor) {
-        this.environmentVariables = Map.copyOf(Objects.requireNonNull(environmentVariables,
-                "environmentVariables must not be null"));
-        this.codexHomeDirectory = Objects.requireNonNull(codexHomeDirectory, "codexHomeDirectory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        this.commandExecutor = Objects.requireNonNull(commandExecutor, "commandExecutor must not be null");
+        this(CodexCliSupport.DEFAULT_COMMAND, environmentVariables, codexHomeDirectory, commandExecutor);
     }
 
     public NativeWindowsPreflightReport run(ActiveProject activeProject) {
@@ -63,7 +82,12 @@ public class NativeWindowsPreflightService {
     }
 
     private NativeWindowsPreflightReport.CheckResult checkCodexAvailability() {
-        CommandResult commandResult = commandExecutor.execute(null, List.of("codex", "--version"));
+        List<String> commandResultArguments = CodexCliSupport.buildNativeCommand(
+                codexCommand,
+                environmentVariables,
+                List.of("--version")
+        );
+        CommandResult commandResult = commandExecutor.execute(null, commandResultArguments);
         if (!commandResult.successful()) {
             return fail(
                     "codex_cli",
@@ -186,35 +210,39 @@ public class NativeWindowsPreflightService {
     }
 
     private NativeWindowsPreflightReport.CheckResult checkQualityGateCommand(ActiveProject activeProject) {
-        Path mvnwPath = activeProject.repositoryPath().resolve("mvnw.cmd");
-        Path pomPath = activeProject.repositoryPath().resolve("pom.xml");
-        if (!Files.isRegularFile(mvnwPath)) {
-            return fail(
+        Optional<String> detectedQualityGateCommand = detectNativeQualityGateCommand(activeProject.repositoryPath());
+        if (detectedQualityGateCommand.isPresent()) {
+            return pass(
                     "quality_gate",
                     "Quality Gate Command",
                     NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
-                    "The quality-gate command " + QUALITY_GATE_COMMAND + " is unavailable because " + mvnwPath
-                            + " is missing.",
-                    qualityGateRemediationCommands(activeProject)
+                    "Detected repository quality gate " + detectedQualityGateCommand.get() + "."
             );
         }
-        if (!Files.isRegularFile(pomPath)) {
-            return fail(
-                    "quality_gate",
-                    "Quality Gate Command",
-                    NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
-                    "The quality-gate command " + QUALITY_GATE_COMMAND + " is unavailable because " + pomPath
-                            + " is missing.",
-                    qualityGateRemediationCommands(activeProject)
-            );
-        }
-
         return pass(
                 "quality_gate",
                 "Quality Gate Command",
                 NativeWindowsPreflightReport.CheckCategory.QUALITY_GATE,
-                "Found mvnw.cmd and pom.xml for " + QUALITY_GATE_COMMAND + "."
+                "No repository-owned native quality gate command was auto-detected. PRD-defined quality gates remain supported."
         );
+    }
+
+    private Optional<String> detectNativeQualityGateCommand(Path repositoryPath) {
+        Path mvnwPath = repositoryPath.resolve("mvnw.cmd");
+        Path pomPath = repositoryPath.resolve("pom.xml");
+        if (Files.isRegularFile(mvnwPath) && Files.isRegularFile(pomPath)) {
+            return Optional.of(QUALITY_GATE_COMMAND);
+        }
+
+        Path gradleWrapperPath = repositoryPath.resolve("gradlew.bat");
+        Path buildGradlePath = repositoryPath.resolve("build.gradle");
+        Path buildGradleKtsPath = repositoryPath.resolve("build.gradle.kts");
+        if (Files.isRegularFile(gradleWrapperPath)
+                && (Files.isRegularFile(buildGradlePath) || Files.isRegularFile(buildGradleKtsPath))) {
+            return Optional.of(GRADLE_QUALITY_GATE_COMMAND);
+        }
+
+        return Optional.empty();
     }
 
     private boolean hasTokenData(JsonNode tokensNode) {
@@ -291,15 +319,15 @@ public class NativeWindowsPreflightService {
 
     private List<PreflightRemediationCommand> codexCliRemediationCommands() {
         return List.of(
-                remediation("Install Codex CLI", CODEX_INSTALL_COMMAND),
+                remediation("Install Codex CLI", CodexCliSupport.INSTALL_COMMAND),
                 remediation("Verify Codex CLI is available", "codex --version")
         );
     }
 
     private List<PreflightRemediationCommand> codexAuthRemediationCommands() {
         return List.of(
-                remediation("Authenticate Codex CLI", CODEX_LOGIN_COMMAND),
-                remediation("Check Codex login status", CODEX_LOGIN_STATUS_COMMAND)
+                remediation("Authenticate Codex CLI", CodexCliSupport.LOGIN_COMMAND),
+                remediation("Check Codex login status", CodexCliSupport.LOGIN_STATUS_COMMAND)
         );
     }
 
@@ -309,16 +337,6 @@ public class NativeWindowsPreflightService {
                 remediation("Inspect Git status", "git -C " + repositoryPath + " status"),
                 remediation("Initialize Git metadata if this is a fresh repository",
                         "git -C " + repositoryPath + " init")
-        );
-    }
-
-    private List<PreflightRemediationCommand> qualityGateRemediationCommands(ActiveProject activeProject) {
-        String repositoryPath = quoteForPowerShell(activeProject.repositoryPath().toString());
-        return List.of(
-                remediation("Restore Maven wrapper files from Git",
-                        "git -C " + repositoryPath + " restore mvnw.cmd pom.xml .mvn"),
-                remediation("Run the quality gate from the repository root",
-                        "Set-Location " + repositoryPath + "; " + QUALITY_GATE_COMMAND)
         );
     }
 

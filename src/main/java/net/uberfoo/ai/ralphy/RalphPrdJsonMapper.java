@@ -14,13 +14,23 @@ import java.util.regex.Pattern;
 @Component
 public class RalphPrdJsonMapper {
     private static final Pattern DOCUMENT_TITLE_PATTERN = Pattern.compile("(?m)^#\\s+PRD:\\s*(.+?)\\s*$");
-    private static final Pattern SECTION_HEADING_PATTERN = Pattern.compile("(?m)^##\\s+(.+?)\\s*$");
-    private static final Pattern STORY_HEADING_PATTERN = Pattern.compile("(?m)^###\\s+(US-\\d{3}):\\s+(.+?)\\s*$");
+    private static final String FLEXIBLE_SECTION_TITLES =
+            "Overview|Introduction|Goals|Quality Gates|User Stories|Scope Boundaries|Functional Requirements"
+                    + "|Technical Considerations|Success Metrics|Open Questions|Non-Goals|Non Goals";
+    private static final Pattern SECTION_HEADING_PATTERN = Pattern.compile(
+            "(?im)^(?:##\\s+(?!US-\\d{3}:)(.+?)\\s*$|\\*\\*((" + FLEXIBLE_SECTION_TITLES + "):?)\\*\\*\\s*$)"
+    );
+    private static final Pattern STORY_HEADING_PATTERN = Pattern.compile(
+            "(?m)^(?:##|###)\\s+(US-\\d{3}):\\s+(.+?)\\s*$"
+    );
     private static final Pattern OUTCOME_PATTERN = Pattern.compile("(?im)^\\*\\*Outcome:\\*\\*\\s*(.+?)\\s*$");
     private static final Pattern DESCRIPTION_PATTERN =
             Pattern.compile("(?im)^\\*\\*(?:Description|Story):\\*\\*\\s*(.+?)\\s*$");
     private static final Pattern DEPENDENCY_LINE_PATTERN =
-            Pattern.compile("(?im)^(?:\\*\\*)?(?:Prerequisites?|Depends\\s+On)(?:\\*\\*)?\\s*:\\s*(.+?)\\s*$");
+            Pattern.compile("(?im)^(?:\\*\\*(?:Dependencies|Prerequisites?|Depends\\s+On):\\*\\*\\s*(.+?)"
+                    + "|(?:\\*\\*(?:Dependencies|Prerequisites?|Depends\\s+On)\\*\\*|Dependencies|Prerequisites?|Depends\\s+On)\\s*:\\s*(.+?))\\s*$");
+    private static final Pattern ACCEPTANCE_CRITERIA_HEADING_PATTERN =
+            Pattern.compile("(?im)^\\*\\*Acceptance Criteria:\\*\\*\\s*(.+?)?\\s*$|^####\\s+Acceptance Criteria\\s*$");
     private static final Pattern STORY_ID_REFERENCE_PATTERN = Pattern.compile("\\bUS-\\d{3}\\b");
     private static final Pattern LEADING_LIST_MARKER_PATTERN =
             Pattern.compile("^(?:[-*+]\\s+|\\d+[.)]\\s+|\\[[ xX]\\]\\s+)");
@@ -79,7 +89,7 @@ public class RalphPrdJsonMapper {
         String name = documentTitle(normalizedMarkdown, activeProject.displayName());
         return new RalphPrdJsonDocument(
                 name,
-                "ralph/" + slugify(name),
+                branchName(activeProject, normalizedMarkdown),
                 overviewDescription(overviewSection, activeProject.displayName()),
                 qualityGates,
                 userStories,
@@ -87,6 +97,12 @@ public class RalphPrdJsonMapper {
                 taskState.createdAt(),
                 taskState.updatedAt()
         );
+    }
+
+    public String branchName(ActiveProject activeProject, String markdown) {
+        Objects.requireNonNull(activeProject, "activeProject must not be null");
+        String normalizedMarkdown = normalizeLineEndings(markdown == null ? "" : markdown);
+        return "ralph/" + slugify(documentTitle(normalizedMarkdown, activeProject.displayName()));
     }
 
     public PrdTaskState toTaskState(ActiveProject activeProject, RalphPrdJsonDocument document) {
@@ -216,9 +232,23 @@ public class RalphPrdJsonMapper {
             return matcher.group(1).trim();
         }
 
+        List<String> acceptanceCriteria = extractAcceptanceCriteria(storyBody, fallback, List.of());
+        if (!acceptanceCriteria.isEmpty()) {
+            return acceptanceCriteria.getFirst();
+        }
+
+        Matcher descriptionMatcher = DESCRIPTION_PATTERN.matcher(storyBody);
+        if (descriptionMatcher.find() && hasText(descriptionMatcher.group(1))) {
+            return descriptionMatcher.group(1).trim();
+        }
+
         for (String line : normalizeLineEndings(storyBody).split("\n")) {
-            String normalizedLine = stripLeadingListMarker(line.trim());
-            if (!normalizedLine.startsWith("####") && hasText(normalizedLine)) {
+            String trimmedLine = line.trim();
+            if (!hasMeaningfulStoryLine(trimmedLine)) {
+                continue;
+            }
+            String normalizedLine = stripLeadingListMarker(trimmedLine);
+            if (hasText(normalizedLine)) {
                 return normalizedLine;
             }
         }
@@ -252,10 +282,19 @@ public class RalphPrdJsonMapper {
                 currentSubheading = normalizeHeading(trimmedLine.substring(4));
                 continue;
             }
+            Matcher acceptanceCriteriaMatcher = ACCEPTANCE_CRITERIA_HEADING_PATTERN.matcher(trimmedLine);
+            if (acceptanceCriteriaMatcher.matches()) {
+                currentSubheading = "acceptance criteria";
+                if (hasText(acceptanceCriteriaMatcher.group(1))) {
+                    criteria.add(stripLeadingListMarker(acceptanceCriteriaMatcher.group(1).trim()));
+                }
+                continue;
+            }
             if (trimmedLine.matches("^\\*\\*(?:Outcome|Description|Story):\\*\\*.*$")) {
                 continue;
             }
             if (DEPENDENCY_LINE_PATTERN.matcher(trimmedLine).matches()) {
+                currentSubheading = "dependencies";
                 continue;
             }
             String normalizedLine = stripLeadingListMarker(trimmedLine);
@@ -288,9 +327,15 @@ public class RalphPrdJsonMapper {
                 continue;
             }
 
+            Matcher acceptanceCriteriaMatcher = ACCEPTANCE_CRITERIA_HEADING_PATTERN.matcher(trimmedLine);
+            if (acceptanceCriteriaMatcher.matches()) {
+                currentSubheading = "acceptance criteria";
+                continue;
+            }
             Matcher dependencyMatcher = DEPENDENCY_LINE_PATTERN.matcher(trimmedLine);
             if (dependencyMatcher.matches()) {
-                collectStoryReferences(dependsOn, dependencyMatcher.group(1));
+                currentSubheading = "dependencies";
+                collectStoryReferences(dependsOn, dependencyValue(dependencyMatcher));
                 continue;
             }
 
@@ -335,7 +380,7 @@ public class RalphPrdJsonMapper {
         Matcher matcher = SECTION_HEADING_PATTERN.matcher(markdown);
         List<SectionMatch> matches = new ArrayList<>();
         while (matcher.find()) {
-            matches.add(new SectionMatch(matcher.group(1).trim(), matcher.start(), matcher.end()));
+            matches.add(new SectionMatch(sectionTitle(matcher), matcher.start(), matcher.end()));
         }
 
         List<Section> sections = new ArrayList<>(matches.size());
@@ -386,6 +431,46 @@ public class RalphPrdJsonMapper {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String dependencyValue(Matcher matcher) {
+        if (matcher == null) {
+            return "";
+        }
+        String inlineBoldValue = matcher.group(1);
+        if (hasText(inlineBoldValue)) {
+            return inlineBoldValue.trim();
+        }
+        String standardValue = matcher.group(2);
+        return standardValue == null ? "" : standardValue.trim();
+    }
+
+    private boolean hasMeaningfulStoryLine(String trimmedLine) {
+        if (!hasText(trimmedLine)) {
+            return false;
+        }
+        if (trimmedLine.startsWith("####")) {
+            return false;
+        }
+        if (OUTCOME_PATTERN.matcher(trimmedLine).matches()) {
+            return false;
+        }
+        if (DESCRIPTION_PATTERN.matcher(trimmedLine).matches()) {
+            return false;
+        }
+        if (DEPENDENCY_LINE_PATTERN.matcher(trimmedLine).matches()) {
+            return false;
+        }
+        return !ACCEPTANCE_CRITERIA_HEADING_PATTERN.matcher(trimmedLine).matches();
+    }
+
+    private String sectionTitle(Matcher matcher) {
+        String markdownHeading = matcher.group(1);
+        if (hasText(markdownHeading)) {
+            return markdownHeading.trim();
+        }
+        String boldHeading = matcher.group(2);
+        return boldHeading == null ? "" : boldHeading.trim();
     }
 
     private String firstNonBlank(String... values) {

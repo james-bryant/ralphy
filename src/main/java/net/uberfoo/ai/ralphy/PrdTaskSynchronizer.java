@@ -15,11 +15,25 @@ import java.util.regex.Pattern;
 
 @Component
 public class PrdTaskSynchronizer {
-    private static final Pattern SECTION_HEADING_PATTERN = Pattern.compile("(?m)^##\\s+(.+?)\\s*$");
-    private static final Pattern STORY_HEADING_PATTERN = Pattern.compile("(?m)^###\\s+(US-\\d{3}):\\s+(.+?)\\s*$");
+    private static final String FLEXIBLE_SECTION_TITLES =
+            "Overview|Introduction|Goals|Quality Gates|User Stories|Scope Boundaries|Functional Requirements"
+                    + "|Technical Considerations|Success Metrics|Open Questions|Non-Goals|Non Goals";
+    private static final Pattern SECTION_HEADING_PATTERN = Pattern.compile(
+            "(?im)^(?:##\\s+(?!US-\\d{3}:)(.+?)\\s*$|\\*\\*((" + FLEXIBLE_SECTION_TITLES + "):?)\\*\\*\\s*$)"
+    );
+    private static final Pattern STORY_HEADING_PATTERN = Pattern.compile(
+            "(?m)^(?:##|###)\\s+(US-\\d{3}):\\s+(.+?)\\s*$"
+    );
     private static final Pattern OUTCOME_PATTERN = Pattern.compile("(?im)^\\*\\*Outcome:\\*\\*\\s*(.+?)\\s*$");
+    private static final Pattern DESCRIPTION_PATTERN =
+            Pattern.compile("(?im)^\\*\\*(?:Description|Story):\\*\\*\\s*(.+?)\\s*$");
+    private static final Pattern DEPENDENCY_LINE_PATTERN =
+            Pattern.compile("(?im)^(?:\\*\\*(?:Dependencies|Prerequisites?|Depends\\s+On):\\*\\*\\s*(.+?)"
+                    + "|(?:\\*\\*(?:Dependencies|Prerequisites?|Depends\\s+On)\\*\\*|Dependencies|Prerequisites?|Depends\\s+On)\\s*:\\s*(.+?))\\s*$");
+    private static final Pattern ACCEPTANCE_CRITERIA_HEADING_PATTERN =
+            Pattern.compile("(?im)^\\*\\*Acceptance Criteria:\\*\\*\\s*(.+?)?\\s*$|^####\\s+Acceptance Criteria\\s*$");
     private static final Pattern LEADING_LIST_MARKER_PATTERN =
-            Pattern.compile("^(?:[-*+]\\s+|\\d+[.)]\\s+)");
+            Pattern.compile("^(?:[-*+]\\s+|\\d+[.)]\\s+|\\[[ xX]\\]\\s+)");
 
     public SyncPlan plan(String markdown, PrdTaskState existingState) {
         ParsedPrd parsedPrd = parse(markdown);
@@ -155,8 +169,25 @@ public class PrdTaskSynchronizer {
             }
         }
 
+        List<String> acceptanceCriteria = acceptanceCriteria(storyBody);
+        if (!acceptanceCriteria.isEmpty()) {
+            return acceptanceCriteria.getFirst();
+        }
+
+        Matcher descriptionMatcher = DESCRIPTION_PATTERN.matcher(storyBody);
+        if (descriptionMatcher.find()) {
+            String description = descriptionMatcher.group(1).trim();
+            if (!description.isBlank()) {
+                return description;
+            }
+        }
+
         for (String line : normalizeLineEndings(storyBody).split("\n")) {
-            String normalizedLine = stripLeadingListMarker(line.trim());
+            String trimmedLine = line.trim();
+            if (!hasMeaningfulStoryLine(trimmedLine)) {
+                continue;
+            }
+            String normalizedLine = stripLeadingListMarker(trimmedLine);
             if (!normalizedLine.isBlank()) {
                 return normalizedLine;
             }
@@ -184,7 +215,7 @@ public class PrdTaskSynchronizer {
         Matcher matcher = SECTION_HEADING_PATTERN.matcher(markdown);
         List<SectionMatch> matches = new ArrayList<>();
         while (matcher.find()) {
-            matches.add(new SectionMatch(matcher.group(1).trim(), matcher.start(), matcher.end()));
+            matches.add(new SectionMatch(sectionTitle(matcher), matcher.start(), matcher.end()));
         }
 
         List<Section> sections = new ArrayList<>(matches.size());
@@ -225,6 +256,75 @@ public class PrdTaskSynchronizer {
         }
 
         return LEADING_LIST_MARKER_PATTERN.matcher(value).replaceFirst("").trim();
+    }
+
+    private List<String> acceptanceCriteria(String storyBody) {
+        List<String> criteria = new ArrayList<>();
+        boolean insideAcceptanceCriteria = false;
+        for (String line : normalizeLineEndings(storyBody).split("\n")) {
+            String trimmedLine = line.trim();
+            if (!hasText(trimmedLine)) {
+                continue;
+            }
+            if (trimmedLine.startsWith("####")) {
+                insideAcceptanceCriteria = normalizeHeading(trimmedLine.substring(4)).equals("acceptance criteria");
+                continue;
+            }
+            if (DEPENDENCY_LINE_PATTERN.matcher(trimmedLine).matches()) {
+                insideAcceptanceCriteria = false;
+                continue;
+            }
+            Matcher acceptanceHeadingMatcher = ACCEPTANCE_CRITERIA_HEADING_PATTERN.matcher(trimmedLine);
+            if (acceptanceHeadingMatcher.matches()) {
+                insideAcceptanceCriteria = true;
+                String inlineValue = acceptanceHeadingMatcher.group(1);
+                if (hasText(inlineValue)) {
+                    criteria.add(stripLeadingListMarker(inlineValue.trim()));
+                }
+                continue;
+            }
+            if (!insideAcceptanceCriteria) {
+                continue;
+            }
+
+            String normalizedLine = stripLeadingListMarker(trimmedLine);
+            if (hasText(normalizedLine)) {
+                criteria.add(normalizedLine);
+            }
+        }
+        return criteria;
+    }
+
+    private boolean hasMeaningfulStoryLine(String trimmedLine) {
+        if (!hasText(trimmedLine)) {
+            return false;
+        }
+        if (trimmedLine.startsWith("####")) {
+            return false;
+        }
+        if (OUTCOME_PATTERN.matcher(trimmedLine).matches()) {
+            return false;
+        }
+        if (DESCRIPTION_PATTERN.matcher(trimmedLine).matches()) {
+            return false;
+        }
+        if (DEPENDENCY_LINE_PATTERN.matcher(trimmedLine).matches()) {
+            return false;
+        }
+        return !ACCEPTANCE_CRITERIA_HEADING_PATTERN.matcher(trimmedLine).matches();
+    }
+
+    private String sectionTitle(Matcher matcher) {
+        String markdownHeading = matcher.group(1);
+        if (hasText(markdownHeading)) {
+            return markdownHeading.trim();
+        }
+        String boldHeading = matcher.group(2);
+        return boldHeading == null ? "" : boldHeading.trim();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     public record SyncPlan(List<String> addedTaskIds, List<String> updatedTaskIds, List<String> removedTaskIds) {

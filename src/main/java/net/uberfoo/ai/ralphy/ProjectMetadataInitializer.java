@@ -15,7 +15,7 @@ import java.util.function.Function;
 
 @Component
 public class ProjectMetadataInitializer {
-    private static final int SCHEMA_VERSION = 7;
+    private static final int SCHEMA_VERSION = 8;
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     public void writeMetadata(ActiveProject activeProject) throws IOException {
@@ -29,6 +29,7 @@ public class ProjectMetadataInitializer {
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
                 existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null ? null : existingMetadata.prdPlanningSession(),
                 existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
@@ -49,6 +50,7 @@ public class ProjectMetadataInitializer {
                 nativeWindowsPreflight,
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
                 existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null ? null : existingMetadata.prdPlanningSession(),
                 existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
@@ -69,6 +71,7 @@ public class ProjectMetadataInitializer {
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 wslPreflight,
                 existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null ? null : existingMetadata.prdPlanningSession(),
                 existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
@@ -89,6 +92,28 @@ public class ProjectMetadataInitializer {
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
                 prdInterviewDraft,
+                existingMetadata == null ? null : existingMetadata.prdPlanningSession(),
+                existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
+                existingMetadata == null || existingMetadata.createdAt() == null
+                        ? timestamp
+                        : existingMetadata.createdAt(),
+                timestamp
+        ));
+    }
+
+    public void writePrdPlanningSession(ActiveProject activeProject,
+                                        PrdPlanningSession prdPlanningSession) throws IOException {
+        String timestamp = Instant.now().toString();
+        writeDocument(activeProject, existingMetadata -> new ProjectMetadataDocument(
+                SCHEMA_VERSION,
+                activeProject.displayName(),
+                activeProject.displayPath(),
+                activeProject.projectMetadataPath().toString(),
+                activeProject.storagePaths(),
+                existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
+                existingMetadata == null ? null : existingMetadata.wslPreflight(),
+                existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                prdPlanningSession,
                 existingMetadata == null ? null : existingMetadata.markdownPrdExchangeLocations(),
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
@@ -110,6 +135,7 @@ public class ProjectMetadataInitializer {
                 existingMetadata == null ? null : existingMetadata.nativeWindowsPreflight(),
                 existingMetadata == null ? null : existingMetadata.wslPreflight(),
                 existingMetadata == null ? null : existingMetadata.prdInterviewDraft(),
+                existingMetadata == null ? null : existingMetadata.prdPlanningSession(),
                 markdownPrdExchangeLocations,
                 existingMetadata == null || existingMetadata.createdAt() == null
                         ? timestamp
@@ -144,6 +170,15 @@ public class ProjectMetadataInitializer {
         }
 
         return java.util.Optional.ofNullable(existingMetadata.prdInterviewDraft());
+    }
+
+    public java.util.Optional<PrdPlanningSession> readPrdPlanningSession(ActiveProject activeProject) throws IOException {
+        ProjectMetadataDocument existingMetadata = readExistingMetadata(activeProject.projectMetadataPath());
+        if (existingMetadata == null) {
+            return java.util.Optional.empty();
+        }
+
+        return java.util.Optional.ofNullable(existingMetadata.prdPlanningSession());
     }
 
     public java.util.Optional<MarkdownPrdExchangeLocations> readMarkdownPrdExchangeLocations(ActiveProject activeProject)
@@ -203,6 +238,7 @@ public class ProjectMetadataInitializer {
                                            NativeWindowsPreflightReport nativeWindowsPreflight,
                                            WslPreflightReport wslPreflight,
                                            PrdInterviewDraft prdInterviewDraft,
+                                           PrdPlanningSession prdPlanningSession,
                                            MarkdownPrdExchangeLocations markdownPrdExchangeLocations,
                                            String createdAt,
                                            String updatedAt) {

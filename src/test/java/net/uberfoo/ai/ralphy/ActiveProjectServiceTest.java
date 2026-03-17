@@ -10,7 +10,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -235,6 +239,168 @@ class ActiveProjectServiceTest {
     }
 
     @Test
+    void runHistoryRestoresPersistedAttemptsWithBranchCommitAndArtifactMetadata() throws IOException {
+        Path repository = createGitDirectoryRepository("run-history-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        projectStorageInitializer.ensureStorageDirectories(activeProject);
+        projectMetadataInitializer.writeMetadata(activeProject);
+        seedQualityGateFiles(repository);
+        Files.writeString(activeProject.activePrdPath(), validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-035: View Run History and Artifacts
+                **Outcome:** Review prior attempts from the desktop shell.
+                """
+        ));
+        Files.writeString(activeProject.activePrdJsonPath(), """
+                {
+                  "name": "Run History",
+                  "branchName": "ralph/run-history",
+                  "description": "Review persisted story attempts and artifacts.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-035",
+                      "title": "View Run History and Artifacts",
+                      "description": "As a user, I want to inspect prior attempts.",
+                      "acceptanceCriteria": [
+                        "The history view lists story attempts.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Review prior attempts from the desktop shell.",
+                      "ralphyStatus": "FAILED",
+                      "history": [],
+                      "attempts": [
+                        {
+                          "runId": "run-history-1",
+                          "presetId": "ralph-codex-implement-v1",
+                          "presetName": "Ralph/Codex Story Implementation",
+                          "presetVersion": "v1",
+                          "outcome": "PASSED",
+                          "queuedAt": "2026-03-16T09:10:00Z",
+                          "startedAt": "2026-03-16T09:11:00Z",
+                          "endedAt": "2026-03-16T09:12:00Z",
+                          "detail": "Created commit commit-run-history-1 after verification passed.",
+                          "commitHash": "commit-run-history-1",
+                          "commitMessage": "US-035: View Run History and Artifacts"
+                        },
+                        {
+                          "runId": "run-history-2",
+                          "presetId": "ralph-codex-fix-v1",
+                          "presetName": "Ralph/Codex Retry and Fix",
+                          "presetVersion": "v1",
+                          "outcome": "FAILED",
+                          "queuedAt": "2026-03-16T09:15:00Z",
+                          "startedAt": "2026-03-16T09:16:00Z",
+                          "endedAt": "2026-03-16T09:18:00Z",
+                          "detail": "Retry attempt failed verification and remains reviewable.",
+                          "commitHash": "",
+                          "commitMessage": ""
+                        }
+                      ],
+                      "createdAt": "2026-03-16T09:00:00Z",
+                      "updatedAt": "2026-03-16T09:18:00Z"
+                    }
+                  ]
+                }
+                """);
+
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        localMetadataStorage.recordProjectActivation(activeProject);
+        localMetadataStorage.finishSession();
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(
+                new LocalMetadataStorage.RunMetadataRecord(
+                        "run-history-1",
+                        projectId,
+                        "US-035",
+                        "SUCCEEDED",
+                        "2026-03-16T09:11:00Z",
+                        "2026-03-16T09:12:00Z",
+                        "POWERSHELL",
+                        repository.toString(),
+                        1234L,
+                        0,
+                        List.of("powershell.exe", "-NoLogo"),
+                        "ralph/run-history",
+                        "CREATED",
+                        new LocalMetadataStorage.RunArtifactPaths(
+                                activeProject.promptsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("prompt.txt").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("stdout.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("stderr.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("structured-events.jsonl").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("attempt-summary.json").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("assistant-summary.txt").toString()
+                        )
+                ),
+                new LocalMetadataStorage.RunMetadataRecord(
+                        "run-history-2",
+                        projectId,
+                        "US-035",
+                        "FAILED",
+                        "2026-03-16T09:16:00Z",
+                        "2026-03-16T09:18:00Z",
+                        "POWERSHELL",
+                        repository.toString(),
+                        2345L,
+                        1,
+                        List.of("powershell.exe", "-NoLogo"),
+                        "ralph/run-history",
+                        "SWITCHED",
+                        new LocalMetadataStorage.RunArtifactPaths(
+                                activeProject.promptsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("prompt.txt").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("stdout.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("stderr.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("structured-events.jsonl").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("attempt-summary.json").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("assistant-summary.txt").toString()
+                        )
+                )
+        ));
+
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+
+        ActiveProjectService.RunHistoryReport historyReport = restoredService.runHistory();
+
+        assertTrue(historyReport.available());
+        assertEquals(2, historyReport.entries().size());
+        assertTrue(historyReport.summary().contains("2 persisted attempts"));
+        assertTrue(historyReport.detail().contains("Latest: US-035 | FAILED"));
+
+        ActiveProjectService.RunHistoryEntry latestEntry = historyReport.entries().getFirst();
+        assertEquals("run-history-2", latestEntry.runId());
+        assertEquals("FAILED", latestEntry.result());
+        assertEquals("ralph/run-history", latestEntry.branchName());
+        assertEquals("SWITCHED", latestEntry.branchAction());
+        assertTrue(latestEntry.detail().contains("reviewable"));
+
+        ActiveProjectService.RunHistoryEntry firstEntry = historyReport.entries().get(1);
+        assertEquals("run-history-1", firstEntry.runId());
+        assertEquals("PASSED", firstEntry.result());
+        assertEquals("commit-run-history-1", firstEntry.commitHash());
+        assertEquals("US-035: View Run History and Artifacts", firstEntry.commitMessage());
+        assertTrue(firstEntry.artifactPaths().assistantSummaryPath().endsWith("assistant-summary.txt"));
+    }
+
+    @Test
     void saveExecutionProfilePersistsWslSettingsAndReloadsThemPerProject() throws IOException {
         LocalMetadataStorage localMetadataStorage = createStorage();
         ActiveProjectService activeProjectService = createService(localMetadataStorage);
@@ -334,6 +500,8 @@ class ActiveProjectServiceTest {
         assertFalse(attempt.queuedAt().isBlank());
         assertFalse(attempt.startedAt().isBlank());
         assertFalse(attempt.endedAt().isBlank());
+        assertEquals("commit-us-011-1", attempt.commitHash());
+        assertEquals("US-011: Execute a Single Story Session", attempt.commitMessage());
         assertTrue(updatedTask.history().stream()
                 .anyMatch(entry -> entry.status() == PrdTaskStatus.READY
                         && entry.message().contains("Queued")));
@@ -342,7 +510,7 @@ class ActiveProjectServiceTest {
                         && entry.message().contains("Started")));
         assertTrue(updatedTask.history().stream()
                 .anyMatch(entry -> entry.status() == PrdTaskStatus.COMPLETED
-                        && entry.message().contains("passed")));
+                        && entry.message().contains("Created commit commit-us-011-1")));
 
         JsonNode persistedTaskState = objectMapper.readTree(Files.readString(repository
                 .resolve(".ralph-tui")
@@ -356,6 +524,131 @@ class ActiveProjectServiceTest {
         assertEquals("run-pass-1", persistedAttempt.path("runId").asText());
         assertEquals("PASSED", persistedAttempt.path("outcome").asText());
         assertEquals("ralph-codex-implement-v1", persistedAttempt.path("presetId").asText());
+        assertEquals("commit-us-011-1", persistedAttempt.path("commitHash").asText());
+        assertEquals("US-011: Execute a Single Story Session", persistedAttempt.path("commitMessage").asText());
+
+        LocalMetadataStorage.RunMetadataRecord persistedRunMetadata =
+                localMetadataStorage.latestRunMetadataForProject(
+                        localMetadataStorage.projectRecordForRepository(repository).orElseThrow().projectId()
+                ).orElseThrow();
+        assertEquals("ralph/task-sync-plan", persistedRunMetadata.branchName());
+        assertEquals("CREATED", persistedRunMetadata.branchAction());
+    }
+
+    @Test
+    void startEligibleSingleStoryAddsSelectedModelToCodexOptions() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        AtomicReference<CodexLauncherService.CodexLaunchPlan> capturedLaunchPlan = new AtomicReference<>();
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                launchPlan -> {
+                    capturedLaunchPlan.set(launchPlan);
+                    return CodexLauncherService.ProcessExecution.completed(4321L, 0, "{\"event\":\"done\"}", "");
+                },
+                () -> "run-model-1"
+        );
+        Path repository = createGitDirectoryRepository("single-story-model-selection-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-041: Choose Execution Model
+                **Outcome:** Story runs with the selected Codex model.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStoryStartResult startResult = activeProjectService.startEligibleSingleStory(
+                PresetUseCase.STORY_IMPLEMENTATION,
+                new ExecutionAgentSelection(ExecutionAgentProvider.CODEX, "gpt-5.4-mini"),
+                CodexLauncherService.RunOutputListener.noop()
+        );
+
+        assertTrue(startResult.successful());
+        assertNotNull(capturedLaunchPlan.get());
+        assertTrue(capturedLaunchPlan.get().command().contains("--model"));
+        assertTrue(capturedLaunchPlan.get().command().contains("gpt-5.4-mini"));
+    }
+
+    @Test
+    void startEligibleSingleStoryReturnsFailureForUnsupportedProvider() throws IOException {
+        ActiveProjectService activeProjectService = createService();
+        Path repository = createGitDirectoryRepository("single-story-provider-selection-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-042: Gate Unsupported Providers
+                **Outcome:** Unsupported providers are blocked before execution starts.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStoryStartResult startResult = activeProjectService.startEligibleSingleStory(
+                PresetUseCase.STORY_IMPLEMENTATION,
+                new ExecutionAgentSelection(ExecutionAgentProvider.CLAUDE_CODE, ""),
+                CodexLauncherService.RunOutputListener.noop()
+        );
+
+        assertFalse(startResult.successful());
+        assertTrue(startResult.detail().contains("not implemented"));
+    }
+
+    @Test
+    void startEligibleSingleStoryFailsWhenValidationNeverProducesACommit() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        AtomicInteger launchCount = new AtomicInteger();
+        AtomicInteger runIdSequence = new AtomicInteger();
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                launchPlan -> {
+                    launchCount.incrementAndGet();
+                    return CodexLauncherService.ProcessExecution.completed(
+                            4321L,
+                            0,
+                            """
+                            {"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Implemented US-034 candidate."}]}
+                            """.trim(),
+                            ""
+                    );
+                },
+                () -> "run-validation-" + runIdSequence.incrementAndGet(),
+                failingStoryCompletionCommandExecutor()
+        );
+        Path repository = createGitDirectoryRepository("single-story-validation-fail-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-034: Commit Each Completed Story
+                **Outcome:** Stories complete only after validation and a commit succeed.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStoryStartResult startResult =
+                activeProjectService.startEligibleSingleStory(PresetUseCase.STORY_IMPLEMENTATION);
+
+        assertTrue(startResult.successful());
+        assertEquals("US-034", startResult.storyId());
+        assertEquals(PrdTaskStatus.FAILED, startResult.finalStatus());
+        assertEquals(2, launchCount.get());
+        assertTrue(startResult.detail().contains("Validation failed"));
+
+        PrdTaskRecord failedTask = activeProjectService.prdTaskState()
+                .orElseThrow()
+                .taskById("US-034")
+                .orElseThrow();
+        assertEquals(PrdTaskStatus.FAILED, failedTask.status());
+        assertEquals(2, failedTask.attempts().size());
+        assertTrue(failedTask.attempts().stream().allMatch(attempt -> attempt.commitHash().isBlank()));
+        assertTrue(failedTask.attempts().stream().allMatch(attempt -> attempt.commitMessage().isBlank()));
+        assertTrue(failedTask.history().stream()
+                .anyMatch(entry -> entry.status() == PrdTaskStatus.FAILED
+                        && entry.message().contains("Validation failed")));
     }
 
     @Test
@@ -497,6 +790,78 @@ class ActiveProjectServiceTest {
         assertTrue(startResult.successful());
         assertEquals(List.of("streamed stdout"), streamedStdout);
         assertEquals("Final summary", startResult.launchResult().assistantSummary());
+    }
+
+    @Test
+    void startEligibleSingleStoryKeepsReadMethodsResponsiveWhileCodexRuns() throws Exception {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        CountDownLatch launchStarted = new CountDownLatch(1);
+        CountDownLatch allowCompletion = new CountDownLatch(1);
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                new CodexLauncherService.ProcessExecutor() {
+                    @Override
+                    public CodexLauncherService.ProcessExecution execute(CodexLauncherService.CodexLaunchPlan launchPlan,
+                                                                         CodexLauncherService.RunOutputListener runOutputListener) {
+                        runOutputListener.onStdout("still running");
+                        launchStarted.countDown();
+                        try {
+                            assertTrue(allowCompletion.await(5, TimeUnit.SECONDS));
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(exception);
+                        }
+                        return CodexLauncherService.ProcessExecution.completed(
+                                8765L,
+                                0,
+                                """
+                                {"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Completed after live run."}]}
+                                """.trim(),
+                                ""
+                        );
+                    }
+
+                    @Override
+                    public CodexLauncherService.ProcessExecution execute(CodexLauncherService.CodexLaunchPlan launchPlan) {
+                        throw new AssertionError("Streaming launcher path should be used.");
+                    }
+                },
+                () -> "run-live-read-1"
+        );
+        Path repository = createGitDirectoryRepository("single-story-live-read-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-041: Keep Execution Status Readable During Long Runs
+                **Outcome:** The UI can keep polling story state while Codex is still running.
+                """
+        )).successful());
+
+        CompletableFuture<ActiveProjectService.SingleStoryStartResult> startFuture = CompletableFuture.supplyAsync(
+                () -> activeProjectService.startEligibleSingleStory(PresetUseCase.STORY_IMPLEMENTATION)
+        );
+
+        assertTrue(launchStarted.await(2, TimeUnit.SECONDS));
+
+        PrdTaskState inFlightTaskState = CompletableFuture.supplyAsync(activeProjectService::prdTaskState)
+                .get(500, TimeUnit.MILLISECONDS)
+                .orElseThrow();
+        ActiveProjectService.SingleStorySessionAvailability inFlightAvailability =
+                CompletableFuture.supplyAsync(() -> activeProjectService.singleStorySessionAvailability(
+                                PresetUseCase.STORY_IMPLEMENTATION))
+                        .get(500, TimeUnit.MILLISECONDS);
+
+        assertEquals(PrdTaskStatus.RUNNING, inFlightTaskState.taskById("US-041").orElseThrow().status());
+        assertFalse(inFlightAvailability.startable());
+
+        allowCompletion.countDown();
+
+        ActiveProjectService.SingleStoryStartResult startResult = startFuture.get(5, TimeUnit.SECONDS);
+        assertTrue(startResult.successful());
+        assertEquals(PrdTaskStatus.COMPLETED, startResult.finalStatus());
     }
 
     @Test
@@ -717,6 +1082,36 @@ class ActiveProjectServiceTest {
         assertEquals(".\\mvnw.cmd clean verify jacoco:report and Windows smoke.",
                 restoredDraft.answerFor("qualityGates"));
         assertEquals(3, restoredDraft.selectedQuestionIndex());
+    }
+
+    @Test
+    void savePrdPlanningSessionPersistsConversationAndReloadsItOnStartup() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        Path repository = createGitDirectoryRepository("prd-planning-session-repo");
+
+        ActiveProjectService activeProjectService = createService(localMetadataStorage);
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        PrdPlanningSession session = PrdPlanningSession.empty()
+                .appendUserMessage("Plan a live conversational PRD planner.")
+                .appendAssistantMessage("1. Which repositories should it target?\n2. Which quality gates are required?", "")
+                .appendUserMessage("One active repository at a time. Quality gates must be user-defined.");
+
+        ActiveProjectService.PrdPlanningSessionSaveResult saveResult =
+                activeProjectService.savePrdPlanningSession(session);
+
+        assertTrue(saveResult.successful());
+        assertTrue(Files.readString(new ActiveProject(repository).projectMetadataPath())
+                .contains("\"prdPlanningSession\""));
+
+        localMetadataStorage.finishSession();
+        ActiveProjectService restoredService = createService(localMetadataStorage);
+        PrdPlanningSession restoredSession = restoredService.prdPlanningSession().orElseThrow();
+
+        assertEquals("Plan a live conversational PRD planner.", restoredSession.starterPrompt());
+        assertEquals(3, restoredSession.messages().size());
+        assertEquals("assistant", restoredSession.messages().get(1).role());
+        assertTrue(restoredSession.messages().get(1).content().contains("Which repositories should it target?"));
     }
 
     @Test
@@ -1457,13 +1852,27 @@ class ActiveProjectServiceTest {
         return createService(
                 localMetadataStorage,
                 launchPlan -> CodexLauncherService.ProcessExecution.completed(1234L, 0, "", ""),
-                () -> "run-default"
+                () -> "run-default",
+                createStoryCompletionCommandExecutor()
         );
     }
 
     private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage,
                                                CodexLauncherService.ProcessExecutor processExecutor,
                                                java.util.function.Supplier<String> runIdGenerator) throws IOException {
+        return createService(
+                localMetadataStorage,
+                processExecutor,
+                runIdGenerator,
+                createStoryCompletionCommandExecutor()
+        );
+    }
+
+    private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage,
+                                               CodexLauncherService.ProcessExecutor processExecutor,
+                                               java.util.function.Supplier<String> runIdGenerator,
+                                               StoryCompletionService.CommandExecutor storyCompletionCommandExecutor)
+            throws IOException {
         PresetCatalogService presetCatalogService = new PresetCatalogService();
         CodexLauncherService codexLauncherService = new CodexLauncherService(
                 localMetadataStorage,
@@ -1471,7 +1880,9 @@ class ActiveProjectServiceTest {
                 runIdGenerator,
                 processExecutor
         );
+        StoryCompletionService storyCompletionService = new StoryCompletionService(storyCompletionCommandExecutor);
         return new ActiveProjectService(
+                createGitFeatureBranchService(),
                 gitRepositoryInitializer,
                 projectMetadataInitializer,
                 projectStorageInitializer,
@@ -1481,6 +1892,7 @@ class ActiveProjectServiceTest {
                 prdTaskStateStore,
                 prdTaskSynchronizer,
                 ralphPrdJsonMapper,
+                storyCompletionService,
                 presetCatalogService,
                 codexLauncherService,
                 createWslPreflightService(),
@@ -1491,6 +1903,113 @@ class ActiveProjectServiceTest {
 
     private LocalMetadataStorage createStorage() {
         return LocalMetadataStorage.forTest(tempDir.resolve("local-storage"));
+    }
+
+    private GitFeatureBranchService createGitFeatureBranchService() {
+        return new GitFeatureBranchService(new GitFeatureBranchService.CommandExecutor() {
+            private final java.util.Map<String, String> currentBranches = new java.util.HashMap<>();
+            private final java.util.Set<String> existingBranches = new java.util.HashSet<>();
+
+            @Override
+            public GitFeatureBranchService.CommandResult execute(Path workingDirectory, List<String> command) {
+                String repositoryKey = workingDirectory.toAbsolutePath().normalize().toString();
+                if (command.equals(List.of("git", "rev-parse", "--abbrev-ref", "HEAD"))) {
+                    return GitFeatureBranchService.CommandResult.success(
+                            0,
+                            currentBranches.getOrDefault(repositoryKey, "main")
+                    );
+                }
+                if (command.size() == 5
+                        && command.get(0).equals("git")
+                        && command.get(1).equals("show-ref")
+                        && command.get(4).startsWith("refs/heads/")) {
+                    String branchName = command.get(4).substring("refs/heads/".length());
+                    return GitFeatureBranchService.CommandResult.success(
+                            existingBranches.contains(repositoryKey + "::" + branchName) ? 0 : 1,
+                            ""
+                    );
+                }
+                if (command.size() == 4
+                        && command.get(0).equals("git")
+                        && command.get(1).equals("switch")
+                        && command.get(2).equals("-c")) {
+                    String branchName = command.get(3);
+                    existingBranches.add(repositoryKey + "::" + branchName);
+                    currentBranches.put(repositoryKey, branchName);
+                    return GitFeatureBranchService.CommandResult.success(0, "");
+                }
+                if (command.size() == 3
+                        && command.get(0).equals("git")
+                        && command.get(1).equals("switch")) {
+                    String branchName = command.get(2);
+                    existingBranches.add(repositoryKey + "::" + branchName);
+                    currentBranches.put(repositoryKey, branchName);
+                    return GitFeatureBranchService.CommandResult.success(0, "");
+                }
+                return GitFeatureBranchService.CommandResult.failure("Unexpected git branch command.");
+            }
+        });
+    }
+
+    private StoryCompletionService.CommandExecutor createStoryCompletionCommandExecutor() {
+        return new StoryCompletionService.CommandExecutor() {
+            @Override
+            public StoryCompletionService.CommandResult execute(Path workingDirectory, List<String> command) {
+                if (command.equals(List.of(
+                        "powershell.exe",
+                        "-NoLogo",
+                        "-NoProfile",
+                        "-Command",
+                        ".\\mvnw.cmd clean verify jacoco:report"
+                ))) {
+                    return StoryCompletionService.CommandResult.success(0, "BUILD SUCCESS");
+                }
+                if (command.equals(List.of("git", "add", "--all"))) {
+                    return StoryCompletionService.CommandResult.success(0, "");
+                }
+                if (command.equals(List.of("git", "status", "--porcelain"))) {
+                    String repositoryKey = workingDirectory.toAbsolutePath().normalize().getFileName().toString();
+                    return StoryCompletionService.CommandResult.success(
+                            0,
+                            "M src/main/java/net/uberfoo/ai/ralphy/" + repositoryKey + ".java"
+                    );
+                }
+                if (command.size() == 4
+                        && command.get(0).equals("git")
+                        && command.get(1).equals("commit")
+                        && command.get(2).equals("-m")) {
+                    return StoryCompletionService.CommandResult.success(0, "");
+                }
+                if (command.equals(List.of("git", "rev-parse", "HEAD"))) {
+                    String repositoryKey = workingDirectory.toAbsolutePath().normalize().getFileName().toString();
+                    return StoryCompletionService.CommandResult.success(0, commitHashForRepository(repositoryKey));
+                }
+                return StoryCompletionService.CommandResult.failure("Unexpected story completion command.");
+            }
+        };
+    }
+
+    private StoryCompletionService.CommandExecutor failingStoryCompletionCommandExecutor() {
+        return (workingDirectory, command) -> {
+            if (command.equals(List.of(
+                    "powershell.exe",
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-Command",
+                    ".\\mvnw.cmd clean verify jacoco:report"
+            ))) {
+                return StoryCompletionService.CommandResult.success(1, "[ERROR] Tests failed");
+            }
+            return StoryCompletionService.CommandResult.failure("Unexpected story completion command.");
+        };
+    }
+
+    private String commitHashForRepository(String repositoryKey) {
+        return switch (repositoryKey) {
+            case "single-story-pass-repo" -> "commit-us-011-1";
+            case "single-story-auto-retry-pass-repo" -> "commit-us-032-2";
+            default -> "commit-" + repositoryKey;
+        };
     }
 
     private NativeWindowsPreflightService createNativePreflightService() throws IOException {
@@ -1523,10 +2042,13 @@ class ActiveProjectServiceTest {
             }
 
             String script = command.getLast();
+            if (script.contains("getent passwd")) {
+                return WslPreflightService.CommandResult.success(0, "/bin/zsh");
+            }
             if (script.contains("pwd")) {
                 return WslPreflightService.CommandResult.success(0, "/mnt/c/wsl-workspaces/wsl-preflight-repo");
             }
-            if (script.contains("codex --version")) {
+            if (script.contains("configured interactive shell")) {
                 return WslPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
             }
             if (script.contains("OPENAI_API_KEY")) {

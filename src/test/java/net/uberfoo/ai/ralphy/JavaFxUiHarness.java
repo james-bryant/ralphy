@@ -5,6 +5,8 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.ButtonBase;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.control.Labeled;
 import javafx.scene.layout.Region;
@@ -84,6 +86,11 @@ final class JavaFxUiHarness {
         if (additionalArgs != null) {
             applicationArgs.addAll(List.of(additionalArgs));
         }
+        boolean stubArgProvided = applicationArgs.stream()
+                .anyMatch(arg -> arg.startsWith("--ralphy.execution.model.catalog.stub="));
+        if (!stubArgProvided) {
+            applicationArgs.add("--ralphy.execution.model.catalog.stub=true");
+        }
         springBridge.start(applicationArgs.toArray(String[]::new));
 
         AppShellStageConfigurer stageConfigurer = springBridge.getRequiredBean(AppShellStageConfigurer.class);
@@ -116,6 +123,14 @@ final class JavaFxUiHarness {
     <T> T getRequiredBean(Class<T> beanType) {
         assertNotNull(springBridge, "Spring bridge must be started before looking up beans.");
         return springBridge.getRequiredBean(beanType);
+    }
+
+    <T> T getRequiredRootController(Class<T> controllerType) throws Exception {
+        return onFxThread(() -> {
+            Object controller = root().getProperties().get("fxml.controller");
+            assertNotNull(controller, "Missing FXML controller on scene root.");
+            return controllerType.cast(controller);
+        });
     }
 
     boolean hasRootStyleClass(String styleClass) throws Exception {
@@ -239,8 +254,16 @@ final class JavaFxUiHarness {
         });
     }
 
+    boolean exists(String selector) throws Exception {
+        return onFxThread(() -> root().lookup(selector) != null);
+    }
+
     boolean isVisible(String selector) throws Exception {
         return onFxThread(() -> requiredNode(selector).isVisible());
+    }
+
+    boolean isSelected(String selector) throws Exception {
+        return onFxThread(() -> requiredNode(selector, RadioButton.class).isSelected());
     }
 
     boolean isEditable(String selector) throws Exception {
@@ -251,15 +274,41 @@ final class JavaFxUiHarness {
         return onFxThread(() -> requiredNode(selector).isDisable());
     }
 
+    double scrollValue(String selector) throws Exception {
+        return onFxThread(() -> requiredNode(selector, ScrollPane.class).getVvalue());
+    }
+
+    double height(String selector) throws Exception {
+        return onFxThread(() -> requiredNode(selector).getLayoutBounds().getHeight());
+    }
+
+    int nodeCount(String selector) throws Exception {
+        return onFxThread(() -> root().lookupAll(selector).size());
+    }
+
+    void setScrollValue(String selector, double value) throws Exception {
+        onFxThread(() -> {
+            ScrollPane scrollPane = requiredNode(selector, ScrollPane.class);
+            scrollPane.setVvalue(value);
+            root().applyCss();
+            root().layout();
+            return null;
+        });
+    }
+
     void waitUntil(ThrowingBooleanSupplier condition) throws Exception {
-        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(FX_TIMEOUT_SECONDS);
+        waitUntil(condition, FX_TIMEOUT_SECONDS);
+    }
+
+    void waitUntil(ThrowingBooleanSupplier condition, long timeoutSeconds) throws Exception {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
         while (System.nanoTime() < deadlineNanos) {
             if (condition.getAsBoolean()) {
                 return;
             }
             Thread.sleep(50L);
         }
-        throw new TimeoutException("Condition was not satisfied within " + FX_TIMEOUT_SECONDS + " seconds.");
+        throw new TimeoutException("Condition was not satisfied within " + timeoutSeconds + " seconds.");
     }
 
     Color textFill(String selector) throws Exception {
@@ -291,6 +340,9 @@ final class JavaFxUiHarness {
             appendText(builder, labeled.getText());
         } else if (node instanceof TextInputControl textInputControl) {
             appendText(builder, textInputControl.getText());
+        } else if (node instanceof ScrollPane scrollPane && scrollPane.getContent() != null) {
+            appendTextContent(scrollPane.getContent(), builder);
+            return;
         }
 
         if (node instanceof Parent parent) {

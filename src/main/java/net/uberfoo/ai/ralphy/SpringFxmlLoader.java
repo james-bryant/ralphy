@@ -18,7 +18,9 @@ public class SpringFxmlLoader {
     public Parent load(String resourceName) throws IOException {
         FXMLLoader loader = new FXMLLoader(resolveResource(resourceName));
         loader.setControllerFactory(controllerFactory);
-        return loader.load();
+        Parent root = loader.load();
+        root.getProperties().put("fxml.controller", loader.getController());
+        return root;
     }
 
     private URL resolveResource(String resourceName) {

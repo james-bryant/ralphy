@@ -36,10 +36,16 @@ class WslPreflightServiceTest {
             }
 
             String script = command.getLast();
+            if (script.contains("getent passwd")) {
+                assertEquals("/bin/sh", command.get(command.size() - 3));
+                return WslPreflightService.CommandResult.success(0, "/bin/zsh");
+            }
             if (script.contains("pwd")) {
+                assertEquals("/bin/sh", command.get(command.size() - 3));
                 return WslPreflightService.CommandResult.success(0, "/mnt/c/workspaces/sample-repo");
             }
-            if (script.contains("codex --version")) {
+            if (script.contains("configured interactive shell")) {
+                assertEquals("/bin/zsh", command.get(command.size() - 3));
                 return WslPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
             }
             if (script.contains("OPENAI_API_KEY")) {
@@ -105,6 +111,8 @@ class WslPreflightServiceTest {
                 .anyMatch(command -> command.command().contains("wsl.exe --install -d")));
         assertTrue(checksById.get("path_mapping").remediationCommands().stream()
                 .anyMatch(command -> command.command().contains("Test-Path")));
+        assertTrue(checksById.get("path_mapping").remediationCommands().stream()
+                .anyMatch(command -> command.command().contains("/bin/sh -lc")));
         assertTrue(executedCommands.stream().noneMatch(command -> command.contains("npm install")));
         assertTrue(executedCommands.stream().noneMatch(command -> command.getLast().contains("codex login")));
     }

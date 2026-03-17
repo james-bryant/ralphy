@@ -1,0 +1,143 @@
+# Iteration 19 Log
+
+## Metadata
+
+- **Task ID**: US-032
+- **Task Title**: Retry Once and Support Resume
+- **Description**: As a user, I want failed stories retried once automatically and then left resumable so that transient failures are handled but control returns to me when needed.
+- **Status**: completed
+- **Task Completed**: Yes
+- **Promise Detected**: Yes
+- **Started At**: 2026-03-16T04:41:05.609Z
+- **Ended At**: 2026-03-16T04:57:37.677Z
+- **Duration**: 16m 32s
+- **Input Tokens**: 5063774
+- **Output Tokens**: 31756
+- **Total Tokens**: 5095530
+- **Agent**: codex
+- **Sandbox Mode**: auto
+- **Sandbox Network**: Enabled
+--- RAW OUTPUT ---
+Using `java-springboot`, `springboot-tdd`, and `springboot-verification` because this is a Spring Boot feature change with required verification. I’m reading the local guidance and the existing runner/progress context before touching code.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg --files'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'C:/Use...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'C:/Use...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'C:/Use...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path '.ralph...
+I’ve loaded the progress history and the current codebase shape. Next I’m tracing the existing single-story/session flow in `ActiveProjectService`, the controller, and the current tests to see whether US-032 is already covered or where the retry/resume seam belongs.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "retry|resume|faile...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/te...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/te...
+The existing loop already stops at a failed story and preserves resumable metadata, but the service path I’ve seen so far only performs a single attempt. I’m drilling into the task record and controller session loop now to add automatic one-time retry without breaking the persisted resume model.
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1700 -First 230'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1600 -First 180'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 200 -First 220'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1450 -First 280'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 500 -First 180'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 120 -First 180'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1080 -First 420'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "startSingleStoryBu...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"createService\\(|...
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1588 -First 140'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 940 -First 140'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1360 -First 120'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1498 -First 120'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 460 -First 220'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "selectStoryForPres...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "attempts|retry" sr...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'src/ma...
+I have the implementation seams now. I’m checking the source PRD/task artifacts for US-032 wording before editing so the retry behavior matches the broader loop contract rather than just the current tests.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"US-032|Retry Once...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'tasks/...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'tasks/...
+Plan for US-032:
+
+1. Add focused service tests for automatic retry behavior:
+- first failure followed by automatic success
+- second failure leaves the story failed and retryable/resumable
+
+2. Add at least one JavaFX regression that exercises `Play` with a transient first failure so the UI loop keeps moving after the automatic retry.
+
+3. Implement retry orchestration in `ActiveProjectService` at the single-story execution seam so each attempt still persists queued/running/final state independently and the existing controller loop stays unchanged.
+
+4. Run targeted tests, then `.\mvnw.cmd clean verify jacoco:report`, then append the required progress entry and any reusable pattern.
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 880 -First 120'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1280 -First 260'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "failed|retry|resum...
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 420 -First 90'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "interface ProcessE...
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 792 -First 120'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"launchMessage\\(\...
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 640 -First 40'
+I’m editing the tests first so the change is pinned down before I touch the runner. The service coverage will define the retry semantics, and the UI regression will verify that `Play` keeps moving after a transient first failure.
+The regression tests are in place. I’m running just the new service/UI slices now to confirm the current runner fails them before I change the execution path.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd -Dtest=Active...
+
+[91m[Error: At line:2 char:121
++ ... leStoryRetriesOnceAutomaticallyAndPassesStoryOnSecondAttempt,ActivePr ...
++                                                                 ~
+Missing argument in parameter list.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingArgument
+ 
+][0m
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd \"-Dtest=Acti...
+
+[91m[Error: [INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------------< net.uberfoo.ai:ralphy >------------------------
+[INFO] Building ralphy 1.0-SNAPSHOT
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- jacoco-maven-plugin:0.8.14:prepare-agent (default) @ ralphy ---
+[INFO] argLine set to -javaagent:C:\\Users\\james\\IdeaProjects\\ralphy\\.\\.m2\\repository\\org\\jacoco\\org.jacoco.agent\\0.8.14\\org.jacoco.agent-0.8.14-runtime.jar=destfi][0m
+I’m editing `ActiveProjectService` now. The retry will live in the service, not the controller, so one logical story run can persist two separate queued/running/final attempts while the UI loop code stays mostly untouched.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "MAX_AUTOMATIC_ATTE...
+The service change is in. I’m rerunning the focused tests now to catch compile issues and to see whether the UI path needs any follow-up beyond the service-level retry.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd \"-Dtest=Acti...
+
+[91m[Error: [INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------------< net.uberfoo.ai:ralphy >------------------------
+[INFO] Building ralphy 1.0-SNAPSHOT
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- jacoco-maven-plugin:0.8.14:prepare-agent (default) @ ralphy ---
+[INFO] argLine set to -javaagent:C:\\Users\\james\\IdeaProjects\\ralphy\\.\\.m2\\repository\\org\\jacoco\\org.jacoco.agent\\0.8.14\\org.jacoco.agent-0.8.14-runtime.jar=destfi][0m
+[94m[shell][0m $ $line++ } | Select-Object -Skip 180 -First 20'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1580 -First 40'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 1620 -First 40'
+The service tests are green, so the remaining issue is the JavaFX regression harness. I’m validating the flaky fake-Codex script separately to see whether the timeout is a real UI bug or just a brittle test condition.
+[94m[shell][0m $ Write-Output '{\\\"event\\\":\\\"assistant_message.completed\\\",\\\"role\\\":\\\"assistant\\\",\\\"...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"waitUntil\\(\" sr...
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Skip 248 -First 28'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd \"-Dtest=Acti...
+The focused regressions are green. I’m doing a quick diff review now, then I’ll run the full Maven gate and update `.ralph-tui/progress.md` with the implementation notes and the reusable pattern.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --stat'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff -- src/main/java...
+I’ve validated the code path and the regression coverage. Before the full gate, I’m updating the project log and checking whether the Windows smoke checklist needs a small note for the new retry behavior so the repo’s execution docs stay current.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "Play|Retry|Pause|E...
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path 'docs/w...
+The feature and regressions are in place, and the progress log is updated. I’m running the full required gate now: `.\mvnw.cmd clean verify jacoco:report`.
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command ".\\mvnw.cmd clean verify ...
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Last 30'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -First 40'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "US-032" .ralph-tui...
+[94m[shell][0m $ $line++ } | Select-Object -Skip 48 -First 26'
+[94m[shell][0m $ $line++ } | Select-Object -Last 25'
+[94m[shell][0m $ Get-Content "'$path | Select-Object -Last 18'
+[94m[shell][0m $ "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "US-032" .ralph-tui...
+Implemented automatic one-time retry in [ActiveProjectService.java](C:/Users/james/IdeaProjects/ralphy/src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java). A failed story now gets one immediate second attempt with a fresh run ID and persisted queued/running/finalized state; if that retry also fails, the run stops, the story remains `FAILED`, and it stays resumable later through the existing retry flow after reopen. I added coverage in [ActiveProjectServiceTest.java](C:/Users/james/IdeaProjects/ralphy/src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java) and [AppShellUiTest.java](C:/Users/james/IdeaProjects/ralphy/src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java), updated [windows-smoke-checklist.md](C:/Users/james/IdeaProjects/ralphy/docs/windows-smoke-checklist.md), and appended the required entry in [progress.md](C:/Users/james/IdeaProjects/ralphy/.ralph-tui/progress.md).
+
+Verification: `.\mvnw.cmd clean verify jacoco:report` passed with 83 tests. I updated the smoke checklist but did not run a manual Windows smoke session in this turn.
+
+<promise>COMPLETE</promise>

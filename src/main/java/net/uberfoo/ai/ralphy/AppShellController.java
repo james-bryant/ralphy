@@ -1,16 +1,24 @@
 package net.uberfoo.ai.ralphy;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
+import javafx.geometry.Bounds;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.RadioButton;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.Node;
+import javafx.scene.Parent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -22,12 +30,21 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 public class AppShellController {
+    private static final ObjectMapper RUN_OUTPUT_OBJECT_MAPPER = new ObjectMapper();
+    private static final double DEFAULT_RUN_OUTPUT_VIEWPORT_HEIGHT = 560.0;
+    private static final double STRUCTURED_RUN_OUTPUT_VIEWPORT_EXTRA_HEIGHT = 160.0;
+    private static final double SCROLL_BOTTOM_PIN_THRESHOLD_PX = 48.0;
     private static final String ACTIVE_NAV_STYLE_CLASS = "shell-nav-button-active";
     private static final String ACTIVE_INTERVIEW_STEP_STYLE_CLASS = "interview-step-button-active";
     private static final String COMPLETE_INTERVIEW_STEP_STYLE_CLASS = "interview-step-button-complete";
@@ -61,7 +78,7 @@ public class AppShellController {
     private static final String NO_ACTIVE_PRD_INTERVIEW_SUMMARY =
             "Open or create a repository to start a PRD interview draft.";
     private static final String NO_ACTIVE_PRD_INTERVIEW_PROMPT =
-            "Choose or restore an active repository before answering sequenced PRD interview questions.";
+            "Choose or restore an active repository before starting the prompt-first PRD planning workflow.";
     private static final String PRD_INTERVIEW_DRAFT_LOCATION_DETAIL =
             "Draft answers are stored per project in .ralph-tui/project-metadata.json.";
     private static final String PRD_INTERVIEW_UNSAVED_CHANGES_MESSAGE =
@@ -102,6 +119,21 @@ public class AppShellController {
     private static final String NO_PERSISTED_RUN_OUTPUT_SUMMARY = "No run output yet";
     private static final String NO_PERSISTED_RUN_OUTPUT_DETAIL =
             "Start a story to stream live Codex output or reopen a completed run.";
+    private static final String NO_ACTIVE_RUN_HISTORY_SUMMARY = "No active project";
+    private static final String NO_ACTIVE_RUN_HISTORY_DETAIL =
+            "Open a repository before reviewing persisted story attempts and artifacts.";
+    private static final String NO_PERSISTED_RUN_HISTORY_SUMMARY = "No run history yet";
+    private static final String NO_PERSISTED_RUN_HISTORY_DETAIL =
+            "Start a story to build persisted attempt history for this project.";
+    private static final String NO_SELECTED_HISTORY_ARTIFACT_SUMMARY = "No history artifact selected";
+    private static final String NO_SELECTED_HISTORY_ARTIFACT_DETAIL =
+            "Choose a stored prompt, log, or summary from the run history list.";
+    private static final String MISSING_HISTORY_ARTIFACT_MESSAGE =
+            "The selected artifact could not be found on disk.";
+    private static final String INVALID_HISTORY_ARTIFACT_MESSAGE =
+            "The selected artifact path is invalid and could not be opened.";
+    private static final String UNREADABLE_HISTORY_ARTIFACT_MESSAGE =
+            "The selected artifact could not be read.";
     private static final String PENDING_ASSISTANT_SUMMARY_MESSAGE =
             "Waiting for the final assistant summary. Switch to Raw Output to follow the live stream.";
     private static final String PENDING_RAW_OUTPUT_MESSAGE = "Waiting for Codex to emit live output...";
@@ -109,6 +141,7 @@ public class AppShellController {
             "No final assistant summary is stored for this run.";
     private static final String MISSING_RAW_OUTPUT_MESSAGE = "No raw output is stored for this run.";
     private static final String STDERR_SECTION_HEADER = "[stderr]";
+    private static final int COMMAND_OUTPUT_PREVIEW_LINE_COUNT = 5;
     private static final ShellSection PROJECTS_SECTION = new ShellSection(
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
@@ -130,6 +163,8 @@ public class AppShellController {
     private final PresetCatalogService presetCatalogService;
     private final PrdMarkdownGenerator prdMarkdownGenerator;
     private final PrdInterviewService prdInterviewService;
+    private final PrdPlannerService prdPlannerService;
+    private final ExecutionAgentModelCatalogService executionAgentModelCatalogService;
     private final MarkdownPrdFileChooser markdownPrdFileChooser;
     private final PrdJsonFileChooser prdJsonFileChooser;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
@@ -137,21 +172,36 @@ public class AppShellController {
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
     private final ToggleGroup presetCatalogToggleGroup = new ToggleGroup();
     private final ToggleGroup runOutputViewToggleGroup = new ToggleGroup();
+    private final Object liveRunOutputLock = new Object();
+    private final StringBuilder liveRunOutputBuffer = new StringBuilder();
+    private final StringBuilder pendingLiveRunOutputDelta = new StringBuilder();
     private final List<Button> prdInterviewQuestionButtons = new ArrayList<>();
+    private PresetUseCase lastExecutionWorkflowPreset = PresetUseCase.STORY_IMPLEMENTATION;
     private PrdInterviewDraft currentPrdInterviewDraft = PrdInterviewDraft.empty();
+    private PrdPlanningSession currentPrdPlanningSession = PrdPlanningSession.empty();
+    private Button activeWorkspaceNavButton;
     private int currentPrdInterviewQuestionIndex;
     private boolean renderingPrdInterview;
     private boolean renderingPrdDocument;
     private boolean prdDocumentDirty;
+    private boolean prdPlannerRequestInProgress;
     private boolean singleStorySessionInProgress;
     private boolean pauseRequested;
     private boolean executionPaused;
+    private boolean liveRunOutputHasStderrSection;
+    private boolean liveRunOutputFlushScheduled;
+    private boolean liveRawOutputTextAreaInitialized;
+    private boolean structuredRunOutputPinnedToBottom = true;
     private String singleStorySessionTaskId;
     private String pausedSessionTaskId;
     private PresetUseCase activeSessionPresetUseCase;
+    private String pendingPrdPlannerUserMessage = "";
     private String prdDocumentEditorBaseline = "";
     private String prdDocumentLineSeparator = System.lineSeparator();
+    private final Map<String, StructuredCommandOutputViewState> structuredRunOutputCommandViewStates = new HashMap<>();
     private RunOutputPresentationState runOutputPresentationState = RunOutputPresentationState.empty();
+    private RunHistoryArtifactViewerState runHistoryArtifactViewerState = RunHistoryArtifactViewerState.empty();
+    private List<ExecutionAgentModelCatalogService.ProviderSupport> executionAgentProviderSupports = List.of();
 
     @FXML
     private Label activeProjectNameLabel;
@@ -178,7 +228,24 @@ public class AppShellController {
     private Label executionOverviewHeadlineLabel;
 
     @FXML
+    private ScrollPane workspaceScrollPane;
+    @FXML
+    private VBox workspacePane;
+
+    @FXML
+    private HBox projectsWorkspaceRow;
+
+    @FXML
     private Label executionProfileMessageLabel;
+
+    @FXML
+    private ComboBox<ExecutionAgentProviderChoice> executionProviderComboBox;
+
+    @FXML
+    private ComboBox<ExecutionModelChoice> executionModelComboBox;
+
+    @FXML
+    private Label executionModelStatusLabel;
 
     @FXML
     private Label executionProfileSummaryLabel;
@@ -188,6 +255,15 @@ public class AppShellController {
 
     @FXML
     private Label singleStorySessionMessageLabel;
+
+    @FXML
+    private HBox singleStorySessionProgressRow;
+
+    @FXML
+    private ProgressIndicator singleStorySessionProgressIndicator;
+
+    @FXML
+    private Label singleStorySessionProgressLabel;
 
     @FXML
     private Label singleStorySessionSummaryLabel;
@@ -232,10 +308,43 @@ public class AppShellController {
     private RadioButton rawOutputViewRadioButton;
 
     @FXML
+    private RadioButton structuredRunOutputViewRadioButton;
+
+    @FXML
     private Label runOutputSummaryLabel;
 
     @FXML
     private TextArea runOutputTextArea;
+
+    @FXML
+    private ScrollPane runOutputStructuredScrollPane;
+
+    @FXML
+    private VBox runOutputStructuredContainer;
+
+    @FXML
+    private VBox runOutputCard;
+
+    @FXML
+    private VBox runHistoryEntriesContainer;
+
+    @FXML
+    private VBox runHistoryCard;
+
+    @FXML
+    private Label runHistorySummaryLabel;
+
+    @FXML
+    private Label runHistoryDetailLabel;
+
+    @FXML
+    private Label runHistoryArtifactSummaryLabel;
+
+    @FXML
+    private TextField runHistoryArtifactPathField;
+
+    @FXML
+    private TextArea runHistoryArtifactTextArea;
 
     @FXML
     private Label prdValidationDetailLabel;
@@ -286,6 +395,9 @@ public class AppShellController {
     private Label presetAssumptionsValueLabel;
 
     @FXML
+    private VBox livePrdPlannerCard;
+
+    @FXML
     private VBox presetCatalogCard;
 
     @FXML
@@ -299,6 +411,45 @@ public class AppShellController {
 
     @FXML
     private TextArea presetPromptPreviewArea;
+
+    @FXML
+    private Button prdPlannerApplyDraftButton;
+
+    @FXML
+    private Button prdPlannerClearButton;
+
+    @FXML
+    private ComboBox<ExecutionModelChoice> prdPlannerModelComboBox;
+
+    @FXML
+    private Label prdPlannerDetailLabel;
+
+    @FXML
+    private TextArea prdPlannerInputArea;
+
+    @FXML
+    private Label prdPlannerMessageLabel;
+
+    @FXML
+    private Label prdPlannerProgressLabel;
+
+    @FXML
+    private Label prdPlannerModelStatusLabel;
+
+    @FXML
+    private HBox prdPlannerProgressRow;
+
+    @FXML
+    private ProgressIndicator prdPlannerProgressIndicator;
+
+    @FXML
+    private Button prdPlannerSendButton;
+
+    @FXML
+    private Label prdPlannerSummaryLabel;
+
+    @FXML
+    private TextArea prdPlannerTranscriptArea;
 
     @FXML
     private RadioButton prdCreationPresetRadioButton;
@@ -382,6 +533,9 @@ public class AppShellController {
     private Label statusLabel;
 
     @FXML
+    private VBox singleStorySessionCard;
+
+    @FXML
     private RadioButton runSummaryPresetRadioButton;
 
     @FXML
@@ -404,6 +558,9 @@ public class AppShellController {
 
     @FXML
     private Button pauseSingleStoryButton;
+
+    @FXML
+    private VBox storyProgressDashboardCard;
 
     @FXML
     private Button runNativePreflightButton;
@@ -452,6 +609,8 @@ public class AppShellController {
                               PresetCatalogService presetCatalogService,
                               PrdMarkdownGenerator prdMarkdownGenerator,
                               PrdInterviewService prdInterviewService,
+                              PrdPlannerService prdPlannerService,
+                              ExecutionAgentModelCatalogService executionAgentModelCatalogService,
                               MarkdownPrdFileChooser markdownPrdFileChooser,
                               PrdJsonFileChooser prdJsonFileChooser,
                               RepositoryDirectoryChooser repositoryDirectoryChooser,
@@ -461,6 +620,8 @@ public class AppShellController {
         this.presetCatalogService = presetCatalogService;
         this.prdMarkdownGenerator = prdMarkdownGenerator;
         this.prdInterviewService = prdInterviewService;
+        this.prdPlannerService = prdPlannerService;
+        this.executionAgentModelCatalogService = executionAgentModelCatalogService;
         this.markdownPrdFileChooser = markdownPrdFileChooser;
         this.prdJsonFileChooser = prdJsonFileChooser;
         this.repositoryDirectoryChooser = repositoryDirectoryChooser;
@@ -483,9 +644,19 @@ public class AppShellController {
         nativePreflightRemediationSection.managedProperty().bind(nativePreflightRemediationSection.visibleProperty());
         wslPreflightRemediationSection.managedProperty().bind(wslPreflightRemediationSection.visibleProperty());
         prdInterviewDraftStateLabel.managedProperty().bind(prdInterviewDraftStateLabel.visibleProperty());
+        prdPlannerMessageLabel.managedProperty().bind(prdPlannerMessageLabel.visibleProperty());
+        prdPlannerProgressRow.managedProperty().bind(prdPlannerProgressRow.visibleProperty());
+        prdPlannerModelStatusLabel.managedProperty().bind(prdPlannerModelStatusLabel.visibleProperty());
         prdDocumentStateLabel.managedProperty().bind(prdDocumentStateLabel.visibleProperty());
         prdValidationErrorsLabel.managedProperty().bind(prdValidationErrorsLabel.visibleProperty());
         singleStorySessionMessageLabel.managedProperty().bind(singleStorySessionMessageLabel.visibleProperty());
+        executionModelStatusLabel.managedProperty().bind(executionModelStatusLabel.visibleProperty());
+        singleStorySessionProgressRow.managedProperty().bind(singleStorySessionProgressRow.visibleProperty());
+        prdPlannerTranscriptArea.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (activeProjectService.activeProject().isPresent()) {
+                scrollPrdPlannerTranscriptToBottom();
+            }
+        });
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
@@ -493,21 +664,51 @@ public class AppShellController {
         );
         assistantSummaryViewRadioButton.setToggleGroup(runOutputViewToggleGroup);
         rawOutputViewRadioButton.setToggleGroup(runOutputViewToggleGroup);
+        structuredRunOutputViewRadioButton.setToggleGroup(runOutputViewToggleGroup);
         runOutputViewToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
                 renderRunOutputView()
         );
-        assistantSummaryViewRadioButton.setSelected(true);
         configurePresetCatalog();
+        configureExecutionAgentSelection();
+        configurePrdPlannerModelSelection();
         configurePrdInterview();
         configurePrdDocumentEditor();
+        setSectionVisible(prdCreationPresetRadioButton, false);
+        prdPlannerTranscriptArea.setEditable(false);
+        prdPlannerProgressIndicator.setProgress(ProgressIndicator.INDETERMINATE_PROGRESS);
+        singleStorySessionProgressIndicator.setProgress(ProgressIndicator.INDETERMINATE_PROGRESS);
         prdDocumentPathField.setEditable(false);
+        runOutputTextArea.managedProperty().bind(runOutputTextArea.visibleProperty());
         runOutputTextArea.setEditable(false);
+        runOutputStructuredScrollPane.managedProperty().bind(runOutputStructuredScrollPane.visibleProperty());
+        runOutputStructuredScrollPane.vvalueProperty().addListener((observable, oldValue, newValue) ->
+                updateStructuredRunOutputPinnedToBottomState()
+        );
+        runOutputStructuredScrollPane.viewportBoundsProperty().addListener((observable, oldValue, newValue) -> {
+            if (selectedRunOutputView() == RunOutputView.STRUCTURED_OUTPUT
+                    && runOutputPresentationState.active()
+                    && structuredRunOutputPinnedToBottom) {
+                scrollStructuredRunOutputToBottom();
+            }
+        });
+        runOutputStructuredContainer.boundsInLocalProperty().addListener((observable, oldValue, newValue) -> {
+            if (selectedRunOutputView() == RunOutputView.STRUCTURED_OUTPUT
+                    && runOutputPresentationState.active()
+                    && structuredRunOutputPinnedToBottom) {
+                scrollStructuredRunOutputToBottom();
+            }
+        });
+        configureRunOutputViewportSizing();
+        runHistoryArtifactPathField.setEditable(false);
+        runHistoryArtifactTextArea.setEditable(false);
         nativeExecutionProfileRadioButton.setSelected(true);
         renderActiveProject(activeProjectService.activeProject().orElse(null));
         setProjectValidationMessage(activeProjectService.startupRecoveryMessage());
         setExecutionProfileMessage("");
         setNativePreflightMessage("");
         setWslPreflightMessage("");
+        setPrdPlannerMessage("");
+        showProjects();
     }
 
     @FXML
@@ -667,6 +868,7 @@ public class AppShellController {
             renderPrdValidation();
             renderSingleStorySession();
             renderStoryProgressDashboard();
+            renderRunHistory();
         }
         if (!importResult.successful()) {
             setPrdDocumentState(importResult.message());
@@ -707,6 +909,7 @@ public class AppShellController {
             renderPrdValidation();
             renderSingleStorySession();
             renderStoryProgressDashboard();
+            renderRunHistory();
         }
         setPrdDocumentState(formatPrdJsonImportMessage(importResult));
     }
@@ -772,8 +975,150 @@ public class AppShellController {
         renderPrdValidation();
         renderSingleStorySession();
         renderStoryProgressDashboard();
+        renderRunHistory();
         setPrdDocumentState("Generated PRD saved to " + saveResult.path()
                 + ". Edit it below and save when you refine the plan.");
+    }
+
+    @FXML
+    private void sendPrdPlannerMessage() {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            setPrdPlannerMessage(NO_ACTIVE_PRD_INTERVIEW_SUMMARY);
+            return;
+        }
+        if (prdPlannerRequestInProgress) {
+            return;
+        }
+
+        String userMessage = prdPlannerInputArea.getText();
+        if (!hasText(userMessage)) {
+            setPrdPlannerMessage("Enter a prompt or clarification before sending it to the planner.");
+            return;
+        }
+
+        ExecutionProfile executionProfile = activeProjectService.executionProfile()
+                .orElse(ExecutionProfile.nativePowerShell());
+        PrdPlanningSession baseSession = currentPrdPlanningSession;
+        pendingPrdPlannerUserMessage = userMessage.trim();
+        currentPrdPlanningSession = baseSession.appendUserMessage(pendingPrdPlannerUserMessage);
+        prdPlannerRequestInProgress = true;
+        setPrdPlannerMessage("");
+        prdPlannerInputArea.clear();
+        renderPrdPlannerRequestState();
+        ensurePrdPlannerVisible();
+        CompletableFuture.supplyAsync(
+                        () -> prdPlannerService.continueConversation(
+                                activeProject.get(),
+                                executionProfile,
+                                baseSession,
+                                pendingPrdPlannerUserMessage,
+                                selectedPrdPlannerModelId(),
+                                CodexLauncherService.RunOutputListener.noop()
+                        ),
+                        backgroundExecutor
+                )
+                .whenComplete((result, throwable) -> Platform.runLater(() ->
+                        handlePrdPlannerCompletion(result, throwable)
+                ));
+    }
+
+    @FXML
+    private void applyPlannerPrdDraft() {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            setPrdPlannerMessage(NO_ACTIVE_PRD_DOCUMENT_MESSAGE);
+            return;
+        }
+        if (!currentPrdPlanningSession.hasLatestPrdMarkdown()) {
+            setPrdPlannerMessage("The planner has not produced a PRD draft yet.");
+            return;
+        }
+        if (prdDocumentDirty) {
+            setPrdDocumentState(PRD_DOCUMENT_SAVE_REQUIRED_BEFORE_IMPORT_MESSAGE);
+            return;
+        }
+
+        ActiveProjectService.ActivePrdSaveResult saveResult =
+                activeProjectService.saveActivePrd(currentPrdPlanningSession.latestPrdMarkdown());
+        if (!saveResult.successful()) {
+            setPrdPlannerMessage(saveResult.message());
+            return;
+        }
+
+        if (!singleStorySessionInProgress && !pauseRequested && !executionPaused) {
+            activeSessionPresetUseCase = null;
+            lastExecutionWorkflowPreset = PresetUseCase.STORY_IMPLEMENTATION;
+            selectWorkflowPreset(PresetUseCase.STORY_IMPLEMENTATION);
+        }
+
+        renderGeneratedPrd(activeProject.get());
+        renderPrdValidation();
+        renderSingleStorySession();
+        renderStoryProgressDashboard();
+        renderRunHistory();
+        ensurePrdDocumentVisible();
+        setPrdPlannerMessage("Applied the latest planner draft to " + saveResult.path() + ".");
+    }
+
+    @FXML
+    private void clearPrdPlannerSession() {
+        Optional<ActiveProject> activeProject = activeProjectService.activeProject();
+        if (activeProject.isEmpty()) {
+            setPrdPlannerMessage(NO_ACTIVE_PRD_INTERVIEW_SUMMARY);
+            return;
+        }
+        ActiveProjectService.PrdPlanningSessionSaveResult saveResult =
+                activeProjectService.savePrdPlanningSession(PrdPlanningSession.empty());
+        if (!saveResult.successful()) {
+            setPrdPlannerMessage(saveResult.message());
+            return;
+        }
+        currentPrdPlanningSession = saveResult.session();
+        pendingPrdPlannerUserMessage = "";
+        prdPlannerInputArea.clear();
+        renderPrdPlannerPreservingWorkspaceScroll(currentPrdPlanningSession);
+        ensurePrdPlannerVisible();
+        setPrdPlannerMessage("Planner session cleared.");
+    }
+
+    private void handlePrdPlannerCompletion(PrdPlannerService.PlannerTurnResult result, Throwable throwable) {
+        prdPlannerRequestInProgress = false;
+        pendingPrdPlannerUserMessage = "";
+        if (throwable != null) {
+            setPrdPlannerMessage("Planner request failed: " + throwable.getMessage());
+            renderPrdPlannerPreservingWorkspaceScroll(currentPrdPlanningSession);
+            return;
+        }
+        if (result == null) {
+            setPrdPlannerMessage("Planner request failed.");
+            renderPrdPlannerPreservingWorkspaceScroll(currentPrdPlanningSession);
+            return;
+        }
+
+        if (result.session() != null) {
+            ActiveProjectService.PrdPlanningSessionSaveResult saveResult =
+                    activeProjectService.savePrdPlanningSession(result.session());
+            if (saveResult.successful() && saveResult.session() != null) {
+                currentPrdPlanningSession = saveResult.session();
+            } else if (!saveResult.successful()) {
+                setPrdPlannerMessage(saveResult.message());
+            }
+        }
+
+        if (!result.successful()) {
+            renderPrdPlannerPreservingWorkspaceScroll(currentPrdPlanningSession);
+            setPrdPlannerMessage(result.message());
+            return;
+        }
+
+        prdPlannerInputArea.clear();
+        renderPrdPlannerPreservingWorkspaceScroll(currentPrdPlanningSession);
+        if (hasText(result.latestPrdMarkdown())) {
+            setPrdPlannerMessage("Planner produced a PRD draft. Review it in the transcript or apply it to the editor.");
+        } else {
+            setPrdPlannerMessage("Planner replied with the next clarification round.");
+        }
     }
 
     @FXML
@@ -787,10 +1132,41 @@ public class AppShellController {
     }
 
     private void activateSection(ShellSection section, Button activeButton) {
+        activeWorkspaceNavButton = activeButton;
         workspaceTitleLabel.setText(section.title());
         workspacePlaceholderLabel.setText(section.workspaceText());
         statusLabel.setText(section.statusText());
         updateActiveNavigationButton(activeButton);
+        updateWorkspaceSectionVisibility(activeButton);
+        syncWorkflowPresetForSection(activeButton);
+    }
+
+    private boolean updateWorkspaceSectionVisibility(Button activeButton) {
+        boolean projectsSectionActive = activeButton == projectsNavButton;
+        boolean prdEditorSectionActive = activeButton == prdEditorNavButton;
+        boolean executionSectionActive = activeButton == executionNavButton;
+
+        boolean changed = false;
+        changed |= setSectionVisible(projectsWorkspaceRow, projectsSectionActive);
+        changed |= setSectionVisible(presetCatalogCard, executionSectionActive);
+        changed |= setSectionVisible(livePrdPlannerCard, prdEditorSectionActive);
+        changed |= setSectionVisible(prdInterviewCard, prdEditorSectionActive && shouldShowLegacyPrdInterview());
+        changed |= setSectionVisible(prdDocumentCard, prdEditorSectionActive);
+        changed |= setSectionVisible(singleStorySessionCard, executionSectionActive);
+        changed |= setSectionVisible(runOutputCard, executionSectionActive);
+        changed |= setSectionVisible(runHistoryCard, executionSectionActive);
+        changed |= setSectionVisible(storyProgressDashboardCard, executionSectionActive);
+        return changed;
+    }
+
+    private boolean setSectionVisible(Node section, boolean visible) {
+        if (section == null) {
+            return false;
+        }
+        boolean changed = section.isVisible() != visible || section.isManaged() != visible;
+        section.setVisible(visible);
+        section.setManaged(visible);
+        return changed;
     }
 
     private Path defaultCreateParentDirectory() {
@@ -866,8 +1242,10 @@ public class AppShellController {
             singleStorySessionInProgress = false;
             pauseRequested = false;
             singleStorySessionTaskId = null;
+            resetLiveRunOutputBuffer();
             clearPausedSessionState();
             runOutputPresentationState = RunOutputPresentationState.empty();
+            runHistoryArtifactViewerState = RunHistoryArtifactViewerState.empty();
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
             activeProjectStatusLabel.setText(NO_ACTIVE_PROJECT_STATUS);
@@ -879,12 +1257,15 @@ public class AppShellController {
             renderSingleStorySession();
             renderStoryProgressDashboard();
             renderRunOutputView();
+            renderRunHistory();
+            renderPrdPlanner(null);
             renderPrdInterview(null);
             renderGeneratedPrd(null);
             return;
         }
 
         refreshRunOutputPresentationState();
+        resetRunHistoryArtifactViewerIfProjectChanged(activeProject);
         activeProjectNameLabel.setText(activeProject.displayName());
         activeProjectPathLabel.setText(activeProject.displayPath());
         activeProjectStatusLabel.setText(activeProject.displayName());
@@ -896,6 +1277,8 @@ public class AppShellController {
         renderSingleStorySession();
         renderStoryProgressDashboard();
         renderRunOutputView();
+        renderRunHistory();
+        renderPrdPlanner(activeProjectService.prdPlanningSession().orElse(PrdPlanningSession.empty()));
         renderPrdInterview(activeProjectService.prdInterviewDraft().orElse(PrdInterviewDraft.empty()));
         renderGeneratedPrd(activeProject);
     }
@@ -953,8 +1336,15 @@ public class AppShellController {
         PresetUseCase sessionPresetUseCase = sessionPresetUseCase();
         ActiveProjectService.SingleStorySessionAvailability availability =
                 activeProjectService.singleStorySessionAvailability(sessionPresetUseCase);
+        ExecutionAgentSelection executionAgentSelection = selectedExecutionAgentSelection();
+        boolean providerSupported = executionAgentSelection.provider().executionSupported();
+        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
 
-        if (pauseRequested && singleStorySessionInProgress && hasText(singleStorySessionTaskId)) {
+        if (!providerSupported && !singleStorySessionInProgress) {
+            singleStorySessionSummaryLabel.setText("Provider not supported");
+            singleStorySessionDetailLabel.setText(executionAgentSelection.provider().displayName()
+                    + " execution is not implemented yet. Switch provider to Codex.");
+        } else if (pauseRequested && singleStorySessionInProgress && hasText(singleStorySessionTaskId)) {
             singleStorySessionSummaryLabel.setText("Pause requested");
             singleStorySessionDetailLabel.setText(singleStorySessionTaskId
                     + " is still running. Ralphy will stop before the next story starts.");
@@ -976,9 +1366,21 @@ public class AppShellController {
         startSingleStoryButton.setText(executionPaused
                 ? sessionResumeLabel(sessionPresetUseCase)
                 : sessionActionLabel(sessionPresetUseCase));
-        startSingleStoryButton.setDisable(!availability.startable() || singleStorySessionInProgress);
+        startSingleStoryButton.setDisable(!availability.startable()
+                || singleStorySessionInProgress
+                || !providerSupported);
         pauseSingleStoryButton.setText(pauseRequested ? "Pause Requested" : "Pause");
         pauseSingleStoryButton.setDisable(!singleStorySessionInProgress || pauseRequested);
+        executionProviderComboBox.setDisable(!activeProjectPresent || singleStorySessionInProgress);
+        executionModelComboBox.setDisable(!activeProjectPresent || singleStorySessionInProgress);
+        singleStorySessionProgressRow.setVisible(singleStorySessionInProgress);
+        if (singleStorySessionInProgress && hasText(singleStorySessionTaskId)) {
+            singleStorySessionProgressLabel.setText(pauseRequested
+                    ? "Finishing " + singleStorySessionTaskId + " before pausing..."
+                    : "Codex is running " + singleStorySessionTaskId + "...");
+        } else {
+            singleStorySessionProgressLabel.setText("");
+        }
     }
 
     private void renderStoryProgressDashboard() {
@@ -995,19 +1397,603 @@ public class AppShellController {
         storyProgressPausedCountLabel.setText(Integer.toString(dashboard.pausedCount()));
     }
 
+    private void renderRunHistory() {
+        ActiveProjectService.RunHistoryReport runHistoryReport = activeProjectService.runHistory();
+        runHistorySummaryLabel.setText(runHistoryReport.summary());
+        runHistoryDetailLabel.setText(runHistoryReport.detail());
+        runHistoryEntriesContainer.getChildren().setAll(runHistoryReport.entries().stream()
+                .map(this::buildRunHistoryEntryCard)
+                .toList());
+
+        if (!runHistoryReport.available() || runHistoryReport.entries().isEmpty()) {
+            runHistoryArtifactViewerState = RunHistoryArtifactViewerState.empty();
+        }
+        renderRunHistoryArtifactViewer();
+    }
+
+    private void renderRunHistoryArtifactViewer() {
+        runHistoryArtifactSummaryLabel.setText(runHistoryArtifactViewerState.summary());
+        runHistoryArtifactPathField.setText(runHistoryArtifactViewerState.path());
+        runHistoryArtifactTextArea.setText(runHistoryArtifactViewerState.content());
+    }
+
+    private void resetRunHistoryArtifactViewerIfProjectChanged(ActiveProject activeProject) {
+        if (activeProject == null || !hasText(runHistoryArtifactViewerState.path())) {
+            return;
+        }
+
+        Optional<Path> selectedArtifactPath = toPath(runHistoryArtifactViewerState.path());
+        if (selectedArtifactPath.isEmpty()
+                || !selectedArtifactPath.get().startsWith(activeProject.ralphyDirectoryPath())) {
+            runHistoryArtifactViewerState = RunHistoryArtifactViewerState.empty();
+        }
+    }
+
+    private void renderPrdPlanner(PrdPlanningSession session) {
+        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
+        livePrdPlannerCard.setDisable(!activeProjectPresent);
+        boolean plannerRequestActive = prdPlannerRequestInProgress;
+        prdPlannerTranscriptArea.setDisable(!activeProjectPresent);
+        prdPlannerInputArea.setDisable(!activeProjectPresent || plannerRequestActive);
+        prdPlannerModelComboBox.setDisable(!activeProjectPresent || plannerRequestActive);
+        prdPlannerSendButton.setDisable(!activeProjectPresent || plannerRequestActive);
+        prdPlannerProgressRow.setVisible(activeProjectPresent && prdPlannerRequestInProgress);
+        prdPlannerProgressLabel.setText(prdPlannerRequestInProgress ? "Waiting for Codex to continue the planner..." : "");
+
+        if (!activeProjectPresent) {
+            currentPrdPlanningSession = PrdPlanningSession.empty();
+            pendingPrdPlannerUserMessage = "";
+            prdPlannerSummaryLabel.setText(NO_ACTIVE_PRD_INTERVIEW_SUMMARY);
+            prdPlannerDetailLabel.setText(NO_ACTIVE_PRD_INTERVIEW_PROMPT);
+            prdPlannerTranscriptArea.clear();
+            prdPlannerInputArea.clear();
+            prdPlannerApplyDraftButton.setDisable(true);
+            prdPlannerClearButton.setDisable(true);
+            return;
+        }
+
+        currentPrdPlanningSession = session == null ? PrdPlanningSession.empty() : session;
+        prdPlannerTranscriptArea.setText(formatPrdPlannerTranscript(currentPrdPlanningSession));
+        scrollPrdPlannerTranscriptToBottom();
+        prdPlannerSendButton.setText(currentPrdPlanningSession.hasMessages() ? "Send Reply" : "Start Planner");
+        prdPlannerApplyDraftButton.setDisable(
+                plannerRequestActive || !currentPrdPlanningSession.hasLatestPrdMarkdown()
+        );
+        prdPlannerClearButton.setDisable(
+                plannerRequestActive || !currentPrdPlanningSession.hasMessages()
+        );
+
+        if (!currentPrdPlanningSession.hasMessages()) {
+            prdPlannerSummaryLabel.setText("Planner ready | 0/100");
+            prdPlannerDetailLabel.setText(
+                    "Send a feature prompt to start a live Codex-backed PRD planning conversation."
+            );
+            return;
+        }
+
+        PlannerReadinessStatus readinessStatus = plannerReadinessStatus(currentPrdPlanningSession);
+        if (prdPlannerRequestInProgress) {
+            prdPlannerSummaryLabel.setText("Planner working | " + readinessStatus.score() + "/100");
+            prdPlannerDetailLabel.setText("The latest message has been sent. Waiting for Codex to respond.");
+            return;
+        }
+
+        if (currentPrdPlanningSession.hasLatestPrdMarkdown()) {
+            prdPlannerSummaryLabel.setText("Draft readiness | " + readinessStatus.score() + "/100");
+            prdPlannerDetailLabel.setText(readinessStatus.detail());
+            return;
+        }
+
+        prdPlannerSummaryLabel.setText("Clarification in progress | " + readinessStatus.score() + "/100");
+        prdPlannerDetailLabel.setText(readinessStatus.detail());
+    }
+
+    private String formatPrdPlannerTranscript(PrdPlanningSession session) {
+        if (session == null || !session.hasMessages()) {
+            return "No planner conversation yet. Start with a feature prompt.";
+        }
+
+        List<String> transcriptBlocks = new ArrayList<>();
+        for (PrdPlanningSession.Message message : session.messages()) {
+            transcriptBlocks.add(formatPrdPlannerTranscriptBlock(message.role(), message.createdAt(), message.content()));
+        }
+        if (prdPlannerRequestInProgress) {
+            transcriptBlocks.add(formatPrdPlannerTranscriptBlock(
+                    "assistant",
+                    "Waiting for Codex",
+                    "Planner is thinking..."
+            ));
+        }
+        return String.join(System.lineSeparator() + System.lineSeparator(), transcriptBlocks);
+    }
+
+    private String formatPrdPlannerTranscriptBlock(String role, String timestamp, String content) {
+        String participant = "user".equalsIgnoreCase(role) ? "You" : "Planner";
+        String normalizedTimestamp = hasText(timestamp) ? timestamp : "Pending";
+        return ("==== " + participant + " | " + normalizedTimestamp + " ===="
+                + System.lineSeparator()
+                + (content == null ? "" : content.trim())).trim();
+    }
+
+    private void scrollPrdPlannerTranscriptToBottom() {
+        prdPlannerTranscriptArea.positionCaret(prdPlannerTranscriptArea.getLength());
+        prdPlannerTranscriptArea.setScrollTop(Double.MAX_VALUE);
+        prdPlannerTranscriptArea.setScrollLeft(0);
+        Platform.runLater(() -> {
+            prdPlannerTranscriptArea.positionCaret(prdPlannerTranscriptArea.getLength());
+            prdPlannerTranscriptArea.setScrollTop(Double.MAX_VALUE);
+            prdPlannerTranscriptArea.setScrollLeft(0);
+            Platform.runLater(() -> {
+                prdPlannerTranscriptArea.positionCaret(prdPlannerTranscriptArea.getLength());
+                prdPlannerTranscriptArea.setScrollTop(Double.MAX_VALUE);
+                prdPlannerTranscriptArea.setScrollLeft(0);
+            });
+        });
+    }
+
+    private void renderPrdPlannerRequestState() {
+        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
+        livePrdPlannerCard.setDisable(!activeProjectPresent);
+        prdPlannerTranscriptArea.setDisable(!activeProjectPresent);
+        prdPlannerInputArea.setDisable(!activeProjectPresent || prdPlannerRequestInProgress);
+        prdPlannerModelComboBox.setDisable(!activeProjectPresent || prdPlannerRequestInProgress);
+        prdPlannerSendButton.setDisable(!activeProjectPresent || prdPlannerRequestInProgress);
+        prdPlannerProgressRow.setVisible(activeProjectPresent && prdPlannerRequestInProgress);
+        prdPlannerProgressLabel.setText(prdPlannerRequestInProgress
+                ? "Waiting for Codex to continue the planner..."
+                : "");
+        prdPlannerApplyDraftButton.setDisable(
+                prdPlannerRequestInProgress || !currentPrdPlanningSession.hasLatestPrdMarkdown()
+        );
+        prdPlannerClearButton.setDisable(
+                prdPlannerRequestInProgress || !currentPrdPlanningSession.hasMessages()
+        );
+    }
+
+    private void refreshWorkspaceSectionVisibility() {
+        if (activeWorkspaceNavButton == null) {
+            return;
+        }
+        if (workspaceScrollPane == null || workspacePane == null) {
+            updateWorkspaceSectionVisibility(activeWorkspaceNavButton);
+            return;
+        }
+        double offsetFromTop = captureScrollOffsetFromTop(workspaceScrollPane);
+        boolean visibilityChanged = updateWorkspaceSectionVisibility(activeWorkspaceNavButton);
+        if (!visibilityChanged) {
+            return;
+        }
+        restoreScrollOffsetFromTop(workspaceScrollPane, offsetFromTop);
+    }
+
+    private double captureScrollOffsetFromTop(ScrollPane scrollPane) {
+        if (scrollPane == null || scrollPane.getContent() == null) {
+            return 0.0;
+        }
+        double scrollableHeight = Math.max(
+                scrollPane.getContent().getLayoutBounds().getHeight() - scrollPane.getViewportBounds().getHeight(),
+                0.0
+        );
+        if (scrollableHeight <= 0.0) {
+            return 0.0;
+        }
+        return Math.max(scrollPane.getVvalue(), 0.0) * scrollableHeight;
+    }
+
+    private void restoreScrollOffsetFromTop(ScrollPane scrollPane, double offsetFromTop) {
+        if (scrollPane == null) {
+            return;
+        }
+        double normalizedOffset = Math.max(offsetFromTop, 0.0);
+        Platform.runLater(() -> Platform.runLater(() -> {
+            if (scrollPane.getContent() == null) {
+                return;
+            }
+            double scrollableHeight = Math.max(
+                    scrollPane.getContent().getLayoutBounds().getHeight() - scrollPane.getViewportBounds().getHeight(),
+                    0.0
+            );
+            if (scrollableHeight <= 0.0) {
+                scrollPane.setVvalue(0.0);
+                return;
+            }
+            scrollPane.setVvalue(Math.min(normalizedOffset / scrollableHeight, 1.0));
+        }));
+    }
+
+    private boolean shouldShowLegacyPrdInterview() {
+        return !prdPlannerRequestInProgress && !currentPrdPlanningSession.hasMessages();
+    }
+
+    private void syncWorkflowPresetForSection(Button activeButton) {
+        if (activeButton == prdEditorNavButton) {
+            return;
+        }
+
+        if (activeButton == executionNavButton) {
+            selectWorkflowPreset(preferredExecutionWorkflowPreset());
+            return;
+        }
+
+        renderPresetPreview(selectedPresetUseCase());
+    }
+
+    private void selectWorkflowPreset(PresetUseCase presetUseCase) {
+        RadioButton radioButton = workflowPresetRadioButton(presetUseCase);
+        if (radioButton == null) {
+            return;
+        }
+
+        if (presetCatalogToggleGroup.getSelectedToggle() == radioButton) {
+            renderPresetPreview(presetUseCase);
+            renderSingleStorySession();
+            return;
+        }
+
+        radioButton.setSelected(true);
+    }
+
+    private PresetUseCase preferredExecutionWorkflowPreset() {
+        if (activeSessionPresetUseCase == PresetUseCase.STORY_IMPLEMENTATION
+                || activeSessionPresetUseCase == PresetUseCase.RETRY_FIX
+                || activeSessionPresetUseCase == PresetUseCase.RUN_SUMMARY) {
+            return activeSessionPresetUseCase;
+        }
+        return lastExecutionWorkflowPreset;
+    }
+
+    private RadioButton workflowPresetRadioButton(PresetUseCase presetUseCase) {
+        return switch (presetUseCase) {
+            case PRD_CREATION -> prdCreationPresetRadioButton;
+            case STORY_IMPLEMENTATION -> storyImplementationPresetRadioButton;
+            case RETRY_FIX -> retryFixPresetRadioButton;
+            case RUN_SUMMARY -> runSummaryPresetRadioButton;
+        };
+    }
+
+    private PlannerReadinessStatus plannerReadinessStatus(PrdPlanningSession session) {
+        if (session == null || !session.hasMessages()) {
+            return new PlannerReadinessStatus(0, "Start with a feature prompt to begin the planning conversation.");
+        }
+
+        if (!session.hasLatestPrdMarkdown()) {
+            return conversationReadinessStatus(session);
+        }
+
+        return draftReadinessStatus(session);
+    }
+
+    private PlannerReadinessStatus conversationReadinessStatus(PrdPlanningSession session) {
+        String transcript = formatPrdPlannerTranscript(session).toLowerCase();
+        int score = 20;
+        if (session.messages().size() >= 2) {
+            score += 10;
+        }
+        if (session.messages().size() >= 4) {
+            score += 10;
+        }
+
+        List<String> missingTopics = new ArrayList<>();
+        if (containsAny(transcript, "quality gate", "quality gates", "must pass", "verify")) {
+            score += 20;
+        } else {
+            missingTopics.add("quality gates");
+        }
+        if (containsAny(transcript, "goal", "goals", "outcome", "success")) {
+            score += 15;
+        } else {
+            missingTopics.add("goals and success signals");
+        }
+        if (containsAny(transcript, "scope", "out of scope", "non-goal", "non goal", "boundary")) {
+            score += 15;
+        } else {
+            missingTopics.add("scope boundaries");
+        }
+        if (containsAny(transcript, "user story", "user stories", "target user", "persona", "who is this for")) {
+            score += 10;
+        } else {
+            missingTopics.add("users and stories");
+        }
+        if (containsAny(transcript, "integration", "existing", "repository", "fit with")) {
+            score += 10;
+        } else {
+            missingTopics.add("integration points");
+        }
+
+        String updatedAt = hasText(session.updatedAt()) ? "Last updated " + session.updatedAt() + ". " : "";
+        if (missingTopics.isEmpty()) {
+            return new PlannerReadinessStatus(
+                    score,
+                    updatedAt + "The planner has enough context to draft a PRD on the next strong turn."
+            );
+        }
+
+        return new PlannerReadinessStatus(
+                score,
+                updatedAt + "Continue refining " + joinPlannerTopics(missingTopics) + "."
+        );
+    }
+
+    private PlannerReadinessStatus draftReadinessStatus(PrdPlanningSession session) {
+        String draft = session.latestPrdMarkdown().toLowerCase();
+        int score = 20;
+        List<String> missingSections = new ArrayList<>();
+
+        score += plannerSectionScore(draft, missingSections, "overview", 10, "## overview", "## introduction");
+        score += plannerSectionScore(draft, missingSections, "goals", 10, "## goals");
+        score += plannerSectionScore(draft, missingSections, "quality gates", 20, "## quality gates");
+        score += plannerSectionScore(draft, missingSections, "user stories", 20, "## user stories", "### us-");
+        score += plannerSectionScore(draft, missingSections, "functional requirements", 10, "## functional requirements");
+        score += plannerSectionScore(draft, missingSections, "non-goals", 10, "## non-goals", "## non goals", "## scope boundaries");
+        score += plannerSectionScore(draft, missingSections, "success metrics", 10, "## success metrics");
+
+        String updatedAt = hasText(session.updatedAt()) ? "Last updated " + session.updatedAt() + ". " : "";
+        if (missingSections.isEmpty()) {
+            return new PlannerReadinessStatus(
+                    score,
+                    updatedAt + "Core Ralph-style PRD sections are present. Apply the draft now or keep refining the details."
+            );
+        }
+
+        return new PlannerReadinessStatus(
+                score,
+                updatedAt + "Draft still needs " + joinPlannerTopics(missingSections)
+                        + ". Quality gates are mandatory before story execution."
+        );
+    }
+
+    private int plannerSectionScore(String markdown,
+                                    List<String> missingSections,
+                                    String sectionName,
+                                    int points,
+                                    String... markers) {
+        if (containsAny(markdown, markers)) {
+            return points;
+        }
+        missingSections.add(sectionName);
+        return 0;
+    }
+
+    private String joinPlannerTopics(List<String> topics) {
+        if (topics == null || topics.isEmpty()) {
+            return "";
+        }
+
+        int maxTopics = Math.min(topics.size(), 3);
+        List<String> visibleTopics = topics.subList(0, maxTopics);
+        String joinedTopics = String.join(", ", visibleTopics);
+        if (topics.size() <= maxTopics) {
+            return joinedTopics + ".";
+        }
+        return joinedTopics + ", and more.";
+    }
+
+    private boolean containsAny(String value, String... candidates) {
+        if (!hasText(value) || candidates == null || candidates.length == 0) {
+            return false;
+        }
+
+        String normalizedValue = value.toLowerCase();
+        for (String candidate : candidates) {
+            if (hasText(candidate) && normalizedValue.contains(candidate.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private VBox buildRunHistoryEntryCard(ActiveProjectService.RunHistoryEntry entry) {
+        Label titleLabel = new Label(entry.storyId() + " | " + entry.storyTitle());
+        titleLabel.getStyleClass().add("card-title");
+        titleLabel.setWrapText(true);
+
+        Label summaryLabel = new Label("Run "
+                + entry.runId()
+                + " | "
+                + entry.result()
+                + " | "
+                + historyTimestampSummary(entry));
+        summaryLabel.getStyleClass().add("section-title");
+        summaryLabel.setWrapText(true);
+
+        Label detailLabel = new Label(buildRunHistoryEntryDetail(entry));
+        detailLabel.getStyleClass().add("muted-text");
+        detailLabel.setWrapText(true);
+
+        HBox primaryActions = new HBox(
+                8.0,
+                buildRunHistoryArtifactButton(entry, RunHistoryArtifactType.PROMPT),
+                buildRunHistoryArtifactButton(entry, RunHistoryArtifactType.STDOUT),
+                buildRunHistoryArtifactButton(entry, RunHistoryArtifactType.STDERR)
+        );
+        primaryActions.setAlignment(Pos.CENTER_LEFT);
+
+        HBox secondaryActions = new HBox(
+                8.0,
+                buildRunHistoryArtifactButton(entry, RunHistoryArtifactType.STRUCTURED_EVENTS),
+                buildRunHistoryArtifactButton(entry, RunHistoryArtifactType.ASSISTANT_SUMMARY),
+                buildRunHistoryArtifactButton(entry, RunHistoryArtifactType.ATTEMPT_SUMMARY)
+        );
+        secondaryActions.setAlignment(Pos.CENTER_LEFT);
+
+        VBox entryCard = new VBox(8.0, titleLabel, summaryLabel, detailLabel, primaryActions, secondaryActions);
+        entryCard.getStyleClass().add("run-history-entry-card");
+        return entryCard;
+    }
+
+    private Button buildRunHistoryArtifactButton(ActiveProjectService.RunHistoryEntry entry,
+                                                 RunHistoryArtifactType artifactType) {
+        Button button = new Button(artifactType.buttonLabel());
+        button.setId("runHistory"
+                + artifactType.idFragment()
+                + sanitizeFxId(entry.runId()));
+        String artifactPath = historyArtifactPath(entry, artifactType);
+        button.setDisable(!hasText(artifactPath));
+        button.setOnAction(event -> {
+            runHistoryArtifactViewerState = loadRunHistoryArtifact(entry, artifactType, artifactPath);
+            renderRunHistoryArtifactViewer();
+        });
+        return button;
+    }
+
+    private RunHistoryArtifactViewerState loadRunHistoryArtifact(ActiveProjectService.RunHistoryEntry entry,
+                                                                 RunHistoryArtifactType artifactType,
+                                                                 String artifactPath) {
+        String summary = entry.storyId()
+                + " | "
+                + artifactType.viewerLabel()
+                + " | "
+                + entry.runId();
+        if (!hasText(artifactPath)) {
+            return new RunHistoryArtifactViewerState(summary, "", MISSING_HISTORY_ARTIFACT_MESSAGE);
+        }
+
+        Optional<Path> resolvedArtifactPath = toPath(artifactPath);
+        if (resolvedArtifactPath.isEmpty()) {
+            return new RunHistoryArtifactViewerState(summary, artifactPath, INVALID_HISTORY_ARTIFACT_MESSAGE);
+        }
+
+        Path path = resolvedArtifactPath.get();
+        if (!Files.exists(path)) {
+            return new RunHistoryArtifactViewerState(summary, path.toString(), MISSING_HISTORY_ARTIFACT_MESSAGE);
+        }
+
+        try {
+            return new RunHistoryArtifactViewerState(
+                    summary,
+                    path.toString(),
+                    Files.readString(path, StandardCharsets.UTF_8)
+            );
+        } catch (java.io.IOException exception) {
+            return new RunHistoryArtifactViewerState(summary, path.toString(), UNREADABLE_HISTORY_ARTIFACT_MESSAGE);
+        }
+    }
+
+    private void renderPrdPlannerPreservingWorkspaceScroll(PrdPlanningSession session) {
+        if (workspaceScrollPane == null || activeWorkspaceNavButton != prdEditorNavButton) {
+            renderPrdPlanner(session);
+            return;
+        }
+        double preservedVvalue = workspaceScrollPane.getVvalue();
+        renderPrdPlanner(session);
+        restoreWorkspaceScrollValue(workspaceScrollPane, preservedVvalue);
+    }
+
+    private void restoreWorkspaceScrollValue(ScrollPane scrollPane, double vvalue) {
+        if (scrollPane == null) {
+            return;
+        }
+        double normalizedVvalue = Math.max(0.0, Math.min(vvalue, 1.0));
+        Platform.runLater(() -> Platform.runLater(() -> {
+            if (scrollPane.getContent() == null) {
+                return;
+            }
+            scrollPane.setVvalue(normalizedVvalue);
+        }));
+    }
+
+    private String historyArtifactPath(ActiveProjectService.RunHistoryEntry entry, RunHistoryArtifactType artifactType) {
+        return switch (artifactType) {
+            case PROMPT -> entry.artifactPaths().promptPath();
+            case STDOUT -> entry.artifactPaths().stdoutPath();
+            case STDERR -> entry.artifactPaths().stderrPath();
+            case STRUCTURED_EVENTS -> entry.artifactPaths().structuredEventsPath();
+            case ASSISTANT_SUMMARY -> entry.artifactPaths().assistantSummaryPath();
+            case ATTEMPT_SUMMARY -> entry.artifactPaths().summaryPath();
+        };
+    }
+
+    private String historyTimestampSummary(ActiveProjectService.RunHistoryEntry entry) {
+        List<String> timestamps = new ArrayList<>();
+        if (hasText(entry.queuedAt())) {
+            timestamps.add("Queued " + entry.queuedAt());
+        }
+        if (hasText(entry.startedAt())) {
+            timestamps.add("Started " + entry.startedAt());
+        }
+        if (hasText(entry.endedAt())) {
+            timestamps.add("Ended " + entry.endedAt());
+        }
+        return timestamps.isEmpty()
+                ? "No timestamps recorded"
+                : String.join(" | ", timestamps);
+    }
+
+    private String buildRunHistoryEntryDetail(ActiveProjectService.RunHistoryEntry entry) {
+        List<String> lines = new ArrayList<>();
+        lines.add("Preset "
+                + entry.presetName()
+                + (hasText(entry.presetVersion()) ? " " + entry.presetVersion() : ""));
+        lines.add(hasText(entry.branchName())
+                ? "Branch "
+                + entry.branchName()
+                + (hasText(entry.branchAction()) ? " (" + entry.branchAction() + ")" : "")
+                : "Branch unavailable");
+        lines.add(hasText(entry.commitHash())
+                ? "Commit "
+                + entry.commitHash()
+                + (hasText(entry.commitMessage()) ? " | " + entry.commitMessage() : "")
+                : "Commit not created");
+        if (hasText(entry.detail())) {
+            lines.add(entry.detail());
+        }
+        return String.join(System.lineSeparator(), lines);
+    }
+
+    private String sanitizeFxId(String value) {
+        if (!hasText(value)) {
+            return "Unknown";
+        }
+        return value.replaceAll("[^A-Za-z0-9]", "");
+    }
+
     private void renderRunOutputView() {
         if (activeProjectService.activeProject().isEmpty()) {
             runOutputSummaryLabel.setText(NO_ACTIVE_RUN_OUTPUT_SUMMARY);
             runOutputDetailLabel.setText(NO_ACTIVE_RUN_OUTPUT_DETAIL);
+            runOutputTextArea.setVisible(true);
+            runOutputStructuredScrollPane.setVisible(false);
             runOutputTextArea.setText(NO_ACTIVE_RUN_OUTPUT_DETAIL);
+            runOutputStructuredContainer.getChildren().clear();
+            structuredRunOutputCommandViewStates.clear();
+            structuredRunOutputPinnedToBottom = true;
+            liveRawOutputTextAreaInitialized = false;
             return;
         }
 
         runOutputSummaryLabel.setText(runOutputPresentationState.summary());
         runOutputDetailLabel.setText(runOutputPresentationState.detail());
-        runOutputTextArea.setText(selectedRunOutputView() == RunOutputView.ASSISTANT_SUMMARY
+        RunOutputView selectedView = selectedRunOutputView();
+        boolean structuredViewSelected = selectedView == RunOutputView.STRUCTURED_OUTPUT;
+        runOutputTextArea.setVisible(!structuredViewSelected);
+        runOutputStructuredScrollPane.setVisible(structuredViewSelected);
+        if (structuredViewSelected) {
+            captureRenderedStructuredRunOutputCommandViewStates();
+            ScrollPositionState scrollPositionState = captureScrollPosition(runOutputStructuredScrollPane);
+            boolean stickToBottomNow = scrollPositionState == null || scrollPositionState.stickToBottom();
+            boolean keepPinnedToBottom = runOutputPresentationState.active()
+                    && (stickToBottomNow || structuredRunOutputPinnedToBottom);
+            runOutputStructuredContainer.getChildren().setAll(buildStructuredRunOutputNodes(runOutputPresentationState));
+            liveRawOutputTextAreaInitialized = false;
+            if (keepPinnedToBottom) {
+                structuredRunOutputPinnedToBottom = true;
+                scrollStructuredRunOutputToBottom();
+                return;
+            }
+            structuredRunOutputPinnedToBottom = false;
+            restoreScrollPosition(runOutputStructuredScrollPane, scrollPositionState, runOutputPresentationState.active());
+            return;
+        }
+
+        runOutputTextArea.setText(selectedView == RunOutputView.ASSISTANT_SUMMARY
                 ? assistantSummaryBody(runOutputPresentationState)
                 : rawOutputBody(runOutputPresentationState));
+        liveRawOutputTextAreaInitialized = selectedView == RunOutputView.RAW_OUTPUT
+                && runOutputPresentationState.active()
+                && hasText(runOutputPresentationState.rawOutput());
+        if (selectedView == RunOutputView.RAW_OUTPUT && hasText(runOutputTextArea.getText())) {
+            scrollRunOutputTextAreaToBottom();
+        }
     }
 
     private void refreshRunOutputPresentationState() {
@@ -1125,12 +2111,619 @@ public class AppShellController {
             return NO_PERSISTED_RUN_OUTPUT_DETAIL;
         }
         if (hasText(state.rawOutput())) {
-            return state.rawOutput();
+            return formatRunOutputJsonBlocks(state.rawOutput());
         }
         return state.active() ? PENDING_RAW_OUTPUT_MESSAGE : MISSING_RAW_OUTPUT_MESSAGE;
     }
 
+    private String formatRunOutputJsonBlocks(String output) {
+        if (!hasText(output)) {
+            return "";
+        }
+
+        List<String> formattedLines = new ArrayList<>();
+        for (String line : normalizeEditorLineEndings(output).split("\n", -1)) {
+            if (line.isEmpty()) {
+                formattedLines.add("");
+                continue;
+            }
+            JsonNode jsonNode = parseJsonLine(line);
+            formattedLines.add(jsonNode == null ? line : jsonNode.toPrettyString());
+        }
+        return String.join(System.lineSeparator(), formattedLines);
+    }
+
+    private List<Node> buildStructuredRunOutputNodes(RunOutputPresentationState state) {
+        List<StructuredRunOutputEntry> entries = buildStructuredRunOutputEntries(state);
+        pruneStructuredRunOutputCommandViewStates(entries);
+
+        List<Node> cards = new ArrayList<>(entries.size());
+        for (StructuredRunOutputEntry entry : entries) {
+            cards.add(buildStructuredRunOutputCard(entry));
+        }
+        return cards;
+    }
+
+    private List<StructuredRunOutputEntry> buildStructuredRunOutputEntries(RunOutputPresentationState state) {
+        if (!state.available()) {
+            return List.of(new StructuredRunOutputEntry(
+                    "run-output-unavailable",
+                    "Run Output",
+                    "Unavailable",
+                    NO_PERSISTED_RUN_OUTPUT_DETAIL,
+                    "",
+                    "run-output-event-neutral",
+                    false
+            ));
+        }
+        if (!hasText(state.rawOutput())) {
+            return List.of(new StructuredRunOutputEntry(
+                    "run-output-empty",
+                    "Run Output",
+                    state.active() ? "Waiting for output" : "No output captured",
+                    state.active() ? PENDING_RAW_OUTPUT_MESSAGE : MISSING_RAW_OUTPUT_MESSAGE,
+                    "",
+                    "run-output-event-neutral",
+                    false
+            ));
+        }
+
+        List<StructuredRunOutputEntry> entries = new ArrayList<>();
+        Map<String, Integer> entryIndexes = new LinkedHashMap<>();
+        StringBuilder plainTextBuffer = new StringBuilder();
+        boolean stderrSection = false;
+        int syntheticEntryIndex = 0;
+        for (String line : normalizeEditorLineEndings(state.rawOutput()).split("\n", -1)) {
+            if (STDERR_SECTION_HEADER.equals(line.trim())) {
+                syntheticEntryIndex = flushStructuredPlainText(entries, plainTextBuffer, stderrSection, syntheticEntryIndex);
+                stderrSection = true;
+                continue;
+            }
+
+            JsonNode eventNode = !stderrSection ? parseJsonLine(line) : null;
+            if (eventNode != null) {
+                syntheticEntryIndex = flushStructuredPlainText(entries, plainTextBuffer, false, syntheticEntryIndex);
+                upsertStructuredRunOutputEntry(
+                        entries,
+                        entryIndexes,
+                        buildStructuredRunOutputEventEntry(eventNode, syntheticEntryIndex)
+                );
+                syntheticEntryIndex++;
+                continue;
+            }
+
+            appendStructuredPlainTextLine(plainTextBuffer, line);
+        }
+        flushStructuredPlainText(entries, plainTextBuffer, stderrSection, syntheticEntryIndex);
+
+        if (entries.isEmpty()) {
+            entries.add(new StructuredRunOutputEntry(
+                    "run-output-plain-text",
+                    "Run Output",
+                    "Plain text output",
+                    formatRunOutputJsonBlocks(state.rawOutput()),
+                    "",
+                    "run-output-event-neutral",
+                    false
+            ));
+        }
+        return entries;
+    }
+
+    private void appendStructuredPlainTextLine(StringBuilder buffer, String line) {
+        if (buffer.length() > 0) {
+            buffer.append(System.lineSeparator());
+        }
+        buffer.append(line);
+    }
+
+    private int flushStructuredPlainText(List<StructuredRunOutputEntry> entries,
+                                         StringBuilder buffer,
+                                         boolean stderrSection,
+                                         int syntheticEntryIndex) {
+        if (!hasText(buffer.toString())) {
+            buffer.setLength(0);
+            return syntheticEntryIndex;
+        }
+
+        entries.add(new StructuredRunOutputEntry(
+                (stderrSection ? "stderr-" : "output-") + syntheticEntryIndex,
+                stderrSection ? "stderr" : "output",
+                stderrSection ? "Standard error" : "Plain text output",
+                buffer.toString(),
+                "",
+                stderrSection ? "run-output-event-failure" : "run-output-event-neutral",
+                false
+        ));
+        buffer.setLength(0);
+        return syntheticEntryIndex + 1;
+    }
+
+    private void upsertStructuredRunOutputEntry(List<StructuredRunOutputEntry> entries,
+                                                Map<String, Integer> entryIndexes,
+                                                StructuredRunOutputEntry entry) {
+        Integer existingEntryIndex = entryIndexes.get(entry.key());
+        if (existingEntryIndex == null) {
+            entryIndexes.put(entry.key(), entries.size());
+            entries.add(entry);
+            return;
+        }
+        entries.set(existingEntryIndex, entry);
+    }
+
+    private StructuredRunOutputEntry buildStructuredRunOutputEventEntry(JsonNode eventNode, int syntheticEntryIndex) {
+        String eventType = textValue(eventNode, "type");
+        JsonNode itemNode = eventNode.path("item");
+        String itemType = textValue(itemNode, "type");
+        String itemStatus = firstNonBlank(textValue(itemNode, "status"), eventTypeStatus(eventType));
+        String accentStyleClass = eventAccentStyleClass(eventType, itemType, itemStatus);
+        String badge = hasText(itemType) ? itemType.replace('_', ' ') : eventType;
+        String title = structuredEventTitle(eventType, itemNode);
+        String detail = structuredEventDetail(eventType, eventNode, itemNode, itemStatus);
+        String body = structuredEventBody(eventType, eventNode, itemNode);
+        return new StructuredRunOutputEntry(
+                structuredEventKey(eventType, itemNode, syntheticEntryIndex),
+                badge,
+                title,
+                body,
+                detail,
+                accentStyleClass,
+                "command_execution".equals(itemType)
+        );
+    }
+
+    private String structuredEventKey(String eventType, JsonNode itemNode, int syntheticEntryIndex) {
+        if (("item.started".equals(eventType) || "item.completed".equals(eventType) || "item.updated".equals(eventType))
+                && hasText(textValue(itemNode, "id"))) {
+            return "item-" + textValue(itemNode, "id");
+        }
+        return "event-" + syntheticEntryIndex;
+    }
+
+    private VBox buildStructuredRunOutputCard(StructuredRunOutputEntry entry) {
+        String accentStyleClass = entry.accentStyleClass();
+        String badgeText = hasText(entry.badge()) ? entry.badge() : "event";
+        String titleText = hasText(entry.title()) ? entry.title() : "Run Output Event";
+        boolean duplicateHeaderText = badgeText.equalsIgnoreCase(titleText);
+
+        Label badgeLabel = new Label(badgeText);
+        badgeLabel.getStyleClass().addAll("run-output-event-badge", accentStyleClass);
+
+        Label titleLabel = new Label(titleText);
+        titleLabel.getStyleClass().add("run-output-event-title");
+        titleLabel.setWrapText(true);
+        titleLabel.setMaxWidth(Double.MAX_VALUE);
+        if (entry.commandOutput()) {
+            titleLabel.getStyleClass().add("run-output-event-command-title");
+        }
+
+        Node headerRow;
+        if (duplicateHeaderText) {
+            headerRow = badgeLabel;
+        } else {
+            headerRow = entry.commandOutput()
+                    ? new VBox(2.0, badgeLabel, titleLabel)
+                    : new HBox(8.0, badgeLabel, titleLabel);
+        }
+        if (headerRow instanceof HBox hbox) {
+            hbox.setAlignment(Pos.CENTER_LEFT);
+        } else if (headerRow instanceof VBox vbox) {
+            vbox.setAlignment(Pos.CENTER_LEFT);
+        } else if (headerRow instanceof Label label) {
+            label.setMaxWidth(Double.MAX_VALUE);
+        }
+
+        VBox card = new VBox(6.0, headerRow);
+        card.setId("structuredRunOutputEntry" + sanitizeFxId(entry.key()));
+        card.getStyleClass().addAll("run-output-event-card", accentStyleClass);
+
+        if (hasText(entry.detail())) {
+            Label detailLabel = new Label(entry.detail());
+            detailLabel.getStyleClass().add("run-output-event-meta");
+            detailLabel.setWrapText(true);
+            card.getChildren().add(detailLabel);
+        }
+        if (entry.commandOutput()) {
+            card.getChildren().add(buildStructuredCommandOutputBox(entry));
+        } else if (hasText(entry.body())) {
+            Label bodyLabel = new Label(entry.body());
+            bodyLabel.getStyleClass().add("run-output-event-body");
+            bodyLabel.setWrapText(true);
+            card.getChildren().add(bodyLabel);
+        }
+        return card;
+    }
+
+    private VBox buildStructuredCommandOutputBox(StructuredRunOutputEntry entry) {
+        StructuredCommandOutputViewState viewState = structuredRunOutputCommandViewStates
+                .getOrDefault(entry.key(), StructuredCommandOutputViewState.collapsed());
+        CommandOutputDisplay commandOutputDisplay = commandOutputDisplay(entry.body(), viewState.expanded());
+
+        VBox container = new VBox(6.0);
+        if (commandOutputDisplay.truncated()) {
+            Button toggleButton = new Button(viewState.expanded() ? "Collapse" : "Expand");
+            toggleButton.setId("structuredRunOutputToggle" + sanitizeFxId(entry.key()));
+            toggleButton.getStyleClass().add("run-output-event-toggle");
+            toggleButton.setOnAction(event -> {
+                StructuredCommandOutputViewState currentState = structuredRunOutputCommandViewStates
+                        .getOrDefault(entry.key(), StructuredCommandOutputViewState.collapsed());
+                structuredRunOutputCommandViewStates.put(entry.key(), currentState.withExpanded(!currentState.expanded()));
+                renderRunOutputView();
+            });
+            container.getChildren().add(toggleButton);
+        }
+
+        Label outputLabel = new Label(commandOutputDisplay.visibleText());
+        outputLabel.setWrapText(false);
+        outputLabel.getStyleClass().add("run-output-event-output-content");
+
+        ScrollPane outputScrollPane = new ScrollPane(outputLabel);
+        outputScrollPane.setId("structuredRunOutputBody" + sanitizeFxId(entry.key()));
+        outputScrollPane.setUserData(entry.key());
+        outputScrollPane.setFitToWidth(false);
+        outputScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        outputScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        outputScrollPane.getStyleClass().add("run-output-event-output-scroll");
+        applyCommandOutputViewportHeight(outputScrollPane, commandOutputDisplay.visibleLineCount(), viewState.expanded());
+        outputScrollPane.vvalueProperty().addListener((observable, oldValue, newValue) ->
+                updateStructuredRunOutputCommandScrollState(entry.key(), outputScrollPane)
+        );
+        container.getChildren().add(outputScrollPane);
+
+        restoreStructuredRunOutputCommandScrollState(outputScrollPane, viewState);
+        return container;
+    }
+
+    private CommandOutputDisplay commandOutputDisplay(String fullOutput, boolean expanded) {
+        String formattedOutput = hasText(fullOutput) ? formatRunOutputJsonBlocks(fullOutput) : "No command output captured yet.";
+        List<String> lines = normalizedDisplayLines(formattedOutput);
+        if (expanded || lines.size() <= COMMAND_OUTPUT_PREVIEW_LINE_COUNT) {
+            return new CommandOutputDisplay(formattedOutput, lines.size(), lines.size() > COMMAND_OUTPUT_PREVIEW_LINE_COUNT);
+        }
+
+        List<String> previewLines = new ArrayList<>();
+        previewLines.add("...");
+        previewLines.addAll(lines.subList(Math.max(lines.size() - COMMAND_OUTPUT_PREVIEW_LINE_COUNT, 0), lines.size()));
+        return new CommandOutputDisplay(String.join(System.lineSeparator(), previewLines), previewLines.size(), true);
+    }
+
+    private List<String> normalizedDisplayLines(String text) {
+        if (!hasText(text)) {
+            return List.of("");
+        }
+        List<String> lines = new ArrayList<>(List.of(normalizeEditorLineEndings(text).split("\n", -1)));
+        while (lines.size() > 1 && lines.get(lines.size() - 1).isEmpty()) {
+            lines.remove(lines.size() - 1);
+        }
+        return lines;
+    }
+
+    private void applyCommandOutputViewportHeight(ScrollPane outputScrollPane, int visibleLineCount, boolean expanded) {
+        double lineHeight = 18.0;
+        double viewportHeight = expanded
+                ? 160.0
+                : Math.min(132.0, Math.max(72.0, 24.0 + (visibleLineCount * lineHeight)));
+        outputScrollPane.setMinHeight(viewportHeight);
+        outputScrollPane.setPrefHeight(viewportHeight);
+        outputScrollPane.setMaxHeight(viewportHeight);
+        outputScrollPane.setPrefViewportHeight(viewportHeight);
+    }
+
+    private void updateStructuredRunOutputCommandScrollState(String entryKey, ScrollPane outputScrollPane) {
+        StructuredCommandOutputViewState currentState = structuredRunOutputCommandViewStates
+                .getOrDefault(entryKey, StructuredCommandOutputViewState.collapsed());
+        structuredRunOutputCommandViewStates.put(
+                entryKey,
+                currentState.withScrollPosition(captureScrollPosition(outputScrollPane))
+        );
+    }
+
+    private void restoreStructuredRunOutputCommandScrollState(ScrollPane outputScrollPane,
+                                                              StructuredCommandOutputViewState viewState) {
+        if (viewState == null || !viewState.expanded()) {
+            return;
+        }
+        restoreScrollPosition(outputScrollPane, viewState.scrollPosition(), true);
+    }
+
+    private void pruneStructuredRunOutputCommandViewStates(List<StructuredRunOutputEntry> entries) {
+        Set<String> activeCommandEntryKeys = new HashSet<>();
+        for (StructuredRunOutputEntry entry : entries) {
+            if (entry.commandOutput()) {
+                activeCommandEntryKeys.add(entry.key());
+            }
+        }
+        structuredRunOutputCommandViewStates.keySet().retainAll(activeCommandEntryKeys);
+    }
+
+    private void captureRenderedStructuredRunOutputCommandViewStates() {
+        if (runOutputStructuredContainer == null) {
+            return;
+        }
+        captureRenderedStructuredRunOutputCommandViewStates(runOutputStructuredContainer);
+    }
+
+    private void captureRenderedStructuredRunOutputCommandViewStates(Node node) {
+        if (node instanceof ScrollPane scrollPane && scrollPane.getUserData() instanceof String entryKey) {
+            StructuredCommandOutputViewState currentState = structuredRunOutputCommandViewStates
+                    .getOrDefault(entryKey, StructuredCommandOutputViewState.collapsed());
+            if (currentState.expanded()) {
+                structuredRunOutputCommandViewStates.put(
+                        entryKey,
+                        currentState.withScrollPosition(captureScrollPosition(scrollPane))
+                );
+            }
+        }
+        if (node instanceof Parent parent) {
+            for (Node childNode : parent.getChildrenUnmodifiable()) {
+                captureRenderedStructuredRunOutputCommandViewStates(childNode);
+            }
+        }
+    }
+
+    private String structuredEventTitle(String eventType, JsonNode itemNode) {
+        if ("item.started".equals(eventType) || "item.completed".equals(eventType) || "item.updated".equals(eventType)) {
+            String itemType = textValue(itemNode, "type");
+            if ("reasoning".equals(itemType)) {
+                return "Reasoning";
+            }
+            if ("command_execution".equals(itemType)) {
+                return firstNonBlank(textValue(itemNode, "command"), "Command execution");
+            }
+            if ("agent_message".equals(itemType)) {
+                return "Agent message";
+            }
+            if ("todo_list".equals(itemType)) {
+                return "Todo list updated";
+            }
+            if ("web_search".equals(itemType)) {
+                return firstNonBlank(textValue(itemNode, "query"), "Web search");
+            }
+            if ("file_change".equals(itemType)) {
+                return structuredFileChangeTitle(itemNode);
+            }
+            return firstNonBlank(itemType.replace('_', ' '), eventType);
+        }
+        return switch (eventType) {
+            case "thread.started" -> "Thread started";
+            case "turn.started" -> "Turn started";
+            case "turn.completed" -> "Turn completed";
+            default -> eventType;
+        };
+    }
+
+    private String structuredEventDetail(String eventType,
+                                         JsonNode eventNode,
+                                         JsonNode itemNode,
+                                         String itemStatus) {
+        if ("item.started".equals(eventType) || "item.completed".equals(eventType) || "item.updated".equals(eventType)) {
+            List<String> details = new ArrayList<>();
+            if (hasText(textValue(itemNode, "id"))) {
+                details.add(textValue(itemNode, "id"));
+            }
+            if (hasText(itemStatus)) {
+                details.add(itemStatus.replace('_', ' '));
+            }
+            if (!itemNode.path("exit_code").isMissingNode() && !itemNode.path("exit_code").isNull()) {
+                details.add("Exit " + itemNode.path("exit_code").asInt());
+            }
+            if ("web_search".equals(textValue(itemNode, "type"))) {
+                String actionType = textValue(itemNode.path("action"), "type");
+                if (hasText(actionType)) {
+                    details.add("Action " + actionType.replace('_', ' '));
+                }
+            }
+            return String.join(" | ", details);
+        }
+        if ("thread.started".equals(eventType) && hasText(textValue(eventNode, "thread_id"))) {
+            return textValue(eventNode, "thread_id");
+        }
+        if ("thread.started".equals(eventType) && hasText(textValue(eventNode, "threadId"))) {
+            return textValue(eventNode, "threadId");
+        }
+        if ("turn.completed".equals(eventType)) {
+            JsonNode usageNode = eventNode.path("usage");
+            if (!usageNode.isMissingNode() && !usageNode.isNull()) {
+                return usageNode.toPrettyString();
+            }
+        }
+        return "";
+    }
+
+    private String structuredEventBody(String eventType, JsonNode eventNode, JsonNode itemNode) {
+        if ("item.started".equals(eventType) || "item.completed".equals(eventType) || "item.updated".equals(eventType)) {
+            String itemType = textValue(itemNode, "type");
+            if ("reasoning".equals(itemType)) {
+                return textValue(itemNode, "text");
+            }
+            if ("agent_message".equals(itemType)) {
+                return textValue(itemNode, "text");
+            }
+            if ("command_execution".equals(itemType)) {
+                String aggregatedOutput = textValue(itemNode, "aggregated_output");
+                if (hasText(aggregatedOutput)) {
+                    return formatRunOutputJsonBlocks(aggregatedOutput);
+                }
+                return "No command output captured yet.";
+            }
+            if ("todo_list".equals(itemType) && itemNode.path("items").isArray()) {
+                List<String> items = new ArrayList<>();
+                for (JsonNode todoItem : itemNode.path("items")) {
+                    items.add((todoItem.path("completed").asBoolean() ? "[x] " : "[ ] ")
+                            + textValue(todoItem, "text"));
+                }
+                return String.join(System.lineSeparator(), items);
+            }
+            if ("web_search".equals(itemType)) {
+                return structuredWebSearchBody(itemNode);
+            }
+            if ("file_change".equals(itemType)) {
+                return structuredFileChangeBody(itemNode);
+            }
+        }
+        if ("thread.started".equals(eventType) && hasText(textValue(eventNode, "thread_id"))) {
+            return textValue(eventNode, "thread_id");
+        }
+        if ("turn.completed".equals(eventType) && eventNode.path("usage").isObject()) {
+            return eventNode.path("usage").toPrettyString();
+        }
+        return eventNode.toPrettyString();
+    }
+
+    private String structuredWebSearchBody(JsonNode itemNode) {
+        List<String> lines = new ArrayList<>();
+        String query = textValue(itemNode, "query");
+        if (hasText(query)) {
+            lines.add("Query: " + query);
+        }
+
+        JsonNode actionNode = itemNode.path("action");
+        String actionType = textValue(actionNode, "type");
+        if (hasText(actionType)) {
+            lines.add("Action: " + actionType.replace('_', ' '));
+        }
+
+        JsonNode queriesNode = actionNode.path("queries");
+        if (queriesNode.isArray()) {
+            for (JsonNode queryNode : queriesNode) {
+                String relatedQuery = queryNode.asText("");
+                if (hasText(relatedQuery) && !relatedQuery.equals(query)) {
+                    lines.add("Related query: " + relatedQuery);
+                }
+            }
+        }
+
+        if (lines.isEmpty()) {
+            return "No search query captured yet.";
+        }
+        return String.join(System.lineSeparator(), lines);
+    }
+
+    private String structuredFileChangeTitle(JsonNode itemNode) {
+        JsonNode changesNode = itemNode.path("changes");
+        if (changesNode.isArray() && changesNode.size() == 1) {
+            String fileName = fileNameFromPath(textValue(changesNode.get(0), "path"));
+            if (hasText(fileName)) {
+                return fileName;
+            }
+        }
+        return changesNode.isArray() && changesNode.size() > 1 ? "File changes" : "File change";
+    }
+
+    private String structuredFileChangeBody(JsonNode itemNode) {
+        JsonNode changesNode = itemNode.path("changes");
+        if (!changesNode.isArray() || changesNode.isEmpty()) {
+            return "No file changes captured yet.";
+        }
+
+        List<String> lines = new ArrayList<>();
+        for (JsonNode changeNode : changesNode) {
+            String path = textValue(changeNode, "path");
+            String kind = textValue(changeNode, "kind");
+            String line = hasText(kind) ? kind.replace('_', ' ') + " " : "";
+            line += hasText(path) ? path : changeNode.toPrettyString();
+            lines.add(line.strip());
+        }
+        return String.join(System.lineSeparator(), lines);
+    }
+
+    private String fileNameFromPath(String path) {
+        if (!hasText(path)) {
+            return "";
+        }
+        int lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        if (lastSlash < 0 || lastSlash >= path.length() - 1) {
+            return path;
+        }
+        return path.substring(lastSlash + 1);
+    }
+
+    private String eventTypeStatus(String eventType) {
+        if (!hasText(eventType)) {
+            return "";
+        }
+        if (eventType.endsWith(".started")) {
+            return "in_progress";
+        }
+        if (eventType.endsWith(".completed")) {
+            return "completed";
+        }
+        return "";
+    }
+
+    private String eventAccentStyleClass(String eventType, String itemType, String itemStatus) {
+        String normalizedStatus = valueOrEmpty(itemStatus).toLowerCase();
+        if ("command_execution".equals(itemType) && "failed".equals(normalizedStatus)) {
+            return "run-output-event-failure";
+        }
+        if ("command_execution".equals(itemType) && "completed".equals(normalizedStatus)) {
+            return "run-output-event-success";
+        }
+        if ("command_execution".equals(itemType) && "in_progress".equals(normalizedStatus)) {
+            return "run-output-event-running";
+        }
+        if ("agent_message".equals(itemType) || "todo_list".equals(itemType)) {
+            return "run-output-event-neutral";
+        }
+        if ("turn.completed".equals(eventType) || "item.completed".equals(eventType)) {
+            return "run-output-event-success";
+        }
+        if (STDERR_SECTION_HEADER.equals(eventType)) {
+            return "run-output-event-failure";
+        }
+        if ("item.started".equals(eventType) || "turn.started".equals(eventType) || "thread.started".equals(eventType)) {
+            return "run-output-event-running";
+        }
+        return "run-output-event-neutral";
+    }
+
+    private JsonNode parseJsonLine(String value) {
+        if (!hasText(value)) {
+            return null;
+        }
+
+        String trimmedValue = value.trim();
+        if ((!trimmedValue.startsWith("{") || !trimmedValue.endsWith("}"))
+                && (!trimmedValue.startsWith("[") || !trimmedValue.endsWith("]"))) {
+            return null;
+        }
+        try {
+            return RUN_OUTPUT_OBJECT_MAPPER.readTree(trimmedValue);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String textValue(JsonNode node, String fieldName) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+        JsonNode valueNode = node.path(fieldName);
+        if (valueNode.isMissingNode() || valueNode.isNull()) {
+            return "";
+        }
+        if (valueNode.isTextual()) {
+            return valueNode.asText();
+        }
+        if (valueNode.isValueNode()) {
+            return valueNode.asText("");
+        }
+        return valueNode.toPrettyString();
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (hasText(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
     private RunOutputView selectedRunOutputView() {
+        if (structuredRunOutputViewRadioButton.isSelected()) {
+            return RunOutputView.STRUCTURED_OUTPUT;
+        }
         if (rawOutputViewRadioButton.isSelected()) {
             return RunOutputView.RAW_OUTPUT;
         }
@@ -1599,6 +3192,13 @@ public class AppShellController {
         if (singleStorySessionInProgress) {
             return;
         }
+        ExecutionAgentSelection executionAgentSelection = selectedExecutionAgentSelection();
+        if (!executionAgentSelection.provider().executionSupported()) {
+            setSingleStorySessionMessage(executionAgentSelection.provider().displayName()
+                    + " execution is not implemented yet. Switch provider to Codex.");
+            renderSingleStorySession();
+            return;
+        }
 
         PresetUseCase presetUseCase = sessionPresetUseCase();
         ActiveProjectService.SingleStorySessionAvailability availability =
@@ -1614,7 +3214,7 @@ public class AppShellController {
         executionPaused = false;
         pausedSessionTaskId = null;
         activeSessionPresetUseCase = presetUseCase;
-        launchStorySessionStep(presetUseCase, availability);
+        launchStorySessionStep(presetUseCase, availability, executionAgentSelection);
     }
 
     @FXML
@@ -1632,10 +3232,12 @@ public class AppShellController {
     }
 
     private void launchStorySessionStep(PresetUseCase presetUseCase,
-                                        ActiveProjectService.SingleStorySessionAvailability availability) {
+                                        ActiveProjectService.SingleStorySessionAvailability availability,
+                                        ExecutionAgentSelection executionAgentSelection) {
         singleStorySessionInProgress = true;
         singleStorySessionTaskId = availability.story().taskId();
         activeSessionPresetUseCase = presetUseCase;
+        resetLiveRunOutputBuffer();
         setSingleStorySessionMessage(startSessionMessage(availability));
         rawOutputViewRadioButton.setSelected(true);
         runOutputPresentationState = RunOutputPresentationState.live(
@@ -1650,15 +3252,20 @@ public class AppShellController {
 
         CodexLauncherService.RunOutputListener runOutputListener = runOutputListener();
         CompletableFuture.supplyAsync(
-                        () -> activeProjectService.startEligibleSingleStory(presetUseCase, runOutputListener),
+                        () -> activeProjectService.startEligibleSingleStory(
+                                presetUseCase,
+                                executionAgentSelection,
+                                runOutputListener
+                        ),
                         backgroundExecutor
                 )
                 .whenComplete((result, throwable) -> Platform.runLater(() ->
-                        handleStorySessionStepCompletion(presetUseCase, result, throwable)
+                        handleStorySessionStepCompletion(presetUseCase, executionAgentSelection, result, throwable)
                 ));
     }
 
     private void handleStorySessionStepCompletion(PresetUseCase presetUseCase,
+                                                  ExecutionAgentSelection executionAgentSelection,
                                                   ActiveProjectService.SingleStoryStartResult result,
                                                   Throwable throwable) {
         if (result != null && result.launchResult() != null) {
@@ -1697,7 +3304,7 @@ public class AppShellController {
         }
 
         if (nextAvailability.startable()) {
-            launchStorySessionStep(presetUseCase, nextAvailability);
+            launchStorySessionStep(presetUseCase, nextAvailability, executionAgentSelection);
             return;
         }
 
@@ -1735,20 +3342,12 @@ public class AppShellController {
 
             @Override
             public void onStdout(String text) {
-                Platform.runLater(() -> {
-                    runOutputPresentationState = runOutputPresentationState.appendRawOutput(text);
-                    renderRunOutputView();
-                });
+                enqueueLiveStdout(text);
             }
 
             @Override
             public void onStderr(String text) {
-                Platform.runLater(() -> {
-                    runOutputPresentationState = runOutputPresentationState.appendRawOutput(
-                            formatStderrOutput(text, runOutputPresentationState.rawOutput())
-                    );
-                    renderRunOutputView();
-                });
+                enqueueLiveStderr(text);
             }
         };
     }
@@ -1790,23 +3389,188 @@ public class AppShellController {
         singleStorySessionMessageLabel.setVisible(visible);
     }
 
-    private String formatStderrOutput(String text, String existingRawOutput) {
+    private void resetLiveRunOutputBuffer() {
+        synchronized (liveRunOutputLock) {
+            liveRunOutputBuffer.setLength(0);
+            pendingLiveRunOutputDelta.setLength(0);
+            liveRunOutputHasStderrSection = false;
+            liveRunOutputFlushScheduled = false;
+        }
+        liveRawOutputTextAreaInitialized = false;
+    }
+
+    private void enqueueLiveStdout(String text) {
+        enqueueLiveRunOutput(text, false);
+    }
+
+    private void enqueueLiveStderr(String text) {
+        enqueueLiveRunOutput(text, true);
+    }
+
+    private void enqueueLiveRunOutput(String text, boolean stderr) {
         if (!hasText(text)) {
-            return "";
+            return;
         }
 
-        StringBuilder builder = new StringBuilder();
-        if (!hasText(existingRawOutput) || !existingRawOutput.contains(STDERR_SECTION_HEADER)) {
-            if (hasText(existingRawOutput) && !existingRawOutput.endsWith(System.lineSeparator())) {
-                builder.append(System.lineSeparator());
+        boolean scheduleFlush = false;
+        synchronized (liveRunOutputLock) {
+            if (stderr) {
+                appendLiveStderr(text);
+            } else {
+                liveRunOutputBuffer.append(text);
+                pendingLiveRunOutputDelta.append(text);
             }
-            if (hasText(existingRawOutput)) {
-                builder.append(System.lineSeparator());
+            if (!liveRunOutputFlushScheduled) {
+                liveRunOutputFlushScheduled = true;
+                scheduleFlush = true;
             }
-            builder.append(STDERR_SECTION_HEADER).append(System.lineSeparator());
         }
-        builder.append(text);
-        return builder.toString();
+
+        if (scheduleFlush) {
+            Platform.runLater(this::flushLiveRunOutput);
+        }
+    }
+
+    private void appendLiveStderr(String text) {
+        if (!liveRunOutputHasStderrSection) {
+            if (liveRunOutputBuffer.length() > 0 && !endsWithLineBreak(liveRunOutputBuffer)) {
+                liveRunOutputBuffer.append(System.lineSeparator());
+                pendingLiveRunOutputDelta.append(System.lineSeparator());
+            }
+            if (liveRunOutputBuffer.length() > 0) {
+                liveRunOutputBuffer.append(System.lineSeparator());
+                pendingLiveRunOutputDelta.append(System.lineSeparator());
+            }
+            liveRunOutputBuffer.append(STDERR_SECTION_HEADER).append(System.lineSeparator());
+            pendingLiveRunOutputDelta.append(STDERR_SECTION_HEADER).append(System.lineSeparator());
+            liveRunOutputHasStderrSection = true;
+        }
+        liveRunOutputBuffer.append(text);
+        pendingLiveRunOutputDelta.append(text);
+    }
+
+    private void flushLiveRunOutput() {
+        String outputSnapshot;
+        synchronized (liveRunOutputLock) {
+            outputSnapshot = liveRunOutputBuffer.toString();
+            pendingLiveRunOutputDelta.setLength(0);
+            liveRunOutputFlushScheduled = false;
+        }
+
+        if (!runOutputPresentationState.active()) {
+            liveRawOutputTextAreaInitialized = false;
+            return;
+        }
+
+        runOutputPresentationState = runOutputPresentationState.withRawOutput(outputSnapshot);
+        RunOutputView selectedView = selectedRunOutputView();
+        if (selectedView == RunOutputView.ASSISTANT_SUMMARY) {
+            liveRawOutputTextAreaInitialized = false;
+            return;
+        }
+        renderRunOutputView();
+        if (selectedView == RunOutputView.STRUCTURED_OUTPUT) {
+            return;
+        }
+        liveRawOutputTextAreaInitialized = hasText(runOutputPresentationState.rawOutput());
+        scrollRunOutputTextAreaToBottom();
+    }
+
+    private void scrollRunOutputTextAreaToBottom() {
+        runOutputTextArea.positionCaret(runOutputTextArea.getLength());
+        runOutputTextArea.setScrollTop(Double.MAX_VALUE);
+        runOutputTextArea.setScrollLeft(0);
+    }
+
+    private void scrollStructuredRunOutputToBottom() {
+        if (runOutputStructuredScrollPane == null) {
+            return;
+        }
+        runOutputStructuredScrollPane.setVvalue(1.0);
+        Platform.runLater(() -> {
+            runOutputStructuredScrollPane.setVvalue(1.0);
+            Platform.runLater(() -> runOutputStructuredScrollPane.setVvalue(1.0));
+        });
+    }
+
+    private void updateStructuredRunOutputPinnedToBottomState() {
+        ScrollPositionState scrollPositionState = captureScrollPosition(runOutputStructuredScrollPane);
+        structuredRunOutputPinnedToBottom = scrollPositionState == null || scrollPositionState.stickToBottom();
+    }
+
+    private ScrollPositionState captureScrollPosition(ScrollPane scrollPane) {
+        if (scrollPane == null || scrollPane.getContent() == null) {
+            return null;
+        }
+
+        double scrollableHeight = Math.max(
+                scrollPane.getContent().getLayoutBounds().getHeight() - scrollPane.getViewportBounds().getHeight(),
+                0.0
+        );
+        double offsetFromTop = scrollableHeight <= 0.0 ? 0.0 : scrollPane.getVvalue() * scrollableHeight;
+        double offsetFromBottom = Math.max(scrollableHeight - offsetFromTop, 0.0);
+        boolean stickToBottom = scrollableHeight <= 0.0 || offsetFromBottom <= SCROLL_BOTTOM_PIN_THRESHOLD_PX;
+        return new ScrollPositionState(stickToBottom, offsetFromTop, offsetFromBottom);
+    }
+
+    private void restoreScrollPosition(ScrollPane scrollPane,
+                                       ScrollPositionState scrollPositionState,
+                                       boolean defaultToBottom) {
+        if (scrollPane == null) {
+            return;
+        }
+        Platform.runLater(() -> Platform.runLater(() -> {
+            if (scrollPane.getContent() == null) {
+                return;
+            }
+            double scrollableHeight = Math.max(
+                    scrollPane.getContent().getLayoutBounds().getHeight() - scrollPane.getViewportBounds().getHeight(),
+                    0.0
+            );
+            if (scrollableHeight <= 0.0) {
+                scrollPane.setVvalue(0.0);
+                return;
+            }
+            if (scrollPositionState == null) {
+                scrollPane.setVvalue(defaultToBottom ? 1.0 : 0.0);
+                return;
+            }
+            if (scrollPositionState.stickToBottom()) {
+                scrollPane.setVvalue(1.0);
+                return;
+            }
+            double targetOffsetFromTop = Math.max(scrollableHeight - scrollPositionState.offsetFromBottom(), 0.0);
+            scrollPane.setVvalue(Math.min(targetOffsetFromTop / scrollableHeight, 1.0));
+        }));
+    }
+
+    private void configureRunOutputViewportSizing() {
+        if (runOutputTextArea == null || runOutputStructuredScrollPane == null) {
+            return;
+        }
+        applyRunOutputViewportHeight(runOutputTextArea.prefHeight(-1));
+        runOutputTextArea.heightProperty().addListener((observable, oldValue, newValue) ->
+                applyRunOutputViewportHeight(newValue.doubleValue())
+        );
+        Platform.runLater(() -> applyRunOutputViewportHeight(runOutputTextArea.getHeight()));
+    }
+
+    private void applyRunOutputViewportHeight(double height) {
+        double baseHeight = height > 0.0 ? height : DEFAULT_RUN_OUTPUT_VIEWPORT_HEIGHT - STRUCTURED_RUN_OUTPUT_VIEWPORT_EXTRA_HEIGHT;
+        double viewportHeight = Math.max(baseHeight + STRUCTURED_RUN_OUTPUT_VIEWPORT_EXTRA_HEIGHT,
+                DEFAULT_RUN_OUTPUT_VIEWPORT_HEIGHT);
+        runOutputStructuredScrollPane.setMinHeight(viewportHeight);
+        runOutputStructuredScrollPane.setPrefHeight(viewportHeight);
+        runOutputStructuredScrollPane.setMaxHeight(viewportHeight);
+        runOutputStructuredScrollPane.setPrefViewportHeight(viewportHeight);
+    }
+
+    private boolean endsWithLineBreak(StringBuilder builder) {
+        if (builder == null || builder.isEmpty()) {
+            return false;
+        }
+        char lastCharacter = builder.charAt(builder.length() - 1);
+        return lastCharacter == '\n' || lastCharacter == '\r';
     }
 
     private boolean hasText(String value) {
@@ -1821,18 +3585,162 @@ public class AppShellController {
         wslPathPrefixField.setDisable(!enableWslFields);
     }
 
+    private void configureExecutionAgentSelection() {
+        executionProviderComboBox.setCellFactory(listView -> new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ExecutionAgentProviderChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                if (empty || choice == null) {
+                    setText(null);
+                    return;
+                }
+                setText(choice.label());
+            }
+        });
+        executionProviderComboBox.setButtonCell(new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ExecutionAgentProviderChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                if (empty || choice == null) {
+                    setText(null);
+                    return;
+                }
+                setText(choice.label());
+            }
+        });
+
+        configureExecutionModelChoiceComboBox(executionModelComboBox);
+
+        executionAgentProviderSupports = executionAgentModelCatalogService.providers();
+        executionProviderComboBox.getItems().setAll(executionAgentProviderSupports.stream()
+                .map(ExecutionAgentProviderChoice::fromProviderSupport)
+                .toList());
+        executionProviderComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
+            selectDefaultRunOutputViewForProvider(newValue == null ? null : newValue.provider());
+            refreshExecutionModelChoices(newValue);
+        });
+        ExecutionAgentProviderChoice codexChoice = executionProviderComboBox.getItems().stream()
+                .filter(choice -> choice.provider() == ExecutionAgentProvider.CODEX)
+                .findFirst()
+                .orElse(null);
+        executionProviderComboBox.getSelectionModel().select(codexChoice);
+        selectDefaultRunOutputViewForProvider(codexChoice == null ? null : codexChoice.provider());
+        refreshExecutionModelChoices(codexChoice);
+    }
+
+    private void configurePrdPlannerModelSelection() {
+        configureExecutionModelChoiceComboBox(prdPlannerModelComboBox);
+        prdPlannerModelComboBox.getItems().setAll(List.of(ExecutionModelChoice.cliDefault()));
+        prdPlannerModelComboBox.getSelectionModel().selectFirst();
+        refreshPrdPlannerModelChoices();
+    }
+
+    private void configureExecutionModelChoiceComboBox(ComboBox<ExecutionModelChoice> comboBox) {
+        comboBox.setCellFactory(listView -> new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ExecutionModelChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : choice.label());
+            }
+        });
+        comboBox.setButtonCell(new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ExecutionModelChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : choice.label());
+            }
+        });
+    }
+
+    private void refreshExecutionModelChoices(ExecutionAgentProviderChoice providerChoice) {
+        executionModelComboBox.getItems().setAll(List.of(ExecutionModelChoice.cliDefault()));
+        executionModelComboBox.getSelectionModel().selectFirst();
+        if (providerChoice == null) {
+            setExecutionModelStatus("Select an execution provider.");
+            return;
+        }
+        setExecutionModelStatus("Loading models for " + providerChoice.label() + "...");
+        CompletableFuture
+                .supplyAsync(() -> executionAgentModelCatalogService.modelsFor(providerChoice.provider()), backgroundExecutor)
+                .whenCompleteAsync((catalog, throwable) -> Platform.runLater(() -> {
+                    if (throwable != null) {
+                        setExecutionModelStatus("Unable to load models (" + throwable.getMessage() + ")");
+                        return;
+                    }
+                    if (catalog.models().isEmpty()) {
+                        setExecutionModelStatus("No models returned; using CLI defaults.");
+                        return;
+                    }
+                    List<ExecutionModelChoice> choices = catalog.models().stream()
+                            .map(ExecutionModelChoice::fromModelOption)
+                            .toList();
+                    executionModelComboBox.getItems().setAll(ExecutionModelChoice.cliDefault());
+                    executionModelComboBox.getItems().addAll(choices);
+                    executionModelComboBox.getSelectionModel().selectFirst();
+                    String detail = hasText(providerChoice.detail()) ? providerChoice.detail() : "";
+                    setExecutionModelStatus(joinMessageParts(catalog.message(), detail));
+                }), Platform::runLater);
+    }
+
+    private void refreshPrdPlannerModelChoices() {
+        String selectedModelId = Optional.ofNullable(prdPlannerModelComboBox.getValue())
+                .map(ExecutionModelChoice::modelId)
+                .orElse("");
+        prdPlannerModelComboBox.getItems().setAll(List.of(ExecutionModelChoice.cliDefault()));
+        prdPlannerModelComboBox.getSelectionModel().selectFirst();
+        setPrdPlannerModelStatus("Loading planning models from Codex...");
+        CompletableFuture
+                .supplyAsync(() -> executionAgentModelCatalogService.modelsFor(ExecutionAgentProvider.CODEX), backgroundExecutor)
+                .whenCompleteAsync((catalog, throwable) -> Platform.runLater(() -> {
+                    if (throwable != null) {
+                        setPrdPlannerModelStatus("Unable to load planning models (" + throwable.getMessage() + ")");
+                        return;
+                    }
+                    if (catalog.models().isEmpty()) {
+                        setPrdPlannerModelStatus("No models returned; planning uses CLI defaults.");
+                        return;
+                    }
+                    List<ExecutionModelChoice> choices = catalog.models().stream()
+                            .map(ExecutionModelChoice::fromModelOption)
+                            .toList();
+                    prdPlannerModelComboBox.getItems().setAll(ExecutionModelChoice.cliDefault());
+                    prdPlannerModelComboBox.getItems().addAll(choices);
+                    Optional<ExecutionModelChoice> selectedChoice = prdPlannerModelComboBox.getItems().stream()
+                            .filter(choice -> choice.modelId().equals(selectedModelId))
+                            .findFirst();
+                    prdPlannerModelComboBox.getSelectionModel().select(selectedChoice.orElseGet(ExecutionModelChoice::cliDefault));
+                    setPrdPlannerModelStatus(catalog.message());
+                }), Platform::runLater);
+    }
+
+    private void selectDefaultRunOutputViewForProvider(ExecutionAgentProvider provider) {
+        if (provider == ExecutionAgentProvider.CODEX && !structuredRunOutputViewRadioButton.isSelected()) {
+            structuredRunOutputViewRadioButton.setSelected(true);
+            return;
+        }
+        if (runOutputViewToggleGroup.getSelectedToggle() == null) {
+            assistantSummaryViewRadioButton.setSelected(true);
+        }
+    }
+
     private void configurePresetCatalog() {
         configurePresetToggle(prdCreationPresetRadioButton, PresetUseCase.PRD_CREATION);
         configurePresetToggle(storyImplementationPresetRadioButton, PresetUseCase.STORY_IMPLEMENTATION);
         configurePresetToggle(retryFixPresetRadioButton, PresetUseCase.RETRY_FIX);
         configurePresetToggle(runSummaryPresetRadioButton, PresetUseCase.RUN_SUMMARY);
         presetCatalogToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) -> {
-            renderPresetPreview(selectedPresetUseCase());
+            PresetUseCase selectedUseCase = selectedPresetUseCase();
+            if (selectedUseCase == PresetUseCase.STORY_IMPLEMENTATION
+                    || selectedUseCase == PresetUseCase.RETRY_FIX
+                    || selectedUseCase == PresetUseCase.RUN_SUMMARY) {
+                lastExecutionWorkflowPreset = selectedUseCase;
+            }
+            renderPresetPreview(selectedUseCase);
             renderSingleStorySession();
         });
         presetPromptPreviewArea.setEditable(false);
-        prdCreationPresetRadioButton.setSelected(true);
-        renderPresetPreview(PresetUseCase.PRD_CREATION);
+        storyImplementationPresetRadioButton.setSelected(true);
+        renderPresetPreview(PresetUseCase.STORY_IMPLEMENTATION);
     }
 
     private void configurePresetToggle(RadioButton radioButton, PresetUseCase useCase) {
@@ -1842,7 +3750,7 @@ public class AppShellController {
 
     private PresetUseCase selectedPresetUseCase() {
         if (presetCatalogToggleGroup.getSelectedToggle() == null) {
-            return PresetUseCase.PRD_CREATION;
+            return preferredExecutionWorkflowPreset();
         }
         return (PresetUseCase) presetCatalogToggleGroup.getSelectedToggle().getUserData();
     }
@@ -2062,6 +3970,7 @@ public class AppShellController {
         renderPrdValidation();
         renderSingleStorySession();
         renderStoryProgressDashboard();
+        renderRunHistory();
         setPrdDocumentState((manualSave ? "Markdown PRD saved to " : "Pending Markdown PRD edits saved to ")
                 + saveResult.path() + ".");
         return true;
@@ -2125,7 +4034,7 @@ public class AppShellController {
         prdInterviewSummaryLabel.setText(currentPrdInterviewDraft.answeredQuestionCount()
                 + " of "
                 + prdInterviewService.questionCount()
-                + " questions answered. Draft answers can be revisited before PRD generation.");
+                + " planning inputs captured. Start with the prompt, then refine the PRD through clarification rounds.");
         prdInterviewQuestionCounterLabel.setText("Question "
                 + (currentPrdInterviewQuestionIndex + 1)
                 + " of "
@@ -2194,6 +4103,82 @@ public class AppShellController {
         return value == null ? "" : value;
     }
 
+    private ExecutionAgentSelection selectedExecutionAgentSelection() {
+        ExecutionAgentProvider provider = Optional.ofNullable(executionProviderComboBox.getValue())
+                .map(ExecutionAgentProviderChoice::provider)
+                .orElse(ExecutionAgentProvider.CODEX);
+        String modelId = Optional.ofNullable(executionModelComboBox.getValue())
+                .map(ExecutionModelChoice::modelId)
+                .orElse("");
+        return new ExecutionAgentSelection(provider, modelId);
+    }
+
+    private String selectedPrdPlannerModelId() {
+        return Optional.ofNullable(prdPlannerModelComboBox.getValue())
+                .map(ExecutionModelChoice::modelId)
+                .orElse("");
+    }
+
+    private void ensurePrdPlannerVisible() {
+        if (workspaceScrollPane == null || workspacePane == null || livePrdPlannerCard == null) {
+            return;
+        }
+        Platform.runLater(() -> {
+            moveWorkspaceToPrdPlanner();
+            Platform.runLater(this::moveWorkspaceToPrdPlanner);
+        });
+    }
+
+    private void moveWorkspaceToPrdPlanner() {
+        if (workspaceScrollPane == null || workspacePane == null || livePrdPlannerCard == null) {
+            return;
+        }
+
+        Bounds contentBounds = workspacePane.getLayoutBounds();
+        Bounds targetBounds = livePrdPlannerCard.getBoundsInParent();
+        double availableHeight = workspaceScrollPane.getViewportBounds().getHeight();
+        double scrollableHeight = Math.max(contentBounds.getHeight() - availableHeight, 0.0);
+        if (scrollableHeight <= 0.0) {
+            workspaceScrollPane.setVvalue(0.0);
+        } else {
+            double targetOffset = Math.max(targetBounds.getMinY() - 12.0, 0.0);
+            workspaceScrollPane.setVvalue(Math.min(targetOffset / scrollableHeight, 1.0));
+        }
+        if (prdPlannerRequestInProgress || prdPlannerInputArea.isDisabled()) {
+            prdPlannerTranscriptArea.requestFocus();
+            return;
+        }
+        prdPlannerInputArea.requestFocus();
+    }
+
+    private void ensurePrdDocumentVisible() {
+        if (workspaceScrollPane == null || workspacePane == null || prdDocumentCard == null) {
+            return;
+        }
+        Platform.runLater(() -> {
+            moveWorkspaceToPrdDocument();
+            Platform.runLater(this::moveWorkspaceToPrdDocument);
+        });
+    }
+
+    private void moveWorkspaceToPrdDocument() {
+        if (workspaceScrollPane == null || workspacePane == null || prdDocumentCard == null) {
+            return;
+        }
+
+        Bounds contentBounds = workspacePane.getLayoutBounds();
+        Bounds targetBounds = prdDocumentCard.getBoundsInParent();
+        double availableHeight = workspaceScrollPane.getViewportBounds().getHeight();
+        double scrollableHeight = Math.max(contentBounds.getHeight() - availableHeight, 0.0);
+        if (scrollableHeight <= 0.0) {
+            workspaceScrollPane.setVvalue(0.0);
+        } else {
+            double targetOffset = Math.max(targetBounds.getMinY() - 12.0, 0.0);
+            workspaceScrollPane.setVvalue(Math.min(targetOffset / scrollableHeight, 1.0));
+        }
+        prdDocumentPreviewArea.requestFocus();
+    }
+
     private String normalizeEditorLineEndings(String value) {
         if (value == null || value.isEmpty()) {
             return "";
@@ -2235,6 +4220,12 @@ public class AppShellController {
         executionProfileMessageLabel.setVisible(hasMessage);
     }
 
+    private void setExecutionModelStatus(String message) {
+        boolean hasMessage = hasText(message);
+        executionModelStatusLabel.setText(hasMessage ? message : "");
+        executionModelStatusLabel.setVisible(hasMessage);
+    }
+
     private void setNativePreflightMessage(String message) {
         boolean hasMessage = message != null && !message.isBlank();
         nativePreflightMessageLabel.setText(hasMessage ? message : "");
@@ -2245,6 +4236,18 @@ public class AppShellController {
         boolean hasMessage = message != null && !message.isBlank();
         wslPreflightMessageLabel.setText(hasMessage ? message : "");
         wslPreflightMessageLabel.setVisible(hasMessage);
+    }
+
+    private void setPrdPlannerMessage(String message) {
+        boolean hasMessage = message != null && !message.isBlank();
+        prdPlannerMessageLabel.setText(hasMessage ? message : "");
+        prdPlannerMessageLabel.setVisible(hasMessage);
+    }
+
+    private void setPrdPlannerModelStatus(String message) {
+        boolean hasMessage = hasText(message);
+        prdPlannerModelStatusLabel.setText(hasMessage ? message : "");
+        prdPlannerModelStatusLabel.setVisible(hasMessage);
     }
 
     private void setPrdInterviewDraftState(String message) {
@@ -2284,9 +4287,102 @@ public class AppShellController {
     private record ShellSection(String title, String workspaceText, String statusText) {
     }
 
+    private record PlannerReadinessStatus(int score, String detail) {
+    }
+
+    private record ExecutionAgentProviderChoice(ExecutionAgentProvider provider, String label, String detail) {
+        private static ExecutionAgentProviderChoice fromProviderSupport(
+                ExecutionAgentModelCatalogService.ProviderSupport providerSupport) {
+            String displayLabel = providerSupport.enabled()
+                    ? providerSupport.displayName()
+                    : providerSupport.displayName() + " (Coming Soon)";
+            return new ExecutionAgentProviderChoice(providerSupport.provider(), displayLabel, providerSupport.detail());
+        }
+    }
+
+    private record ExecutionModelChoice(String modelId, String label) {
+        private static ExecutionModelChoice cliDefault() {
+            return new ExecutionModelChoice("", "CLI Default");
+        }
+
+        private static ExecutionModelChoice fromModelOption(ExecutionAgentModelCatalogService.ModelOption modelOption) {
+            String displayLabel = hasText(modelOption.displayName())
+                    ? modelOption.displayName() + " (" + modelOption.modelId() + ")"
+                    : modelOption.modelId();
+            return new ExecutionModelChoice(modelOption.modelId(), displayLabel);
+        }
+
+        private static boolean hasText(String value) {
+            return value != null && !value.isBlank();
+        }
+    }
+
+    private record StructuredRunOutputEntry(String key,
+                                            String badge,
+                                            String title,
+                                            String body,
+                                            String detail,
+                                            String accentStyleClass,
+                                            boolean commandOutput) {
+    }
+
+    private record CommandOutputDisplay(String visibleText, int visibleLineCount, boolean truncated) {
+    }
+
+    private record ScrollPositionState(boolean stickToBottom,
+                                       double offsetFromTop,
+                                       double offsetFromBottom) {
+    }
+
+    private record StructuredCommandOutputViewState(boolean expanded, ScrollPositionState scrollPosition) {
+        private static StructuredCommandOutputViewState collapsed() {
+            return new StructuredCommandOutputViewState(false, null);
+        }
+
+        private StructuredCommandOutputViewState withExpanded(boolean replacementExpanded) {
+            return new StructuredCommandOutputViewState(replacementExpanded, scrollPosition);
+        }
+
+        private StructuredCommandOutputViewState withScrollPosition(ScrollPositionState replacementScrollPosition) {
+            return new StructuredCommandOutputViewState(expanded, replacementScrollPosition);
+        }
+    }
+
     private enum RunOutputView {
         ASSISTANT_SUMMARY,
-        RAW_OUTPUT
+        RAW_OUTPUT,
+        STRUCTURED_OUTPUT
+    }
+
+    private enum RunHistoryArtifactType {
+        PROMPT("Prompt", "Prompt", "OpenPrompt"),
+        STDOUT("Stdout", "Stdout Log", "OpenStdout"),
+        STDERR("Stderr", "Stderr Log", "OpenStderr"),
+        STRUCTURED_EVENTS("Events", "Structured Events", "OpenEvents"),
+        ASSISTANT_SUMMARY("Assistant Summary", "Assistant Summary", "OpenAssistantSummary"),
+        ATTEMPT_SUMMARY("Artifact Summary", "Artifact Summary", "OpenArtifactSummary");
+
+        private final String buttonLabel;
+        private final String viewerLabel;
+        private final String idFragment;
+
+        RunHistoryArtifactType(String buttonLabel, String viewerLabel, String idFragment) {
+            this.buttonLabel = buttonLabel;
+            this.viewerLabel = viewerLabel;
+            this.idFragment = idFragment;
+        }
+
+        private String buttonLabel() {
+            return buttonLabel;
+        }
+
+        private String viewerLabel() {
+            return viewerLabel;
+        }
+
+        private String idFragment() {
+            return idFragment;
+        }
     }
 
     private enum StoryDashboardState {
@@ -2337,17 +4433,26 @@ public class AppShellController {
             return new RunOutputPresentationState(true, true, summary, detail, assistantSummary, rawOutput);
         }
 
-        private RunOutputPresentationState appendRawOutput(String additionalOutput) {
-            if (additionalOutput == null || additionalOutput.isBlank()) {
-                return this;
-            }
+        private RunOutputPresentationState withRawOutput(String replacementRawOutput) {
             return new RunOutputPresentationState(
                     available,
                     active,
                     summary,
                     detail,
                     assistantSummary,
-                    rawOutput + additionalOutput
+                    replacementRawOutput == null ? "" : replacementRawOutput
+            );
+        }
+    }
+
+    private record RunHistoryArtifactViewerState(String summary,
+                                                 String path,
+                                                 String content) {
+        private static RunHistoryArtifactViewerState empty() {
+            return new RunHistoryArtifactViewerState(
+                    NO_SELECTED_HISTORY_ARTIFACT_SUMMARY,
+                    "",
+                    NO_SELECTED_HISTORY_ARTIFACT_DETAIL
             );
         }
     }

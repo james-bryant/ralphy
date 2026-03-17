@@ -102,13 +102,18 @@ public record PrdTaskRecord(String taskId,
         return replaceAttemptState(PrdTaskStatus.RUNNING, updatedAttempts, timestamp, message);
     }
 
-    public PrdTaskRecord finishAttempt(String runId, PrdTaskStatus replacementOutcome, String timestamp, String message) {
+    public PrdTaskRecord finishAttempt(String runId,
+                                       PrdTaskStatus replacementOutcome,
+                                       String timestamp,
+                                       String message,
+                                       String commitHash,
+                                       String commitMessage) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(replacementOutcome, "replacementOutcome must not be null");
         Objects.requireNonNull(timestamp, "timestamp must not be null");
         List<PrdStoryAttemptRecord> updatedAttempts = updateAttempt(
                 runId,
-                attempt -> attempt.finished(replacementOutcome, timestamp, message)
+                attempt -> attempt.finished(replacementOutcome, timestamp, message, commitHash, commitMessage)
         );
         return replaceAttemptState(replacementOutcome, updatedAttempts, timestamp, message);
     }

@@ -31,24 +31,32 @@ public class CodexLauncherService {
     private final Clock clock;
     private final Supplier<String> runIdGenerator;
     private final ProcessExecutor processExecutor;
+    private final WslShellResolver wslShellResolver;
     private final ObjectMapper objectMapper;
     private final String codexCommand;
 
     @Autowired
     public CodexLauncherService(LocalMetadataStorage localMetadataStorage,
-                                @Value("${ralphy.codex.command:codex}") String codexCommand) {
+                                @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}")
+                                String codexCommand) {
         this(localMetadataStorage,
                 Clock.systemUTC(),
                 () -> UUID.randomUUID().toString(),
                 new SystemProcessExecutor(),
-                codexCommand);
+                codexCommand,
+                new SystemWslShellResolver());
     }
 
     CodexLauncherService(LocalMetadataStorage localMetadataStorage,
                          Clock clock,
                          Supplier<String> runIdGenerator,
                          ProcessExecutor processExecutor) {
-        this(localMetadataStorage, clock, runIdGenerator, processExecutor, "codex");
+        this(localMetadataStorage,
+                clock,
+                runIdGenerator,
+                processExecutor,
+                CodexCliSupport.DEFAULT_COMMAND,
+                new SystemWslShellResolver());
     }
 
     CodexLauncherService(LocalMetadataStorage localMetadataStorage,
@@ -56,10 +64,25 @@ public class CodexLauncherService {
                          Supplier<String> runIdGenerator,
                          ProcessExecutor processExecutor,
                          String codexCommand) {
+        this(localMetadataStorage,
+                clock,
+                runIdGenerator,
+                processExecutor,
+                codexCommand,
+                new SystemWslShellResolver());
+    }
+
+    CodexLauncherService(LocalMetadataStorage localMetadataStorage,
+                         Clock clock,
+                         Supplier<String> runIdGenerator,
+                         ProcessExecutor processExecutor,
+                         String codexCommand,
+                         WslShellResolver wslShellResolver) {
         this.localMetadataStorage = Objects.requireNonNull(localMetadataStorage, "localMetadataStorage must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.runIdGenerator = Objects.requireNonNull(runIdGenerator, "runIdGenerator must not be null");
         this.processExecutor = Objects.requireNonNull(processExecutor, "processExecutor must not be null");
+        this.wslShellResolver = Objects.requireNonNull(wslShellResolver, "wslShellResolver must not be null");
         this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         this.codexCommand = Objects.requireNonNull(codexCommand, "codexCommand must not be null");
     }
@@ -69,24 +92,25 @@ public class CodexLauncherService {
 
         String runId = normalizeRunId(runIdGenerator.get());
         String promptText = renderPrompt(request);
-        List<String> codexCommandTokens = codexCommandTokens(request.codexOptions());
+        List<String> codexArguments = codexArguments(request.codexOptions());
 
         if (request.executionProfile().type() == ExecutionProfile.ProfileType.POWERSHELL) {
+            List<String> nativeCommand = CodexCliSupport.buildNativeCommand(
+                    codexCommand,
+                    System.getenv(),
+                    codexArguments
+            );
             return new CodexLaunchPlan(
                     runId,
                     request.storyId(),
                     request.activeProject(),
                     request.executionProfile(),
                     request.preset(),
-                    List.of(
-                            "powershell.exe",
-                            "-NoLogo",
-                            "-NoProfile",
-                            "-Command",
-                            buildPowerShellCommand(codexCommandTokens)
-                    ),
+                    nativeCommand,
                     request.activeProject().repositoryPath(),
                     request.activeProject().repositoryPath().toString(),
+                    request.branchName(),
+                    request.branchAction(),
                     promptText
             );
         }
@@ -96,6 +120,7 @@ public class CodexLauncherService {
         if (!pathMappingResult.successful()) {
             throw new IllegalArgumentException(pathMappingResult.message());
         }
+        String shellPath = wslShellResolver.resolveShellPath(request.executionProfile().wslDistribution());
 
         return new CodexLaunchPlan(
                 runId,
@@ -103,19 +128,21 @@ public class CodexLauncherService {
                 request.activeProject(),
                 request.executionProfile(),
                 request.preset(),
-                List.of(
+                    List.of(
                         "wsl.exe",
                         "--distribution",
                         request.executionProfile().wslDistribution(),
                         "--cd",
                         pathMappingResult.wslPath(),
                         "--exec",
-                        "/bin/sh",
-                        "-lc",
-                        buildShCommand(codexCommandTokens)
+                        shellPath,
+                        "-ic",
+                        CodexCliSupport.buildWslCodexScript(codexCommand, codexArguments)
                 ),
                 null,
                 pathMappingResult.wslPath(),
+                request.branchName(),
+                request.branchAction(),
                 promptText
         );
     }
@@ -189,6 +216,8 @@ public class CodexLauncherService {
                         null,
                         null,
                         launchPlan.command(),
+                        launchPlan.branchName(),
+                        launchPlan.branchAction(),
                         LocalMetadataStorage.RunArtifactPaths.empty()
                 )));
     }
@@ -207,6 +236,8 @@ public class CodexLauncherService {
                         launchResult.processId(),
                         launchResult.exitCode(),
                         launchResult.launchPlan().command(),
+                        launchResult.launchPlan().branchName(),
+                        launchResult.launchPlan().branchAction(),
                         new LocalMetadataStorage.RunArtifactPaths(
                                 launchResult.artifacts().promptPath().toString(),
                                 launchResult.artifacts().stdoutPath().toString(),
@@ -285,6 +316,8 @@ public class CodexLauncherService {
                     processId,
                     exitCode,
                     launchPlan.command(),
+                    launchPlan.branchName(),
+                    launchPlan.branchAction(),
                     message,
                     new LocalMetadataStorage.RunArtifactPaths(
                             promptPath.toString(),
@@ -616,38 +649,12 @@ public class CodexLauncherService {
         return promptBuilder.toString().trim();
     }
 
-    private List<String> codexCommandTokens(List<String> codexOptions) {
-        List<String> commandTokens = new ArrayList<>();
-        commandTokens.add(codexCommand);
-        commandTokens.add("exec");
-        commandTokens.addAll(codexOptions);
-        commandTokens.add("-");
-        return List.copyOf(commandTokens);
-    }
-
-    private String buildPowerShellCommand(List<String> commandTokens) {
-        StringBuilder scriptBuilder = new StringBuilder("&");
-        for (String commandToken : commandTokens) {
-            scriptBuilder.append(' ').append(quoteForPowerShell(commandToken));
-        }
-        return scriptBuilder.toString();
-    }
-
-    private String buildShCommand(List<String> commandTokens) {
-        return commandTokens.stream()
-                .map(this::quoteForSh)
-                .reduce((left, right) -> left + " " + right)
-                .orElse("");
-    }
-
-    private String quoteForPowerShell(String value) {
-        String safeValue = value == null ? "" : value;
-        return "'" + safeValue.replace("'", "''") + "'";
-    }
-
-    private String quoteForSh(String value) {
-        String safeValue = value == null ? "" : value;
-        return "'" + safeValue.replace("'", "'\"'\"'") + "'";
+    private List<String> codexArguments(List<String> codexOptions) {
+        List<String> commandArguments = new ArrayList<>();
+        commandArguments.add("exec");
+        commandArguments.addAll(codexOptions);
+        commandArguments.add("-");
+        return List.copyOf(commandArguments);
     }
 
     private String launchMessage(ProcessExecution processExecution) {
@@ -691,7 +698,9 @@ public class CodexLauncherService {
                                      BuiltInPreset preset,
                                      List<PromptInput> presetInputs,
                                      String additionalInstructions,
-                                     List<String> codexOptions) {
+                                     List<String> codexOptions,
+                                     String branchName,
+                                     String branchAction) {
         public CodexLaunchRequest {
             if (storyId == null || storyId.isBlank()) {
                 throw new IllegalArgumentException("storyId must not be blank");
@@ -702,6 +711,19 @@ public class CodexLauncherService {
             presetInputs = List.copyOf(presetInputs == null ? List.of() : presetInputs);
             codexOptions = List.copyOf(codexOptions == null ? List.of() : codexOptions);
             additionalInstructions = additionalInstructions == null ? "" : additionalInstructions;
+            branchName = branchName == null ? "" : branchName;
+            branchAction = branchAction == null ? "" : branchAction;
+        }
+
+        public CodexLaunchRequest(String storyId,
+                                  ActiveProject activeProject,
+                                  ExecutionProfile executionProfile,
+                                  BuiltInPreset preset,
+                                  List<PromptInput> presetInputs,
+                                  String additionalInstructions,
+                                  List<String> codexOptions) {
+            this(storyId, activeProject, executionProfile, preset, presetInputs, additionalInstructions, codexOptions,
+                    "", "");
         }
     }
 
@@ -722,6 +744,8 @@ public class CodexLauncherService {
                                   List<String> command,
                                   Path processWorkingDirectory,
                                   String executionWorkingDirectory,
+                                  String branchName,
+                                  String branchAction,
                                   String promptText) {
         public CodexLaunchPlan {
             if (runId == null || runId.isBlank()) {
@@ -737,6 +761,8 @@ public class CodexLauncherService {
             if (executionWorkingDirectory == null || executionWorkingDirectory.isBlank()) {
                 throw new IllegalArgumentException("executionWorkingDirectory must not be blank");
             }
+            branchName = branchName == null ? "" : branchName;
+            branchAction = branchAction == null ? "" : branchAction;
             Objects.requireNonNull(promptText, "promptText must not be null");
         }
     }
@@ -797,6 +823,8 @@ public class CodexLauncherService {
                                           Long processId,
                                           Integer exitCode,
                                           List<String> command,
+                                          String branchName,
+                                          String branchAction,
                                           String message,
                                           LocalMetadataStorage.RunArtifactPaths artifactPaths) {
     }
@@ -849,6 +877,31 @@ public class CodexLauncherService {
         }
     }
 
+    interface WslShellResolver {
+        String resolveShellPath(String distribution);
+    }
+
+    private static final class SystemWslShellResolver implements WslShellResolver {
+        @Override
+        public String resolveShellPath(String distribution) {
+            return WslShellSupport.resolveShellPath(distribution, command -> {
+                ProcessBuilder processBuilder = new ProcessBuilder(command);
+                processBuilder.redirectErrorStream(true);
+                try {
+                    Process process = processBuilder.start();
+                    String processOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+                    int exitCode = process.waitFor();
+                    return new WslShellSupport.CommandResult(exitCode == 0, processOutput);
+                } catch (IOException exception) {
+                    return new WslShellSupport.CommandResult(false, exception.getMessage());
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return new WslShellSupport.CommandResult(false, "");
+                }
+            });
+        }
+    }
+
     private static final class SystemProcessExecutor implements ProcessExecutor {
         @Override
         public ProcessExecution execute(CodexLaunchPlan launchPlan) {
@@ -860,6 +913,9 @@ public class CodexLauncherService {
             ProcessBuilder processBuilder = new ProcessBuilder(launchPlan.command());
             if (launchPlan.processWorkingDirectory() != null) {
                 processBuilder.directory(launchPlan.processWorkingDirectory().toFile());
+            }
+            if (launchPlan.executionProfile().type() == ExecutionProfile.ProfileType.POWERSHELL) {
+                CodexCliSupport.prependNativePathEntries(processBuilder.environment());
             }
 
             try {

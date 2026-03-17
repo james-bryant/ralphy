@@ -10,7 +10,9 @@ public record PrdStoryAttemptRecord(String runId,
                                     String queuedAt,
                                     String startedAt,
                                     String endedAt,
-                                    String detail) {
+                                    String detail,
+                                    String commitHash,
+                                    String commitMessage) {
     public PrdStoryAttemptRecord {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(presetId, "presetId must not be null");
@@ -21,6 +23,8 @@ public record PrdStoryAttemptRecord(String runId,
         startedAt = startedAt == null ? "" : startedAt.trim();
         endedAt = endedAt == null ? "" : endedAt.trim();
         detail = detail == null ? "" : detail.trim();
+        commitHash = commitHash == null ? "" : commitHash.trim();
+        commitMessage = commitMessage == null ? "" : commitMessage.trim();
     }
 
     public static PrdStoryAttemptRecord queued(String runId, BuiltInPreset preset, String timestamp, String detail) {
@@ -34,7 +38,9 @@ public record PrdStoryAttemptRecord(String runId,
                 timestamp,
                 "",
                 "",
-                detail
+                detail,
+                "",
+                ""
         );
     }
 
@@ -48,11 +54,17 @@ public record PrdStoryAttemptRecord(String runId,
                 queuedAt,
                 timestamp,
                 "",
-                detail
+                detail,
+                "",
+                ""
         );
     }
 
-    public PrdStoryAttemptRecord finished(PrdTaskStatus replacementOutcome, String timestamp, String detail) {
+    public PrdStoryAttemptRecord finished(PrdTaskStatus replacementOutcome,
+                                          String timestamp,
+                                          String detail,
+                                          String commitHash,
+                                          String commitMessage) {
         Objects.requireNonNull(replacementOutcome, "replacementOutcome must not be null");
         return new PrdStoryAttemptRecord(
                 runId,
@@ -63,7 +75,9 @@ public record PrdStoryAttemptRecord(String runId,
                 queuedAt,
                 startedAt,
                 timestamp,
-                detail
+                detail,
+                commitHash,
+                commitMessage
         );
     }
 }

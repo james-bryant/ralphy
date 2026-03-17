@@ -70,10 +70,19 @@ class PrdMarkdownGeneratorTest {
         assertTrue(markdown.contains("## Quality Gates"));
         assertTrue(markdown.contains("## User Stories"));
         assertTrue(markdown.contains("## Scope Boundaries"));
+        assertTrue(markdown.contains("## Functional Requirements"));
+        assertTrue(markdown.contains("## Technical Considerations"));
+        assertTrue(markdown.contains("## Success Metrics"));
+        assertTrue(markdown.contains("## Open Questions"));
         assertTrue(markdown.contains("### In Scope"));
         assertTrue(markdown.contains("### Out of Scope"));
         assertTrue(markdown.indexOf("### US-002: Generate the active PRD")
                 < markdown.indexOf("### US-010: Edit the active PRD"));
+        assertTrue(markdown.contains("### US-002: Generate the active PRD"));
+        assertTrue(markdown.contains("**Description:** As a user, I want Generate the active PRD so that Interview answers become reviewable Markdown."));
+        assertTrue(markdown.contains("**Dependencies:** None."));
+        assertTrue(markdown.contains("**Acceptance Criteria:**"));
+        assertTrue(markdown.contains("- [ ] Interview answers become reviewable Markdown."));
     }
 
     @Test
@@ -97,5 +106,7 @@ class PrdMarkdownGeneratorTest {
         assertTrue(markdown.contains("### US-002: Regenerate from the latest draft"));
         assertTrue(markdown.indexOf("### US-001: Generate the active PRD")
                 < markdown.indexOf("### US-002: Regenerate from the latest draft"));
+        assertTrue(markdown.contains("**Description:** As a user, I want Generate the active PRD so that Turn interview answers into Markdown."));
+        assertTrue(markdown.contains("- [ ] Overwrite the saved PRD with new answers."));
     }
 }

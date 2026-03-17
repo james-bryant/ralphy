@@ -23,6 +23,9 @@ class NativeWindowsPreflightServiceTest {
     @Test
     void runPassesWhenCodexAuthGitAndQualityGateAreReady() throws IOException {
         Path codexHome = Files.createDirectories(tempDir.resolve("codex-home"));
+        Path appDataDirectory = Files.createDirectories(tempDir.resolve("appdata"));
+        Path npmDirectory = Files.createDirectories(appDataDirectory.resolve("npm"));
+        Files.writeString(npmDirectory.resolve("codex.cmd"), "@echo off\r\n");
         Files.writeString(codexHome.resolve("auth.json"), """
                 {
                   "OPENAI_API_KEY": null,
@@ -34,12 +37,16 @@ class NativeWindowsPreflightServiceTest {
         Path repository = createRepository("ready-repo", true);
 
         NativeWindowsPreflightService service = new NativeWindowsPreflightService(
-                Map.of(),
+                Map.of("APPDATA", appDataDirectory.toString()),
                 codexHome,
-                (workingDirectory, command) -> switch (command.getFirst()) {
-                    case "codex" -> NativeWindowsPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
-                    case "git" -> NativeWindowsPreflightService.CommandResult.success(0, "true");
-                    default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
+                (workingDirectory, command) -> {
+                    if (command.getFirst().endsWith("codex.cmd")) {
+                        return NativeWindowsPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
+                    }
+                    if ("git".equals(command.getFirst())) {
+                        return NativeWindowsPreflightService.CommandResult.success(0, "true");
+                    }
+                    return NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
                 }
         );
 
@@ -58,7 +65,7 @@ class NativeWindowsPreflightServiceTest {
     }
 
     @Test
-    void runCategorizesFailuresWhenRequirementsAreMissing() throws IOException {
+    void runDoesNotFailQualityGateWhenTheRepositoryIsNotMavenBased() throws IOException {
         Path codexHome = Files.createDirectories(tempDir.resolve("codex-home"));
         Files.writeString(codexHome.resolve("auth.json"), """
                 {
@@ -68,16 +75,15 @@ class NativeWindowsPreflightServiceTest {
                 """);
         Path repository = createRepository("broken-repo", false);
 
-        List<List<String>> executedCommands = new ArrayList<>();
         NativeWindowsPreflightService service = new NativeWindowsPreflightService(
                 Map.of(),
                 codexHome,
                 (workingDirectory, command) -> {
-                    executedCommands.add(command);
                     return switch (command.getFirst()) {
-                    case "codex" -> NativeWindowsPreflightService.CommandResult.failure("The system cannot find the file specified.");
-                    case "git" -> NativeWindowsPreflightService.CommandResult.success(1, "fatal: not a git repository");
-                    default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
+                        case "codex" -> NativeWindowsPreflightService.CommandResult.failure(
+                                "The system cannot find the file specified.");
+                        case "git" -> NativeWindowsPreflightService.CommandResult.success(1, "fatal: not a git repository");
+                        default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
                     };
                 }
         );
@@ -94,17 +100,45 @@ class NativeWindowsPreflightServiceTest {
         assertEquals(NativeWindowsPreflightReport.CheckStatus.FAIL, checksById.get("codex_cli").status());
         assertEquals(NativeWindowsPreflightReport.CheckStatus.FAIL, checksById.get("codex_auth").status());
         assertEquals(NativeWindowsPreflightReport.CheckStatus.FAIL, checksById.get("git_ready").status());
-        assertEquals(NativeWindowsPreflightReport.CheckStatus.FAIL, checksById.get("quality_gate").status());
+        assertEquals(NativeWindowsPreflightReport.CheckStatus.PASS, checksById.get("quality_gate").status());
         assertTrue(checksById.get("codex_auth").detail().contains("No stored Codex credentials"));
-        assertTrue(checksById.get("quality_gate").detail().contains("mvnw.cmd"));
+        assertTrue(checksById.get("quality_gate").detail().contains("No repository-owned native quality gate command was auto-detected"));
         assertEquals("npm install -g @openai/codex",
                 checksById.get("codex_cli").remediationCommands().getFirst().command());
         assertEquals("codex login",
                 checksById.get("codex_auth").remediationCommands().getFirst().command());
-        assertTrue(checksById.get("quality_gate").remediationCommands().stream()
-                .anyMatch(command -> command.command().contains(NativeWindowsPreflightService.QUALITY_GATE_COMMAND)));
-        assertTrue(executedCommands.stream().noneMatch(command -> command.contains("login")));
-        assertTrue(executedCommands.stream().noneMatch(command -> command.contains("npm")));
+        assertTrue(checksById.get("quality_gate").remediationCommands().isEmpty());
+    }
+
+    @Test
+    void runDetectsGradleWrapperQualityGateWhenPresent() throws IOException {
+        Path codexHome = Files.createDirectories(tempDir.resolve("codex-home"));
+        Files.writeString(codexHome.resolve("auth.json"), """
+                {
+                  "OPENAI_API_KEY": "test-key",
+                  "tokens": {}
+                }
+                """);
+        Path repository = Files.createDirectory(tempDir.resolve("gradle-repo"));
+        Files.createDirectory(repository.resolve(".git"));
+        Files.writeString(repository.resolve("gradlew.bat"), "@echo off\r\n");
+        Files.writeString(repository.resolve("build.gradle.kts"), "plugins {}\r\n");
+
+        NativeWindowsPreflightService service = new NativeWindowsPreflightService(
+                Map.of(),
+                codexHome,
+                (workingDirectory, command) -> switch (command.getFirst()) {
+                    case "codex" -> NativeWindowsPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
+                    case "git" -> NativeWindowsPreflightService.CommandResult.success(0, "true");
+                    default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
+                }
+        );
+
+        NativeWindowsPreflightReport report = service.run(new ActiveProject(repository));
+
+        Map<String, NativeWindowsPreflightReport.CheckResult> checksById = checksById(report);
+        assertEquals(NativeWindowsPreflightReport.CheckStatus.PASS, checksById.get("quality_gate").status());
+        assertTrue(checksById.get("quality_gate").detail().contains(NativeWindowsPreflightService.GRADLE_QUALITY_GATE_COMMAND));
     }
 
     private Path createRepository(String name, boolean includeQualityGateFiles) throws IOException {

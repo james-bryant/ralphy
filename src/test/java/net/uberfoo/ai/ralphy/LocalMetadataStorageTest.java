@@ -39,7 +39,7 @@ class LocalMetadataStorageTest {
         LocalMetadataStorage.ProfileRecord profileRecord = restartedSnapshot.profiles().getFirst();
         ActiveProject activeProject = new ActiveProject(repositoryPath);
 
-        assertEquals(5, restartedSnapshot.schemaVersion());
+        assertEquals(6, restartedSnapshot.schemaVersion());
         assertEquals(repositoryPath.toAbsolutePath().normalize().toString(), projectRecord.repositoryPath());
         assertEquals(activeProject.activePrdPath().toString(), projectRecord.storagePaths().activePrdPath());
         assertEquals(activeProject.prdJsonDirectoryPath().toString(), projectRecord.storagePaths().prdJsonDirectoryPath());
@@ -100,7 +100,7 @@ class LocalMetadataStorageTest {
                 LocalMetadataStorage.forTest(storageDirectory).snapshot();
         ActiveProject activeProject = new ActiveProject(repositoryPath);
 
-        assertEquals(5, migratedSnapshot.schemaVersion());
+        assertEquals(6, migratedSnapshot.schemaVersion());
         assertEquals(activeProject.artifactsDirectoryPath().toString(),
                 migratedSnapshot.projects().getFirst().storagePaths().artifactsDirectoryPath());
         assertEquals(activeProject.logsDirectoryPath().toString(),
@@ -253,7 +253,7 @@ class LocalMetadataStorageTest {
         LocalMetadataStorage.LocalMetadataSnapshot migratedSnapshot =
                 LocalMetadataStorage.forTest(storageDirectory).snapshot();
 
-        assertEquals(5, migratedSnapshot.schemaVersion());
+        assertEquals(6, migratedSnapshot.schemaVersion());
         assertEquals(new LocalMetadataStorage.RunArtifactPaths(null, null, null, null, null, null),
                 migratedSnapshot.runMetadata().getFirst().artifactPaths());
     }

@@ -45,6 +45,15 @@
     -fx-text-fill: -color-text-primary;
 }
 
+.ralphy-shell .text-area .content,
+.ralphy-shell .text-area .viewport {
+    -fx-background-color: -color-surface-primary;
+}
+
+.ralphy-shell #prdInterviewPromptLabel {
+    -fx-font-size: 15px;
+}
+
 .ralphy-shell .radio-button {
     -fx-text-fill: -color-text-primary;
 }
@@ -187,11 +196,127 @@
     -fx-font-family: "Consolas";
 }
 
+.ralphy-shell .run-output-structured-scroll,
+.ralphy-shell .run-output-structured-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+.ralphy-shell .run-output-structured-container {
+    -fx-padding: 2 0 2 0;
+}
+
+.ralphy-shell .run-output-event-card {
+    -fx-background-color: -color-surface-primary;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-width: 0 0 0 4;
+    -fx-padding: 12;
+    -fx-spacing: 6;
+}
+
+.ralphy-shell .run-output-event-running {
+    -fx-border-color: #0ea5e9;
+}
+
+.ralphy-shell .run-output-event-success {
+    -fx-border-color: #10b981;
+}
+
+.ralphy-shell .run-output-event-failure {
+    -fx-border-color: #f97316;
+}
+
+.ralphy-shell .run-output-event-neutral {
+    -fx-border-color: -color-border-muted;
+}
+
+.ralphy-shell .run-output-event-badge {
+    -fx-background-radius: 999;
+    -fx-font-family: "Consolas";
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-padding: 3 8 3 8;
+}
+
+.ralphy-shell .run-output-event-badge.run-output-event-running {
+    -fx-background-color: #082f49;
+    -fx-text-fill: #7dd3fc;
+}
+
+.ralphy-shell .run-output-event-badge.run-output-event-success {
+    -fx-background-color: #052e2b;
+    -fx-text-fill: #6ee7b7;
+}
+
+.ralphy-shell .run-output-event-badge.run-output-event-failure {
+    -fx-background-color: #431407;
+    -fx-text-fill: #fdba74;
+}
+
+.ralphy-shell .run-output-event-badge.run-output-event-neutral {
+    -fx-background-color: -color-surface-raised;
+    -fx-text-fill: -color-text-secondary;
+}
+
+.ralphy-shell .run-output-event-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+
+.ralphy-shell .run-output-event-command-title {
+    -fx-font-size: 12px;
+    -fx-font-weight: normal;
+    -fx-font-family: "Consolas";
+}
+
+.ralphy-shell .run-output-event-meta {
+    -fx-font-size: 11px;
+    -fx-text-fill: -color-text-secondary;
+}
+
+.ralphy-shell .run-output-event-body {
+    -fx-font-family: "Consolas";
+}
+
+.ralphy-shell .run-output-event-toggle {
+    -fx-background-color: transparent;
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 999;
+    -fx-background-radius: 999;
+    -fx-font-size: 11px;
+    -fx-text-fill: -color-text-secondary;
+    -fx-padding: 4 10 4 10;
+}
+
+.ralphy-shell .run-output-event-output-scroll,
+.ralphy-shell .run-output-event-output-scroll > .viewport {
+    -fx-background-color: -color-surface-raised;
+    -fx-background-radius: 8;
+}
+
+.ralphy-shell .run-output-event-output-scroll {
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 8;
+}
+
+.ralphy-shell .run-output-event-output-content {
+    -fx-font-family: "Consolas";
+    -fx-padding: 8 10 8 10;
+}
+
 .ralphy-shell .story-progress-metric {
     -fx-background-color: -color-surface-primary;
     -fx-background-radius: 10;
     -fx-border-color: -color-border-muted;
     -fx-border-radius: 10;
+}
+
+.ralphy-shell .run-history-entry-card {
+    -fx-background-color: -color-surface-primary;
+    -fx-background-radius: 10;
+    -fx-border-color: -color-border-muted;
+    -fx-border-radius: 10;
+    -fx-padding: 12;
 }
 
 .ralphy-shell .story-progress-count {

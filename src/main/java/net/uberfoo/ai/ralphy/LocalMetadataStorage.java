@@ -24,7 +24,7 @@ import java.util.UUID;
 
 @Component
 public class LocalMetadataStorage {
-    private static final int SCHEMA_VERSION = 5;
+    private static final int SCHEMA_VERSION = 6;
     private static final String STORAGE_FILE_NAME = "metadata-store.json";
     private static final String DEFAULT_PROFILE_TYPE = ExecutionProfile.ProfileType.POWERSHELL.storageValue();
 
@@ -174,6 +174,18 @@ public class LocalMetadataStorage {
         return state.runMetadata().stream()
                 .filter(runMetadataRecord -> projectId.equals(runMetadataRecord.projectId()))
                 .max(Comparator.comparing(this::runSortKey));
+    }
+
+    public synchronized List<RunMetadataRecord> runMetadataForProject(String projectId) {
+        if (!isPopulated(projectId)) {
+            return List.of();
+        }
+
+        return state.runMetadata().stream()
+                .filter(runMetadataRecord -> projectId.equals(runMetadataRecord.projectId()))
+                .sorted(Comparator.comparing(this::runSortKey).reversed()
+                        .thenComparing(RunMetadataRecord::runId, Comparator.nullsLast(String::compareTo)))
+                .toList();
     }
 
     public synchronized RunMetadataRecord saveRunMetadata(RunMetadataRecord runMetadataRecord) {
@@ -513,6 +525,8 @@ public class LocalMetadataStorage {
                 runMetadataRecord.processId(),
                 runMetadataRecord.exitCode(),
                 runMetadataRecord.command(),
+                runMetadataRecord.branchName(),
+                runMetadataRecord.branchAction(),
                 runMetadataRecord.artifactPaths()
         );
     }
@@ -734,10 +748,41 @@ public class LocalMetadataStorage {
                                     Long processId,
                                     Integer exitCode,
                                     List<String> command,
+                                    String branchName,
+                                    String branchAction,
                                     RunArtifactPaths artifactPaths) {
         public RunMetadataRecord {
             command = List.copyOf(command == null ? List.of() : command);
+            branchName = normalizeOptionalValue(branchName);
+            branchAction = normalizeOptionalValue(branchAction);
             artifactPaths = artifactPaths == null ? RunArtifactPaths.empty() : artifactPaths;
+        }
+
+        public RunMetadataRecord(String runId,
+                                String projectId,
+                                 String storyId,
+                                 String status,
+                                 String startedAt,
+                                 String endedAt,
+                                 String profileType,
+                                String workingDirectory,
+                                Long processId,
+                                Integer exitCode,
+                                List<String> command) {
+            this(runId,
+                    projectId,
+                    storyId,
+                    status,
+                    startedAt,
+                    endedAt,
+                    profileType,
+                    workingDirectory,
+                    processId,
+                    exitCode,
+                    command,
+                    null,
+                    null,
+                    RunArtifactPaths.empty());
         }
 
         public RunMetadataRecord(String runId,
@@ -750,7 +795,8 @@ public class LocalMetadataStorage {
                                  String workingDirectory,
                                  Long processId,
                                  Integer exitCode,
-                                 List<String> command) {
+                                 List<String> command,
+                                 RunArtifactPaths artifactPaths) {
             this(runId,
                     projectId,
                     storyId,
@@ -762,7 +808,9 @@ public class LocalMetadataStorage {
                     processId,
                     exitCode,
                     command,
-                    RunArtifactPaths.empty());
+                    null,
+                    null,
+                    artifactPaths);
         }
 
         public RunMetadataRecord(String runId,
@@ -772,6 +820,7 @@ public class LocalMetadataStorage {
                                  String startedAt,
                                  String endedAt) {
             this(runId, projectId, storyId, status, startedAt, endedAt, null, null, null, null, List.of(),
+                    null, null,
                     RunArtifactPaths.empty());
         }
     }

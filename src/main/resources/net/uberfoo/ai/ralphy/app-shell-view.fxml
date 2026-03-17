@@ -3,7 +3,9 @@
 <?import java.lang.String?>
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ProgressIndicator?>
 <?import javafx.scene.control.RadioButton?>
 <?import javafx.scene.control.ScrollPane?>
 <?import javafx.scene.control.Separator?>
@@ -16,6 +18,9 @@
 
 <BorderPane id="shellRoot" prefHeight="800.0" prefWidth="1280.0" xmlns:fx="http://javafx.com/fxml"
             fx:controller="net.uberfoo.ai.ralphy.AppShellController">
+    <styleClass>
+        <String fx:value="ralphy-shell"/>
+    </styleClass>
     <left>
         <VBox id="navigationPane" fx:id="navigationPane" prefWidth="260.0" spacing="16.0">
             <styleClass>
@@ -67,7 +72,8 @@
         </VBox>
     </left>
     <center>
-        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" pannable="true">
+        <ScrollPane id="workspaceScrollPane" fx:id="workspaceScrollPane"
+                    fitToWidth="true" hbarPolicy="NEVER" pannable="true">
             <styleClass>
                 <String fx:value="workspace-scroll-pane"/>
             </styleClass>
@@ -89,7 +95,7 @@
                             <String fx:value="muted-text"/>
                         </styleClass>
                     </Label>
-                    <HBox spacing="16.0">
+                    <HBox id="projectsWorkspaceRow" fx:id="projectsWorkspaceRow" spacing="16.0">
                         <VBox HBox.hgrow="ALWAYS" spacing="8.0">
                             <styleClass>
                                 <String fx:value="shell-card"/>
@@ -347,12 +353,12 @@
                         <padding>
                             <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
                         </padding>
-                        <Label text="Built-In Preset Catalog">
+                        <Label text="Execution Workflows">
                             <styleClass>
                                 <String fx:value="card-title"/>
                             </styleClass>
                         </Label>
-                        <Label text="Select a built-in Ralph/Codex preset and inspect its versioned prompt preview. v1 intentionally keeps the prompt text read-only."
+                        <Label text="Choose the execution workflow for this run stage and inspect the versioned prompt preview for the active execution step."
                                wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
@@ -360,7 +366,7 @@
                         </Label>
                         <HBox spacing="18.0">
                             <VBox prefWidth="250.0" spacing="10.0">
-                                <Label text="Workflow Step">
+                                <Label text="Execution Step">
                                     <styleClass>
                                         <String fx:value="section-title"/>
                                     </styleClass>
@@ -426,7 +432,100 @@
                             </VBox>
                         </HBox>
                     </VBox>
-                    <VBox spacing="12.0">
+                    <VBox id="livePrdPlannerCard" fx:id="livePrdPlannerCard" spacing="12.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Live PRD Planner">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Start with a prompt, get clarifying questions back from Codex, and iterate until the planner produces a PRD draft you want to apply. Conversation state is saved with the project, and the planner status tracks draft readiness."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="prdPlannerSummaryLabel" fx:id="prdPlannerSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="prdPlannerDetailLabel" fx:id="prdPlannerDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="Planning Model">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <ComboBox id="prdPlannerModelComboBox" fx:id="prdPlannerModelComboBox"
+                                      HBox.hgrow="ALWAYS"/>
+                        </HBox>
+                        <Label id="prdPlannerModelStatusLabel" fx:id="prdPlannerModelStatusLabel" visible="false"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox id="prdPlannerProgressRow" fx:id="prdPlannerProgressRow"
+                              alignment="CENTER_LEFT" spacing="8.0" visible="false">
+                            <ProgressIndicator id="prdPlannerProgressIndicator"
+                                               fx:id="prdPlannerProgressIndicator"
+                                               maxHeight="18.0" maxWidth="18.0"
+                                               prefHeight="18.0" prefWidth="18.0"
+                                               progress="-1.0"/>
+                            <Label id="prdPlannerProgressLabel" fx:id="prdPlannerProgressLabel" wrapText="true">
+                                <styleClass>
+                                    <String fx:value="muted-text"/>
+                                </styleClass>
+                            </Label>
+                        </HBox>
+                        <TextArea id="prdPlannerTranscriptArea" fx:id="prdPlannerTranscriptArea"
+                                  editable="false" prefRowCount="20" wrapText="true" VBox.vgrow="ALWAYS">
+                            <styleClass>
+                                <String fx:value="run-output-area"/>
+                            </styleClass>
+                        </TextArea>
+                        <Label text="Reply to Planner">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <TextArea id="prdPlannerInputArea" fx:id="prdPlannerInputArea"
+                                  prefRowCount="6"
+                                  promptText="Describe the feature or answer the planner's latest questions."
+                                  wrapText="true">
+                            <styleClass>
+                                <String fx:value="interview-answer-area"/>
+                            </styleClass>
+                        </TextArea>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Button id="prdPlannerSendButton" fx:id="prdPlannerSendButton"
+                                    mnemonicParsing="false" onAction="#sendPrdPlannerMessage"
+                                    text="Send to Planner"/>
+                            <Button id="prdPlannerApplyDraftButton" fx:id="prdPlannerApplyDraftButton"
+                                    mnemonicParsing="false" onAction="#applyPlannerPrdDraft"
+                                    text="Use Latest PRD Draft"/>
+                            <Button id="prdPlannerClearButton" fx:id="prdPlannerClearButton"
+                                    mnemonicParsing="false" onAction="#clearPrdPlannerSession"
+                                    text="Clear Session"/>
+                        </HBox>
+                        <Label id="prdPlannerMessageLabel" fx:id="prdPlannerMessageLabel"
+                               visible="false" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                    </VBox>
+                    <VBox id="singleStorySessionCard" fx:id="singleStorySessionCard" spacing="12.0">
                         <styleClass>
                             <String fx:value="shell-card"/>
                         </styleClass>
@@ -455,6 +554,42 @@
                             </styleClass>
                         </Label>
                         <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="Provider">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <ComboBox id="executionProviderComboBox" fx:id="executionProviderComboBox"
+                                      prefWidth="220.0"/>
+                            <Label text="Model">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <ComboBox id="executionModelComboBox" fx:id="executionModelComboBox"
+                                      HBox.hgrow="ALWAYS"/>
+                        </HBox>
+                        <Label id="executionModelStatusLabel" fx:id="executionModelStatusLabel" visible="false"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox id="singleStorySessionProgressRow" fx:id="singleStorySessionProgressRow"
+                              alignment="CENTER_LEFT" spacing="8.0" visible="false">
+                            <ProgressIndicator id="singleStorySessionProgressIndicator"
+                                               fx:id="singleStorySessionProgressIndicator"
+                                               maxHeight="18.0" maxWidth="18.0"
+                                               prefHeight="18.0" prefWidth="18.0"
+                                               progress="-1.0"/>
+                            <Label id="singleStorySessionProgressLabel" fx:id="singleStorySessionProgressLabel"
+                                   wrapText="true">
+                                <styleClass>
+                                    <String fx:value="muted-text"/>
+                                </styleClass>
+                            </Label>
+                        </HBox>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
                             <Button id="startSingleStoryButton" fx:id="startSingleStoryButton"
                                     mnemonicParsing="false" onAction="#startSingleStorySession"
                                     text="Play"/>
@@ -481,8 +616,8 @@
                                 <String fx:value="card-title"/>
                             </styleClass>
                         </Label>
-                        <Label text="Follow the current run without opening raw log files. Assistant Summary shows the stored final assistant message and Raw Output shows the live or persisted log stream."
-                               wrapText="true">
+                        <Label text="Follow the current run without opening raw log files. Assistant Summary shows the stored final assistant message, Raw Output pretty-prints JSON log lines, and Structured Output parses Codex events into a richer timeline."
+                                wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
                             </styleClass>
@@ -503,8 +638,74 @@
                                          mnemonicParsing="false" text="Assistant Summary"/>
                             <RadioButton id="rawOutputViewRadioButton" fx:id="rawOutputViewRadioButton"
                                          mnemonicParsing="false" text="Raw Output"/>
+                            <RadioButton id="structuredRunOutputViewRadioButton"
+                                         fx:id="structuredRunOutputViewRadioButton"
+                                         mnemonicParsing="false" text="Structured Output"/>
                         </HBox>
                         <TextArea id="runOutputTextArea" fx:id="runOutputTextArea"
+                                  editable="false" prefRowCount="22" wrapText="true">
+                            <styleClass>
+                                <String fx:value="run-output-area"/>
+                            </styleClass>
+                        </TextArea>
+                        <ScrollPane id="runOutputStructuredScrollPane" fx:id="runOutputStructuredScrollPane"
+                                    fitToWidth="true" hbarPolicy="NEVER" visible="false">
+                            <styleClass>
+                                <String fx:value="run-output-structured-scroll"/>
+                            </styleClass>
+                            <content>
+                                <VBox id="runOutputStructuredContainer" fx:id="runOutputStructuredContainer"
+                                      spacing="10.0">
+                                    <styleClass>
+                                        <String fx:value="run-output-structured-container"/>
+                                    </styleClass>
+                                </VBox>
+                            </content>
+                        </ScrollPane>
+                    </VBox>
+                    <VBox id="runHistoryCard" fx:id="runHistoryCard" spacing="12.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Run History">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Review persisted story attempts across the active project and open the stored prompt, logs, and summaries for any prior run."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="runHistorySummaryLabel" fx:id="runHistorySummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="runHistoryDetailLabel" fx:id="runHistoryDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <VBox id="runHistoryEntriesContainer" fx:id="runHistoryEntriesContainer" spacing="12.0"/>
+                        <Separator/>
+                        <Label text="Artifact Viewer">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="runHistoryArtifactSummaryLabel" fx:id="runHistoryArtifactSummaryLabel"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <TextField id="runHistoryArtifactPathField" fx:id="runHistoryArtifactPathField"/>
+                        <TextArea id="runHistoryArtifactTextArea" fx:id="runHistoryArtifactTextArea"
                                   editable="false" prefRowCount="12" wrapText="true">
                             <styleClass>
                                 <String fx:value="run-output-area"/>
@@ -680,7 +881,7 @@
                         <padding>
                             <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
                         </padding>
-                        <Label text="PRD Interview Engine">
+                        <Label text="Structured PRD Worksheet (Optional)">
                             <styleClass>
                                 <String fx:value="card-title"/>
                             </styleClass>
@@ -697,7 +898,7 @@
                                         <String fx:value="section-title"/>
                                     </styleClass>
                                 </Label>
-                                <Label text="Move through the clarification prompts in order or revisit any saved answer before PRD generation."
+                                <Label text="Use this only when you want a manual fallback. The live planner above is the primary Ralph-style workflow for iterative clarification and draft creation."
                                        wrapText="true">
                                     <styleClass>
                                         <String fx:value="muted-text"/>

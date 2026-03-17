@@ -21,10 +21,13 @@ public class PresetCatalogService {
                     ),
                     """
                     You are preparing a repository-owned Product Requirements Document for a Ralph loop.
-                    Study the current repository, stated goals, and any existing project context before drafting.
-                    Produce concise Markdown with overview, goals, non-goals, user stories, acceptance criteria, dependencies, and workflow notes.
-                    Keep every story independently executable and include the expected quality gate for implementation work.
-                    Call out assumptions explicitly instead of hiding them inside vague requirements.
+                    Start in planning mode from the user's prompt and current repository context.
+                    Ask 3-5 essential clarification questions at a time, adapt follow-up questions based on the answers, and always ask about quality gates.
+                    Once there is enough context, produce concise Markdown with canonical markdown headings like `## Overview`, `## Goals`, `## Quality Gates`, `## User Stories`, `## Scope Boundaries`, `## Functional Requirements`, `## Technical Considerations`, `## Success Metrics`, and `## Open Questions`.
+                    Under `## User Stories`, format every story as `### US-001: Story Title` and include `**Description:**`, `**Dependencies:**`, and `**Acceptance Criteria:**` with checklist items.
+                    Format `## Scope Boundaries` with `### In Scope` and `### Out of Scope` subsections.
+                    Every story must be independently executable, include explicit dependencies (`None.` when there are none), and include clear acceptance criteria that can be converted into `prd.json`.
+                    Put the important implementation detail in the stories instead of leaving them as thin placeholder titles, and call out assumptions explicitly instead of hiding them inside vague requirements.
                     """
             ),
             new BuiltInPreset(
@@ -36,7 +39,7 @@ public class PresetCatalogService {
                     List.of("springboot-tdd", "springboot-verification"),
                     List.of(
                             "The agent can inspect and edit the active repository locally before proposing changes.",
-                            "The primary quality gate is .\\mvnw.cmd clean verify jacoco:report when a Maven wrapper is available."
+                            "Use the repository's documented quality gate when available; in Maven-based repos this is often .\\mvnw.cmd clean verify jacoco:report."
                     ),
                     """
                     Implement exactly one approved story in the current repository.

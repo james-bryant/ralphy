@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CodexLauncherServiceTest {
+    private static final String TEST_NATIVE_CODEX_COMMAND = "C:\\tools\\codex.cmd";
     private final PresetCatalogService presetCatalogService = new PresetCatalogService();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -47,22 +48,24 @@ class CodexLauncherServiceTest {
                         )
                 ),
                 "Implement this story and keep the change set scoped.",
-                List.of("--json", "--color", "never")
+                List.of("--json", "--color", "never"),
+                "ralph/task-sync-plan",
+                "CREATED"
         ));
 
         assertEquals("run-123", launchPlan.runId());
-        assertEquals(
-                List.of(
-                        "powershell.exe",
-                        "-NoLogo",
-                        "-NoProfile",
-                        "-Command",
-                        "& 'codex' 'exec' '--json' '--color' 'never' '-'"
-                ),
-                launchPlan.command()
-        );
+        assertEquals(List.of(
+                TEST_NATIVE_CODEX_COMMAND,
+                "exec",
+                "--json",
+                "--color",
+                "never",
+                "-"
+        ), launchPlan.command());
         assertEquals(activeProject.repositoryPath(), launchPlan.processWorkingDirectory());
         assertEquals(activeProject.repositoryPath().toString(), launchPlan.executionWorkingDirectory());
+        assertEquals("ralph/task-sync-plan", launchPlan.branchName());
+        assertEquals("CREATED", launchPlan.branchAction());
         assertTrue(launchPlan.promptText().contains("Preset Inputs:"));
         assertTrue(launchPlan.promptText().contains("- Story: US-025: Build a Native and WSL Codex Launcher"));
         assertTrue(launchPlan.promptText().contains("Additional Instructions:"));
@@ -89,26 +92,30 @@ class CodexLauncherServiceTest {
                 presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
                 List.of(new CodexLauncherService.PromptInput("Story", "US-025")),
                 "",
-                List.of("--json")
+                List.of("--json"),
+                "ralph/task-sync-plan",
+                "SWITCHED"
         ));
 
         assertEquals("run-123", launchPlan.runId());
-        assertEquals(
-                List.of(
-                        "wsl.exe",
-                        "--distribution",
-                        "Ubuntu-24.04",
-                        "--cd",
-                        "/mnt/c/workspace-root/wsl-launch-repo",
-                        "--exec",
-                        "/bin/sh",
-                        "-lc",
-                        "'codex' 'exec' '--json' '-'"
-                ),
-                launchPlan.command()
-        );
+        assertEquals(List.of(
+                "wsl.exe",
+                "--distribution",
+                "Ubuntu-24.04",
+                "--cd",
+                "/mnt/c/workspace-root/wsl-launch-repo",
+                "--exec",
+                "/bin/zsh",
+                "-ic"
+        ), launchPlan.command().subList(0, 8));
+        String wslScript = launchPlan.command().get(8);
+        assertTrue(wslScript.contains("configured interactive shell"));
+        assertTrue(wslScript.contains("--version"));
+        assertTrue(wslScript.contains("--json"));
         assertNull(launchPlan.processWorkingDirectory());
         assertEquals("/mnt/c/workspace-root/wsl-launch-repo", launchPlan.executionWorkingDirectory());
+        assertEquals("ralph/task-sync-plan", launchPlan.branchName());
+        assertEquals("SWITCHED", launchPlan.branchAction());
         assertTrue(launchPlan.promptText().contains("- Story: US-025"));
     }
 
@@ -128,7 +135,8 @@ class CodexLauncherServiceTest {
                 launchPlan -> {
                     executedPlan.set(launchPlan);
                     return CodexLauncherService.ProcessExecution.completed(4321L, 0, "{\"event\":\"done\"}", "");
-                }
+                },
+                TEST_NATIVE_CODEX_COMMAND
         );
 
         CodexLauncherService.CodexLaunchResult launchResult =
@@ -142,7 +150,9 @@ class CodexLauncherServiceTest {
                                 "US-025: Build a Native and WSL Codex Launcher"
                         )),
                         "Run the project quality gate before finishing.",
-                        List.of("--json")
+                        List.of("--json"),
+                        "ralph/task-sync-plan",
+                        "CREATED"
                 ));
 
         assertTrue(launchResult.successful());
@@ -188,6 +198,8 @@ class CodexLauncherServiceTest {
         assertEquals("SUCCEEDED", summaryArtifact.path("status").asText());
         assertEquals("POWERSHELL", summaryArtifact.path("profileType").asText());
         assertEquals(0, summaryArtifact.path("exitCode").asInt());
+        assertEquals("ralph/task-sync-plan", summaryArtifact.path("branchName").asText());
+        assertEquals("CREATED", summaryArtifact.path("branchAction").asText());
         assertEquals(summaryPath.toString(), summaryArtifact.path("artifactPaths").path("summaryPath").asText());
         assertEquals(assistantSummaryPath.toString(),
                 summaryArtifact.path("artifactPaths").path("assistantSummaryPath").asText());
@@ -207,6 +219,8 @@ class CodexLauncherServiceTest {
         assertEquals(Long.valueOf(4321L), persistedRunMetadata.processId());
         assertEquals(Integer.valueOf(0), persistedRunMetadata.exitCode());
         assertEquals(executedPlan.get().command(), persistedRunMetadata.command());
+        assertEquals("ralph/task-sync-plan", persistedRunMetadata.branchName());
+        assertEquals("CREATED", persistedRunMetadata.branchAction());
         assertEquals(new LocalMetadataStorage.RunArtifactPaths(
                 promptPath.toString(),
                 stdoutPath.toString(),
@@ -238,7 +252,8 @@ class CodexLauncherServiceTest {
                 localMetadataStorage,
                 Clock.fixed(Instant.parse("2026-03-15T21:45:00Z"), ZoneOffset.UTC),
                 () -> "run-999",
-                launchPlan -> CodexLauncherService.ProcessExecution.failure("Access is denied.")
+                launchPlan -> CodexLauncherService.ProcessExecution.failure("Access is denied."),
+                TEST_NATIVE_CODEX_COMMAND
         );
 
         CodexLauncherService.CodexLaunchResult launchResult =
@@ -269,11 +284,9 @@ class CodexLauncherServiceTest {
         assertNull(persistedRunMetadata.processId());
         assertNull(persistedRunMetadata.exitCode());
         assertEquals(List.of(
-                "powershell.exe",
-                "-NoLogo",
-                "-NoProfile",
-                "-Command",
-                "& 'codex' 'exec' '-'"
+                TEST_NATIVE_CODEX_COMMAND,
+                "exec",
+                "-"
         ), persistedRunMetadata.command());
     }
 
@@ -296,7 +309,8 @@ class CodexLauncherServiceTest {
                 launchPlan -> {
                     runningMetadata.set(localMetadataStorage.latestRunMetadataForProject(projectId).orElseThrow());
                     return CodexLauncherService.ProcessExecution.completed(2222L, 0, "", "");
-                }
+                },
+                TEST_NATIVE_CODEX_COMMAND
         );
 
         CodexLauncherService.CodexLaunchResult launchResult =
@@ -307,7 +321,9 @@ class CodexLauncherServiceTest {
                         presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
                         List.of(new CodexLauncherService.PromptInput("Story", "US-027")),
                         "",
-                        List.of("--json")
+                        List.of("--json"),
+                        "ralph/task-sync-plan",
+                        "SWITCHED"
                 ));
 
         assertTrue(launchResult.successful());
@@ -315,6 +331,8 @@ class CodexLauncherServiceTest {
         assertEquals("run-running-1", runningMetadata.get().runId());
         assertEquals("US-027", runningMetadata.get().storyId());
         assertEquals("2026-03-15T21:55:00Z", runningMetadata.get().startedAt());
+        assertEquals("ralph/task-sync-plan", runningMetadata.get().branchName());
+        assertEquals("SWITCHED", runningMetadata.get().branchAction());
         assertNull(runningMetadata.get().endedAt());
     }
 
@@ -335,7 +353,8 @@ class CodexLauncherServiceTest {
                         7,
                         "plain stdout",
                         "plain stderr"
-                )
+                ),
+                TEST_NATIVE_CODEX_COMMAND
         );
 
         CodexLauncherService.CodexLaunchResult launchResult =
@@ -402,7 +421,8 @@ class CodexLauncherServiceTest {
                 localMetadataStorage,
                 Clock.fixed(Instant.parse("2026-03-15T22:05:00Z"), ZoneOffset.UTC),
                 () -> "run-stream-1",
-                processExecutor
+                processExecutor,
+                TEST_NATIVE_CODEX_COMMAND
         );
 
         CodexLauncherService.CodexLaunchResult launchResult =
@@ -439,7 +459,9 @@ class CodexLauncherServiceTest {
                 LocalMetadataStorage.forTest(tempDir.resolve("unused-storage")),
                 Clock.fixed(Instant.parse("2026-03-15T21:00:00Z"), ZoneOffset.UTC),
                 () -> "run-123",
-                processExecutor
+                processExecutor,
+                TEST_NATIVE_CODEX_COMMAND,
+                distribution -> "/bin/zsh"
         );
     }
 

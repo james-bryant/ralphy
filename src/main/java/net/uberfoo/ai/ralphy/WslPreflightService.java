@@ -1,5 +1,6 @@
 package net.uberfoo.ai.ralphy;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -12,17 +13,24 @@ import java.util.Objects;
 
 @Component
 public class WslPreflightService {
-    private static final String CODEX_INSTALL_COMMAND = "npm install -g @openai/codex";
-    private static final String CODEX_LOGIN_COMMAND = "codex login";
-    private static final String CODEX_LOGIN_STATUS_COMMAND = "codex login status";
-
     private final CommandExecutor commandExecutor;
+    private final String codexCommand;
 
-    public WslPreflightService() {
-        this(new SystemCommandExecutor());
+    public WslPreflightService(
+            @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}") String codexCommand) {
+        this(codexCommand, new SystemCommandExecutor());
+    }
+
+    WslPreflightService() {
+        this(CodexCliSupport.DEFAULT_COMMAND, new SystemCommandExecutor());
     }
 
     WslPreflightService(CommandExecutor commandExecutor) {
+        this(CodexCliSupport.DEFAULT_COMMAND, commandExecutor);
+    }
+
+    WslPreflightService(String codexCommand, CommandExecutor commandExecutor) {
+        this.codexCommand = hasText(codexCommand) ? codexCommand.trim() : CodexCliSupport.DEFAULT_COMMAND;
         this.commandExecutor = Objects.requireNonNull(commandExecutor, "commandExecutor must not be null");
     }
 
@@ -136,7 +144,12 @@ public class WslPreflightService {
             );
         }
 
-        CommandResult commandResult = executeInDistro(executionProfile.wslDistribution(), null, "codex --version");
+        CommandResult commandResult = executeInDistro(
+                executionProfile.wslDistribution(),
+                null,
+                CodexCliSupport.buildWslCodexScript(codexCommand, List.of("--version")),
+                true
+        );
         if (!commandResult.successful()) {
             return fail(
                     "codex_cli",
@@ -256,6 +269,14 @@ public class WslPreflightService {
     }
 
     private CommandResult executeInDistro(String distribution, String workingDirectory, String script) {
+        return executeInDistro(distribution, workingDirectory, script, false);
+    }
+
+    private CommandResult executeInDistro(String distribution,
+                                          String workingDirectory,
+                                          String script,
+                                          boolean useInteractiveUserShell) {
+        String shellPath = useInteractiveUserShell ? resolveShellPath(distribution) : "/bin/sh";
         List<String> command = new ArrayList<>();
         command.add("wsl.exe");
         command.add("--distribution");
@@ -265,10 +286,17 @@ public class WslPreflightService {
             command.add(workingDirectory);
         }
         command.add("--exec");
-        command.add("/bin/sh");
-        command.add("-lc");
+        command.add(shellPath);
+        command.add(useInteractiveUserShell ? "-ic" : "-lc");
         command.add(script);
         return commandExecutor.execute(null, List.copyOf(command));
+    }
+
+    private String resolveShellPath(String distribution) {
+        return WslShellSupport.resolveShellPath(distribution, command -> {
+            CommandResult commandResult = commandExecutor.execute(null, command);
+            return new WslShellSupport.CommandResult(commandResult.successful(), commandResult.output());
+        });
     }
 
     private String commandFailureDetail(String prefix, CommandResult commandResult) {
@@ -354,18 +382,27 @@ public class WslPreflightService {
     private List<PreflightRemediationCommand> codexCliRemediationCommands(ExecutionProfile executionProfile) {
         return List.of(
                 remediation("Install Codex CLI in the selected WSL distribution",
-                        commandInDistro(executionProfile.wslDistribution(), CODEX_INSTALL_COMMAND)),
+                        commandInUserShell(executionProfile.wslDistribution(), CodexCliSupport.INSTALL_COMMAND)),
                 remediation("Verify Codex CLI in the selected WSL distribution",
-                        commandInDistro(executionProfile.wslDistribution(), "codex --version"))
+                        commandInUserShell(
+                                executionProfile.wslDistribution(),
+                                CodexCliSupport.buildShellCommand(codexCommand, List.of("--version"))
+                        ))
         );
     }
 
     private List<PreflightRemediationCommand> codexAuthRemediationCommands(ExecutionProfile executionProfile) {
         return List.of(
                 remediation("Authenticate Codex CLI in the selected WSL distribution",
-                        commandInDistro(executionProfile.wslDistribution(), CODEX_LOGIN_COMMAND)),
+                        commandInUserShell(
+                                executionProfile.wslDistribution(),
+                                CodexCliSupport.buildShellCommand(codexCommand, List.of("login"))
+                        )),
                 remediation("Check Codex login status in the selected WSL distribution",
-                        commandInDistro(executionProfile.wslDistribution(), CODEX_LOGIN_STATUS_COMMAND))
+                        commandInUserShell(
+                                executionProfile.wslDistribution(),
+                                CodexCliSupport.buildShellCommand(codexCommand, List.of("login", "status"))
+                        ))
         );
     }
 
@@ -389,6 +426,13 @@ public class WslPreflightService {
     private String commandInDistro(String distribution, String script) {
         return "wsl.exe --distribution " + quoteForPowerShell(distribution)
                 + " --exec /bin/sh -lc " + quoteForPowerShell(script);
+    }
+
+    private String commandInUserShell(String distribution, String script) {
+        String shellPath = resolveShellPath(distribution);
+        return "wsl.exe --distribution " + quoteForPowerShell(distribution)
+                + " --exec " + quoteForPowerShell(shellPath)
+                + " -ic " + quoteForPowerShell(script);
     }
 
     private String quoteForPowerShell(String value) {

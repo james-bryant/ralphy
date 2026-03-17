@@ -27,6 +27,7 @@ import java.util.stream.Stream;
 public class ActiveProjectService {
     private static final int MAX_AUTOMATIC_ATTEMPTS_PER_STORY = 2;
 
+    private final GitFeatureBranchService gitFeatureBranchService;
     private final GitRepositoryInitializer gitRepositoryInitializer;
     private final LocalMetadataStorage localMetadataStorage;
     private final NativeWindowsPreflightService nativeWindowsPreflightService;
@@ -35,16 +36,19 @@ public class ActiveProjectService {
     private final PrdTaskStateStore prdTaskStateStore;
     private final PrdTaskSynchronizer prdTaskSynchronizer;
     private final RalphPrdJsonMapper ralphPrdJsonMapper;
+    private final StoryCompletionService storyCompletionService;
     private final ProjectMetadataInitializer projectMetadataInitializer;
     private final ProjectStorageInitializer projectStorageInitializer;
     private final WslPreflightService wslPreflightService;
     private final CodexLauncherService codexLauncherService;
     private final boolean autoRunNativeWindowsPreflight;
     private final boolean autoRunWslPreflight;
+    private final Object storySessionLock = new Object();
     private ActiveProject activeProject;
     private NativeWindowsPreflightReport latestNativeWindowsPreflightReport;
     private WslPreflightReport latestWslPreflightReport;
     private PrdInterviewDraft prdInterviewDraft;
+    private PrdPlanningSession prdPlanningSession;
     private String activePrdMarkdown;
     private PrdTaskState prdTaskState;
     private PrdTaskSyncResult lastPrdTaskSyncResult;
@@ -52,7 +56,8 @@ public class ActiveProjectService {
     private String startupRecoveryMessage = "";
 
     @Autowired
-    public ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
+    public ActiveProjectService(GitFeatureBranchService gitFeatureBranchService,
+                                GitRepositoryInitializer gitRepositoryInitializer,
                                 ProjectMetadataInitializer projectMetadataInitializer,
                                 ProjectStorageInitializer projectStorageInitializer,
                                 LocalMetadataStorage localMetadataStorage,
@@ -61,11 +66,13 @@ public class ActiveProjectService {
                                 PrdTaskStateStore prdTaskStateStore,
                                 PrdTaskSynchronizer prdTaskSynchronizer,
                                 RalphPrdJsonMapper ralphPrdJsonMapper,
+                                StoryCompletionService storyCompletionService,
                                 PresetCatalogService presetCatalogService,
                                 CodexLauncherService codexLauncherService,
                                 WslPreflightService wslPreflightService,
                                 @Value("${ralphy.preflight.native.auto-run:true}") boolean autoRunNativeWindowsPreflight,
                                 @Value("${ralphy.preflight.wsl.auto-run:true}") boolean autoRunWslPreflight) {
+        this.gitFeatureBranchService = gitFeatureBranchService;
         this.gitRepositoryInitializer = gitRepositoryInitializer;
         this.projectMetadataInitializer = projectMetadataInitializer;
         this.projectStorageInitializer = projectStorageInitializer;
@@ -75,6 +82,7 @@ public class ActiveProjectService {
         this.prdTaskStateStore = prdTaskStateStore;
         this.prdTaskSynchronizer = prdTaskSynchronizer;
         this.ralphPrdJsonMapper = ralphPrdJsonMapper;
+        this.storyCompletionService = storyCompletionService;
         this.presetCatalogService = presetCatalogService;
         this.codexLauncherService = codexLauncherService;
         this.wslPreflightService = wslPreflightService;
@@ -85,6 +93,7 @@ public class ActiveProjectService {
     }
 
     ActiveProjectService(GitRepositoryInitializer gitRepositoryInitializer,
+                         GitFeatureBranchService gitFeatureBranchService,
                          ProjectMetadataInitializer projectMetadataInitializer,
                          ProjectStorageInitializer projectStorageInitializer,
                          LocalMetadataStorage localMetadataStorage,
@@ -93,10 +102,12 @@ public class ActiveProjectService {
                          PrdTaskStateStore prdTaskStateStore,
                          PrdTaskSynchronizer prdTaskSynchronizer,
                          RalphPrdJsonMapper ralphPrdJsonMapper,
+                         StoryCompletionService storyCompletionService,
                          PresetCatalogService presetCatalogService,
                          CodexLauncherService codexLauncherService,
                          WslPreflightService wslPreflightService) {
         this(
+                gitFeatureBranchService,
                 gitRepositoryInitializer,
                 projectMetadataInitializer,
                 projectStorageInitializer,
@@ -106,6 +117,7 @@ public class ActiveProjectService {
                 prdTaskStateStore,
                 prdTaskSynchronizer,
                 ralphPrdJsonMapper,
+                storyCompletionService,
                 presetCatalogService,
                 codexLauncherService,
                 wslPreflightService,
@@ -141,6 +153,60 @@ public class ActiveProjectService {
                 .flatMap(projectRecord -> localMetadataStorage.latestRunMetadataForProject(projectRecord.projectId()));
     }
 
+    public synchronized RunHistoryReport runHistory() {
+        if (activeProject == null) {
+            return RunHistoryReport.unavailable(
+                    "No active project",
+                    "Open a repository before reviewing prior story attempts."
+            );
+        }
+
+        if (prdTaskState == null || prdTaskState.tasks().isEmpty()) {
+            return RunHistoryReport.empty(
+                    "No run history yet",
+                    "Save a valid PRD and run a story to build persisted attempt history."
+            );
+        }
+
+        Map<String, LocalMetadataStorage.RunMetadataRecord> runMetadataByRunId = new LinkedHashMap<>();
+        localMetadataStorage.projectRecordForRepository(activeProject.repositoryPath())
+                .ifPresent(projectRecord -> localMetadataStorage.runMetadataForProject(projectRecord.projectId())
+                        .forEach(runMetadataRecord -> runMetadataByRunId.put(runMetadataRecord.runId(), runMetadataRecord)));
+
+        List<RunHistoryEntry> entries = prdTaskState.tasks().stream()
+                .flatMap(task -> task.attempts().stream()
+                        .map(attempt -> toRunHistoryEntry(task, attempt, runMetadataByRunId.get(attempt.runId()))))
+                .sorted(Comparator.comparing(this::runHistorySortKey).reversed()
+                        .thenComparing(RunHistoryEntry::runId, Comparator.reverseOrder()))
+                .toList();
+        if (entries.isEmpty()) {
+            return RunHistoryReport.empty(
+                    "No run history yet",
+                    "Start a story to build persisted attempt history for this project."
+            );
+        }
+
+        long distinctStories = entries.stream()
+                .map(RunHistoryEntry::storyId)
+                .distinct()
+                .count();
+        RunHistoryEntry latestEntry = entries.getFirst();
+        return RunHistoryReport.available(
+                entries.size()
+                        + (entries.size() == 1 ? " persisted attempt" : " persisted attempts"),
+                "Across "
+                        + distinctStories
+                        + (distinctStories == 1 ? " story" : " stories")
+                        + ". Latest: "
+                        + latestEntry.storyId()
+                        + " | "
+                        + latestEntry.result()
+                        + " | "
+                        + firstNonBlank(latestEntry.endedAt(), latestEntry.startedAt(), latestEntry.queuedAt(), "No timestamp"),
+                entries
+        );
+    }
+
     public synchronized Optional<ExecutionProfile> executionProfile() {
         if (activeProject == null) {
             return Optional.empty();
@@ -159,6 +225,10 @@ public class ActiveProjectService {
 
     public synchronized Optional<PrdInterviewDraft> prdInterviewDraft() {
         return Optional.ofNullable(prdInterviewDraft);
+    }
+
+    public synchronized Optional<PrdPlanningSession> prdPlanningSession() {
+        return Optional.ofNullable(prdPlanningSession);
     }
 
     public synchronized Optional<String> activePrdMarkdown() {
@@ -263,64 +333,139 @@ public class ActiveProjectService {
         );
     }
 
-    public synchronized SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase) {
-        return startEligibleSingleStory(presetUseCase, CodexLauncherService.RunOutputListener.noop());
+    public SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase) {
+        return startEligibleSingleStory(
+                presetUseCase,
+                ExecutionAgentSelection.codexDefault(),
+                CodexLauncherService.RunOutputListener.noop()
+        );
     }
 
-    public synchronized SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase,
-                                                                        CodexLauncherService.RunOutputListener runOutputListener) {
-        SingleStorySessionAvailability availability = singleStorySessionAvailability(presetUseCase);
-        if (!availability.startable()) {
-            return SingleStoryStartResult.failure(availability.summary(), availability.detail());
-        }
-
-        ExecutionProfile executionProfile = executionProfile().orElse(ExecutionProfile.nativePowerShell());
-        String storyId = availability.story().taskId();
-        SingleStoryStartResult latestResult = null;
-        String initialFailureDetail = "";
-
-        for (int attemptNumber = 1; attemptNumber <= MAX_AUTOMATIC_ATTEMPTS_PER_STORY; attemptNumber++) {
-            boolean automaticRetry = attemptNumber > 1;
-            latestResult = executeStoryAttempt(
-                    storyId,
-                    availability.preset(),
-                    executionProfile,
-                    runOutputListener,
-                    automaticRetry
-            );
-            if (!latestResult.successful()) {
-                return latestResult;
-            }
-            if (latestResult.finalStatus() == PrdTaskStatus.COMPLETED) {
-                return automaticRetry
-                        ? rewriteStoryAttemptResult(
-                        latestResult,
-                        automaticRetrySuccessDetail(initialFailureDetail, latestResult.detail())
-                )
-                        : latestResult;
-            }
-            if (!automaticRetry) {
-                initialFailureDetail = latestResult.detail();
-            }
-        }
-
-        return rewriteStoryAttemptResult(
-                latestResult,
-                automaticRetryFailureDetail(initialFailureDetail, latestResult == null ? "" : latestResult.detail())
+    public SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase,
+                                                           CodexLauncherService.RunOutputListener runOutputListener) {
+        return startEligibleSingleStory(
+                presetUseCase,
+                ExecutionAgentSelection.codexDefault(),
+                runOutputListener
         );
+    }
+
+    public SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase,
+                                                           ExecutionAgentSelection executionAgentSelection,
+                                                           CodexLauncherService.RunOutputListener runOutputListener) {
+        ExecutionAgentSelection resolvedAgentSelection = executionAgentSelection == null
+                ? ExecutionAgentSelection.codexDefault()
+                : executionAgentSelection;
+        if (!resolvedAgentSelection.provider().executionSupported()) {
+            return SingleStoryStartResult.failure(
+                    "Provider not supported",
+                    resolvedAgentSelection.provider().displayName()
+                            + " execution is not implemented yet. Switch provider to Codex."
+            );
+        }
+
+        synchronized (storySessionLock) {
+            SingleStorySessionAvailability availability;
+            ExecutionProfile executionProfile;
+            synchronized (this) {
+                availability = singleStorySessionAvailability(presetUseCase);
+                if (!availability.startable()) {
+                    return SingleStoryStartResult.failure(availability.summary(), availability.detail());
+                }
+                executionProfile = executionProfile().orElse(ExecutionProfile.nativePowerShell());
+            }
+
+            String storyId = availability.story().taskId();
+            SingleStoryStartResult latestResult = null;
+            String initialFailureDetail = "";
+
+            for (int attemptNumber = 1; attemptNumber <= MAX_AUTOMATIC_ATTEMPTS_PER_STORY; attemptNumber++) {
+                boolean automaticRetry = attemptNumber > 1;
+                latestResult = executeStoryAttempt(
+                        storyId,
+                        availability.preset(),
+                        executionProfile,
+                        resolvedAgentSelection,
+                        runOutputListener,
+                        automaticRetry
+                );
+                if (!latestResult.successful()) {
+                    return latestResult;
+                }
+                if (latestResult.finalStatus() == PrdTaskStatus.COMPLETED) {
+                    return automaticRetry
+                            ? rewriteStoryAttemptResult(
+                            latestResult,
+                            automaticRetrySuccessDetail(initialFailureDetail, latestResult.detail())
+                    )
+                            : latestResult;
+                }
+                if (!automaticRetry) {
+                    initialFailureDetail = latestResult.detail();
+                }
+            }
+
+            return rewriteStoryAttemptResult(
+                    latestResult,
+                    automaticRetryFailureDetail(initialFailureDetail, latestResult == null ? "" : latestResult.detail())
+            );
+        }
     }
 
     private SingleStoryStartResult executeStoryAttempt(String storyId,
                                                        BuiltInPreset preset,
                                                        ExecutionProfile executionProfile,
+                                                       ExecutionAgentSelection executionAgentSelection,
                                                        CodexLauncherService.RunOutputListener runOutputListener,
                                                        boolean automaticRetry) {
-        PrdTaskRecord task = prdTaskState.taskById(storyId)
+        ActiveProject activeProjectSnapshot;
+        String activePrdMarkdownSnapshot;
+        PrdTaskState workingTaskState;
+        synchronized (this) {
+            activeProjectSnapshot = activeProject;
+            activePrdMarkdownSnapshot = activePrdMarkdown;
+            workingTaskState = prdTaskState;
+        }
+        if (activeProjectSnapshot == null) {
+            return SingleStoryStartResult.failure(
+                    "No active project",
+                    "Open or restore a repository before starting a story."
+            );
+        }
+        if (workingTaskState == null) {
+            return SingleStoryStartResult.failure(
+                    "No synced story state",
+                    "Save or sync the active PRD before starting a story."
+            );
+        }
+
+        PrdTaskRecord task = workingTaskState.taskById(storyId)
                 .orElseThrow(() -> new IllegalStateException("Missing story state for " + storyId + "."));
+        List<String> qualityGates = List.copyOf(workingTaskState.qualityGates());
 
         CodexLauncherService.CodexLaunchPlan launchPlan;
+        GitFeatureBranchService.BranchSelectionResult branchSelection = gitFeatureBranchService.ensureBranch(
+                activeProjectSnapshot,
+                ralphPrdJsonMapper.branchName(activeProjectSnapshot, activePrdMarkdownSnapshot)
+        );
+        if (!branchSelection.successful()) {
+            return SingleStoryStartResult.failure(
+                    "Unable to prepare feature branch",
+                    branchSelection.message()
+            );
+        }
         try {
-            launchPlan = codexLauncherService.buildLaunch(buildLaunchRequest(task, preset, executionProfile));
+            launchPlan = codexLauncherService.buildLaunch(
+                    buildLaunchRequest(
+                            task,
+                            preset,
+                            executionProfile,
+                            executionAgentSelection,
+                            branchSelection,
+                            activeProjectSnapshot,
+                            workingTaskState
+                    )
+            );
         } catch (IllegalArgumentException exception) {
             return SingleStoryStartResult.failure(
                     "Unable to start story",
@@ -336,44 +481,66 @@ public class ActiveProjectService {
                     queuedAt,
                     queueMessage(preset, storyId, automaticRetry)
             );
-            persistPrdTaskState(prdTaskState.replaceTask(queuedTask, queuedAt));
+            workingTaskState = workingTaskState.replaceTask(queuedTask, queuedAt);
+            persistPrdTaskState(activeProjectSnapshot, workingTaskState);
 
             String startedAt = Instant.now().toString();
-            PrdTaskRecord runningTask = prdTaskState.taskById(storyId)
+            PrdTaskRecord runningTask = workingTaskState.taskById(storyId)
                     .orElseThrow()
                     .startAttempt(
                             launchPlan.runId(),
                             startedAt,
                             startMessage(preset, storyId, automaticRetry)
                     );
-            persistPrdTaskState(prdTaskState.replaceTask(runningTask, startedAt));
+            workingTaskState = workingTaskState.replaceTask(runningTask, startedAt);
+            persistPrdTaskState(activeProjectSnapshot, workingTaskState);
         } catch (IOException exception) {
             return SingleStoryStartResult.failure(
-                    "Unable to persist story state",
+                "Unable to persist story state",
                     "The queued or running story state could not be stored: " + exception.getMessage()
             );
         }
 
         CodexLauncherService.CodexLaunchResult launchResult = null;
+        StoryCompletionService.StoryCompletionResult storyCompletionResult = null;
         PrdTaskStatus finalStatus = PrdTaskStatus.FAILED;
         String finalMessage;
         String finishedAt = Instant.now().toString();
         try {
             launchResult = codexLauncherService.launch(launchPlan, runOutputListener);
-            finalStatus = launchResult.successful() ? PrdTaskStatus.COMPLETED : PrdTaskStatus.FAILED;
             finishedAt = launchResult.endedAt();
-            finalMessage = attemptCompletionMessage(launchResult, automaticRetry);
+            if (launchResult.successful()) {
+                storyCompletionResult = storyCompletionService.validateAndCommit(
+                        activeProjectSnapshot,
+                        task,
+                        qualityGates
+                );
+                finalStatus = storyCompletionResult.successful() ? PrdTaskStatus.COMPLETED : PrdTaskStatus.FAILED;
+                finalMessage = storyCompletionResult.detail();
+                finishedAt = Instant.now().toString();
+            } else {
+                finalStatus = PrdTaskStatus.FAILED;
+                finalMessage = attemptCompletionMessage(launchResult, automaticRetry);
+            }
         } catch (RuntimeException exception) {
             finalMessage = automaticRetry
                     ? "Automatic retry launch failed: " + exception.getMessage()
-                    : "Codex launch failed: " + exception.getMessage();
+                    : "Story validation or launch failed: " + exception.getMessage();
         }
 
         try {
-            PrdTaskRecord finalizedTask = prdTaskState.taskById(storyId)
+            PrdTaskRecord finalizedTask = workingTaskState.taskById(storyId)
                     .orElseThrow()
-                    .finishAttempt(launchPlan.runId(), finalStatus, finishedAt, finalMessage);
-            persistPrdTaskState(prdTaskState.replaceTask(finalizedTask, finalizedTask.updatedAt()));
+                    .finishAttempt(
+                            launchPlan.runId(),
+                            finalStatus,
+                            finishedAt,
+                            finalMessage,
+                            storyCompletionResult == null ? "" : storyCompletionResult.commitHash(),
+                            storyCompletionResult == null ? "" : storyCompletionResult.commitMessage()
+                    );
+            workingTaskState = workingTaskState.replaceTask(finalizedTask, finalizedTask.updatedAt());
+            persistPrdTaskState(activeProjectSnapshot, workingTaskState);
             return SingleStoryStartResult.success(
                     storyId,
                     finalStatus,
@@ -616,16 +783,29 @@ public class ActiveProjectService {
     }
 
     private CodexLauncherService.CodexLaunchRequest buildLaunchRequest(PrdTaskRecord task,
-                                                                      BuiltInPreset preset,
-                                                                      ExecutionProfile executionProfile) {
+                                                                       BuiltInPreset preset,
+                                                                       ExecutionProfile executionProfile,
+                                                                       ExecutionAgentSelection executionAgentSelection,
+                                                                       GitFeatureBranchService.BranchSelectionResult branchSelection,
+                                                                       ActiveProject activeProject,
+                                                                       PrdTaskState taskState) {
         List<CodexLauncherService.PromptInput> promptInputs = new ArrayList<>();
         promptInputs.add(new CodexLauncherService.PromptInput("Story", task.taskId() + ": " + task.title()));
         promptInputs.add(new CodexLauncherService.PromptInput("Outcome", task.outcome()));
-        if (prdTaskState != null && !prdTaskState.qualityGates().isEmpty()) {
+        if (taskState != null && !taskState.qualityGates().isEmpty()) {
             promptInputs.add(new CodexLauncherService.PromptInput(
                     "Quality Gates",
-                    String.join(System.lineSeparator(), prdTaskState.qualityGates())
+                    String.join(System.lineSeparator(), taskState.qualityGates())
             ));
+        }
+
+        List<String> codexOptions = new ArrayList<>();
+        codexOptions.add("--json");
+        if (executionAgentSelection != null
+                && executionAgentSelection.provider() == ExecutionAgentProvider.CODEX
+                && hasText(executionAgentSelection.modelId())) {
+            codexOptions.add("--model");
+            codexOptions.add(executionAgentSelection.modelId());
         }
 
         return new CodexLauncherService.CodexLaunchRequest(
@@ -635,14 +815,20 @@ public class ActiveProjectService {
                 preset,
                 promptInputs,
                 "",
-                List.of("--json")
+                codexOptions,
+                branchSelection.branchName(),
+                branchSelection.branchAction()
         );
     }
 
-    private void persistPrdTaskState(PrdTaskState replacementState) throws IOException {
+    private synchronized void persistPrdTaskState(ActiveProject targetProject, PrdTaskState replacementState)
+            throws IOException {
         Objects.requireNonNull(replacementState, "replacementState must not be null");
-        prdTaskStateStore.write(activeProject, replacementState);
-        prdTaskState = replacementState;
+        Objects.requireNonNull(targetProject, "targetProject must not be null");
+        prdTaskStateStore.write(targetProject, replacementState);
+        if (activeProject != null && activeProject.repositoryPath().equals(targetProject.repositoryPath())) {
+            prdTaskState = replacementState;
+        }
     }
 
     public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
@@ -695,6 +881,26 @@ public class ActiveProjectService {
             return PrdInterviewDraftSaveResult.failure(
                     replacementDraft,
                     "Unable to store PRD interview answers: " + exception.getMessage()
+            );
+        }
+    }
+
+    public synchronized PrdPlanningSessionSaveResult savePrdPlanningSession(PrdPlanningSession replacementSession) {
+        Objects.requireNonNull(replacementSession, "replacementSession must not be null");
+        if (activeProject == null) {
+            return PrdPlanningSessionSaveResult.failure(
+                    "Open or create a repository before saving a PRD planning session."
+            );
+        }
+
+        try {
+            projectMetadataInitializer.writePrdPlanningSession(activeProject, replacementSession);
+            prdPlanningSession = replacementSession;
+            return PrdPlanningSessionSaveResult.success(replacementSession);
+        } catch (IOException exception) {
+            return PrdPlanningSessionSaveResult.failure(
+                    replacementSession,
+                    "Unable to store the PRD planning session: " + exception.getMessage()
             );
         }
     }
@@ -1035,6 +1241,7 @@ public class ActiveProjectService {
         localMetadataStorage.recordProjectActivation(candidateProject);
         refreshPreflightState();
         refreshPrdInterviewDraft();
+        refreshPrdPlanningSession();
         refreshActivePrd();
         refreshPrdTaskState();
         refreshMarkdownPrdExchangeLocations();
@@ -1117,6 +1324,10 @@ public class ActiveProjectService {
         prdInterviewDraft = readStoredPrdInterviewDraft().orElse(null);
     }
 
+    private void refreshPrdPlanningSession() {
+        prdPlanningSession = readStoredPrdPlanningSession().orElse(null);
+    }
+
     private void refreshActivePrd() {
         activePrdMarkdown = readStoredActivePrd().orElse(null);
     }
@@ -1172,6 +1383,18 @@ public class ActiveProjectService {
 
         try {
             return projectMetadataInitializer.readMarkdownPrdExchangeLocations(activeProject);
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+    }
+
+    private Optional<PrdPlanningSession> readStoredPrdPlanningSession() {
+        if (activeProject == null) {
+            return Optional.empty();
+        }
+
+        try {
+            return projectMetadataInitializer.readPrdPlanningSession(activeProject);
         } catch (IOException exception) {
             return Optional.empty();
         }
@@ -1372,6 +1595,55 @@ public class ActiveProjectService {
 
     private String attemptSortKey(PrdStoryAttemptRecord attempt) {
         return firstNonBlank(attempt.queuedAt(), attempt.startedAt(), attempt.endedAt(), "");
+    }
+
+    private RunHistoryEntry toRunHistoryEntry(PrdTaskRecord task,
+                                              PrdStoryAttemptRecord attempt,
+                                              LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        return new RunHistoryEntry(
+                task.taskId(),
+                task.title(),
+                attempt.runId(),
+                attempt.queuedAt(),
+                attempt.startedAt(),
+                attempt.endedAt(),
+                runMetadataRecord == null ? "" : runMetadataRecord.branchName(),
+                runMetadataRecord == null ? "" : runMetadataRecord.branchAction(),
+                attempt.presetId(),
+                attempt.presetName(),
+                attempt.presetVersion(),
+                runHistoryResult(attempt, runMetadataRecord),
+                attempt.detail(),
+                attempt.commitHash(),
+                attempt.commitMessage(),
+                runMetadataRecord == null
+                        ? LocalMetadataStorage.RunArtifactPaths.empty()
+                        : runMetadataRecord.artifactPaths()
+        );
+    }
+
+    private String runHistorySortKey(RunHistoryEntry entry) {
+        return latestTimestamp(entry.queuedAt(), entry.startedAt(), entry.endedAt());
+    }
+
+    private String runHistoryResult(PrdStoryAttemptRecord attempt,
+                                    LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        if (runMetadataRecord != null && hasText(runMetadataRecord.status())) {
+            return switch (normalizeStatus(runMetadataRecord.status())) {
+                case "SUCCEEDED", "PASSED", "COMPLETED" -> "PASSED";
+                case "FAILED" -> "FAILED";
+                case "RUNNING" -> "RUNNING";
+                default -> displayStatus(runMetadataRecord.status());
+            };
+        }
+
+        return switch (attempt.outcome()) {
+            case READY -> "QUEUED";
+            case RUNNING -> "RUNNING";
+            case BLOCKED -> "BLOCKED";
+            case COMPLETED -> "PASSED";
+            case FAILED -> "FAILED";
+        };
     }
 
     private String earliestTimestamp(String... values) {
@@ -1696,6 +1968,61 @@ public class ActiveProjectService {
     public record RunRecoveryCandidate(String runId, String storyId, String status, RunRecoveryAction action) {
     }
 
+    public record RunHistoryReport(boolean available,
+                                   String summary,
+                                   String detail,
+                                   List<RunHistoryEntry> entries) {
+        public RunHistoryReport {
+            entries = entries == null ? List.of() : List.copyOf(entries);
+        }
+
+        private static RunHistoryReport unavailable(String summary, String detail) {
+            return new RunHistoryReport(false, summary, detail, List.of());
+        }
+
+        private static RunHistoryReport empty(String summary, String detail) {
+            return new RunHistoryReport(true, summary, detail, List.of());
+        }
+
+        private static RunHistoryReport available(String summary, String detail, List<RunHistoryEntry> entries) {
+            return new RunHistoryReport(true, summary, detail, entries);
+        }
+    }
+
+    public record RunHistoryEntry(String storyId,
+                                  String storyTitle,
+                                  String runId,
+                                  String queuedAt,
+                                  String startedAt,
+                                  String endedAt,
+                                  String branchName,
+                                  String branchAction,
+                                  String presetId,
+                                  String presetName,
+                                  String presetVersion,
+                                  String result,
+                                  String detail,
+                                  String commitHash,
+                                  String commitMessage,
+                                  LocalMetadataStorage.RunArtifactPaths artifactPaths) {
+        public RunHistoryEntry {
+            storyTitle = storyTitle == null ? "" : storyTitle.trim();
+            queuedAt = queuedAt == null ? "" : queuedAt.trim();
+            startedAt = startedAt == null ? "" : startedAt.trim();
+            endedAt = endedAt == null ? "" : endedAt.trim();
+            branchName = branchName == null ? "" : branchName.trim();
+            branchAction = branchAction == null ? "" : branchAction.trim();
+            presetId = presetId == null ? "" : presetId.trim();
+            presetName = presetName == null ? "" : presetName.trim();
+            presetVersion = presetVersion == null ? "" : presetVersion.trim();
+            result = result == null ? "" : result.trim();
+            detail = detail == null ? "" : detail.trim();
+            commitHash = commitHash == null ? "" : commitHash.trim();
+            commitMessage = commitMessage == null ? "" : commitMessage.trim();
+            artifactPaths = artifactPaths == null ? LocalMetadataStorage.RunArtifactPaths.empty() : artifactPaths;
+        }
+    }
+
     public record SingleStorySessionAvailability(boolean startable,
                                                  SingleStorySessionState state,
                                                  String summary,
@@ -1829,6 +2156,20 @@ public class ActiveProjectService {
 
         private static PrdInterviewDraftSaveResult failure(PrdInterviewDraft draft, String message) {
             return new PrdInterviewDraftSaveResult(false, draft, message);
+        }
+    }
+
+    public record PrdPlanningSessionSaveResult(boolean successful, PrdPlanningSession session, String message) {
+        private static PrdPlanningSessionSaveResult success(PrdPlanningSession session) {
+            return new PrdPlanningSessionSaveResult(true, session, "");
+        }
+
+        private static PrdPlanningSessionSaveResult failure(String message) {
+            return new PrdPlanningSessionSaveResult(false, null, message);
+        }
+
+        private static PrdPlanningSessionSaveResult failure(PrdPlanningSession session, String message) {
+            return new PrdPlanningSessionSaveResult(false, session, message);
         }
     }
 

@@ -10,58 +10,88 @@ public class PrdInterviewService {
             new PrdInterviewQuestion(
                     "overviewContext",
                     "overview",
-                    "Overview",
-                    "Product Context",
-                    "What product, workflow, or repository initiative is this PRD defining?",
-                    "Describe the current context, the problem being addressed, and why the work matters now."
+                    "Prompt-First Planning",
+                    "Starter Prompt",
+                    "What feature, workflow, or repository initiative do you want this PRD to plan?",
+                    "Use a short freeform prompt first. Include the problem, the desired outcome, and why the work matters now."
             ),
             new PrdInterviewQuestion(
                     "overviewAudience",
-                    "overview",
-                    "Overview",
-                    "Primary Users",
-                    "Who are the primary users or operators affected by this PRD?",
-                    "Call out the main user groups, their environment, and any constraints that shape the solution."
+                    "planning-clarification",
+                    "Planning Clarifications",
+                    "Users, Constraints, and Integration",
+                    """
+                    Based on the starter prompt, answer the core planning questions:
+                    1. Who are the primary users or operators?
+                    2. What environment, constraints, or workflows shape the solution?
+                    3. Which existing systems, files, or integrations does this need to fit?
+                    """,
+                    "Answer in short labeled bullets when practical, for example `Users: ...`, `Constraints: ...`, `Integration: ...`."
             ),
             new PrdInterviewQuestion(
                     "goalsOutcomes",
                     "goals",
-                    "Goals",
-                    "Goals",
-                    "What outcomes must this PRD achieve?",
-                    "Focus on the concrete user, delivery, or business outcomes that define success."
+                    "Goals and Success",
+                    "Goals and Success Signals",
+                    """
+                    What must this plan achieve?
+                    1. List the concrete goals.
+                    2. List the success signals or outcomes that tell us the work is done well.
+                    3. Call out any core functionality that must exist for the PRD to be considered complete.
+                    """,
+                    "Keep this explicit and testable. One outcome per line is preferred."
             ),
             new PrdInterviewQuestion(
                     "qualityGates",
                     "quality-gates",
                     "Quality Gates",
                     "Quality Gates",
-                    "What automated or manual quality gates must every implementation story satisfy?",
-                    "List the commands, validations, smoke checks, or review expectations that should stay true story by story."
+                    """
+                    What quality commands and review checks must every story satisfy?
+                    1. List the required commands that must pass.
+                    2. Note any manual verification that is still required.
+                    3. For UI work, say whether visual verification is required.
+                    """,
+                    "This round is mandatory. Use one line per command or check."
             ),
             new PrdInterviewQuestion(
                     "userStories",
                     "user-stories",
                     "User Stories",
                     "User Stories",
-                    "Which user stories should this PRD include?",
-                    "Use one line per story when possible. Include a stable ID, a short title, and the outcome the story should deliver."
+                    """
+                    Which small, independently completable user stories should this PRD include?
+                    1. Break the work into focused stories.
+                    2. Keep each story small enough for one agent session.
+                    3. Include the user benefit or outcome for each story.
+                    """,
+                    "Use one line per story when possible, for example `US-010: Title | Outcome`."
             ),
             new PrdInterviewQuestion(
                     "scopeIn",
                     "scope-boundaries",
-                    "Scope Boundaries",
-                    "In Scope",
-                    "What work is explicitly in scope for this PRD?",
-                    "Capture the capabilities, milestones, or deliverables the team should plan to implement."
+                    "Scope and Requirements",
+                    "In Scope and Functional Requirements",
+                    """
+                    What is explicitly in scope for this plan?
+                    1. List the capabilities, milestones, or deliverables that belong in the PRD.
+                    2. Add any functional requirements or integration requirements that must be honored.
+                    3. Call out important technical considerations if they are already known.
+                    """,
+                    "One line per item works best. Prefix formal requirements with `FR-` when you already know them."
             ),
             new PrdInterviewQuestion(
                     "scopeOut",
                     "scope-boundaries",
-                    "Scope Boundaries",
-                    "Out of Scope",
-                    "What should stay out of scope for this PRD?",
-                    "List exclusions, deferred ideas, or guardrails that prevent the PRD from expanding unpredictably."
+                    "Boundaries and Follow-Up",
+                    "Non-Goals and Open Questions",
+                    """
+                    What should stay out of scope, and what still needs clarification?
+                    1. List the non-goals or exclusions.
+                    2. Add any deferred ideas or guardrails.
+                    3. Capture any unresolved planning questions.
+                    """,
+                    "List exclusions as plain bullets. Put unresolved questions on separate lines ending with `?`."
             )
     );
 

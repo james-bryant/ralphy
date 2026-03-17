@@ -26,7 +26,27 @@ after each iteration and it's included in prompts for context.
 - For JavaFX flows that race background completion, extend the shared UI harness with helpers that wait for a control to become enabled and capture the resulting label text on the same FX-thread pulse; that keeps async state assertions deterministic without hard-coded sleeps.
 - Keep loop story selection in `ActiveProjectService` as a typed availability/report that includes skipped-story metadata and stop-state semantics; the controller can then render `Play`, pause, completion, and skip messaging without re-implementing eligibility rules in JavaFX code.
 - Keep automatic retry inside `ActiveProjectService` as a loop over persisted single-attempt executions for the same story ID; each retry should create a fresh run ID and queued/running/finalized attempt record so audit artifacts, restart-safe resume state, and Play-loop behavior stay aligned without teaching JavaFX about retry internals.
+- Keep Git branch automation at the service/launcher seam: derive the feature branch from the same `RalphPrdJsonMapper` branch name used in exported `prd.json`, then persist the branch name and action on run metadata before Codex starts so restart flows and future history views can reuse typed state instead of re-reading Git.
+- Treat story completion as a post-launch service step: run automated quality-gate commands, create the per-story Git commit, and only then mark the `PrdStoryAttemptRecord` as `COMPLETED` while persisting the commit hash/message on that attempt record.
+- Build restart-safe run history by treating `PrdTaskRecord.attempts()` as the authoritative per-story audit trail and joining each attempt to `LocalMetadataStorage.RunMetadataRecord` by `runId` for branch and artifact-path details; that keeps `prd.json` stable across reopen while the UI can still open stored prompt/log/summary files without rescanning directories.
 
+---
+## 2026-03-16 - US-034
+- Implemented a dedicated `StoryCompletionService` that normalizes automated quality-gate commands, runs validation after a successful Codex attempt, creates a per-story Git commit whose message begins with the story ID, and returns the resulting commit hash/message.
+- Reworked `ActiveProjectService` so a story is marked `COMPLETED` only after the post-run validation and commit step succeeds; failed validation or missing commit now leaves the story `FAILED` and retryable, while successful attempts persist commit metadata on the story attempt record and export it through `prd.json`.
+- Expanded regression coverage for validation/commit success, validation failure gating, persisted attempt commit metadata, and JavaFX Play/pause flows by extending the fake Git/Maven test fixtures to support the new completion step. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `.ralph-tui/progress.md`
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdStoryAttemptRecord.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/PrdTaskRecord.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/StoryCompletionService.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/StoryCompletionServiceTest.java`
+- **Learnings:**
+  - The right seam for commit-per-story logic is after `CodexLauncherService` returns, not inside the launcher; that keeps raw launch artifacts stable while letting story status reflect validation and commit outcomes together.
+  - JavaFX Play-loop fixtures now need runnable quality-gate files and fake Git commit commands, because a successful fake Codex run is no longer enough to drive a story into `COMPLETED`.
 ---
 ## 2026-03-15 - US-014
 - Implemented WSL preflight presentation in the desktop shell, including stored-report rendering, a manual `Run WSL Preflight` action, and WSL-specific summary/detail/check formatting alongside the existing native diagnostics.
@@ -374,4 +394,43 @@ after each iteration and it's included in prompts for context.
 - **Learnings:**
   - Automatic retry belongs at the single-story service seam, not in the controller, because the retry has to reuse the same persisted task-state and run-artifact pipeline as any other attempt.
   - Reopen-safe resume after a double failure falls out naturally when each retry writes a normal attempt record and leaves the final story status as `FAILED`; no separate "resumable failed" tracker state is needed.
+---
+## 2026-03-16 - US-033
+- Implemented feature-branch setup with a new `GitFeatureBranchService`, so each story run now creates or switches to the deterministic active-PRD branch before Codex starts.
+- Reused `RalphPrdJsonMapper` branch naming for launch-time Git automation and extended launcher/local metadata persistence so each run stores the branch name and branch action (`CREATED`, `SWITCHED`, or `ALREADY_ACTIVE`) alongside the existing process details.
+- Added launcher, service, metadata-migration, and JavaFX regressions, including a configurable `ralphy.git.command` seam plus fake-git UI harness scripts so run-flow tests can exercise branch setup without requiring real Git repos in the UI test fixtures. Ran `.\mvnw.cmd clean verify jacoco:report`.
+- Files changed:
+  - `src/main/java/net/uberfoo/ai/ralphy/GitFeatureBranchService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/CodexLauncherService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/RalphPrdJsonMapper.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/GitFeatureBranchServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/CodexLauncherServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/LocalMetadataStorageTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+  - `.ralph-tui/progress.md`
+- **Learnings:**
+  - The exported `prd.json` branch name was already the right source of truth for deterministic branch automation; reusing the mapper avoids drift between Git behavior and Ralph-compatible task exports.
+  - Persisting branch details on the same pre-launch `RUNNING` metadata record as the process fields keeps restart recovery future-proof, because the app can recover the selected branch even when the Codex process never reaches a clean exit.
+  - JavaFX run-flow tests in this repo use lightweight fake repositories with `.git` directories only, so Git automation needs a configurable command seam just like Codex execution if the UI test suite is going to stay fast and hermetic.
+---
+## 2026-03-16 - US-035
+- Implemented a typed run-history projection in `ActiveProjectService` that joins persisted story attempts with persisted run metadata so the UI can list timestamps, branch, commit, preset, result, and stored artifact paths across restarts and repeated runs of the same project.
+- Added an `Execution > Run History` card with per-attempt history rows plus an in-app artifact viewer that opens stored prompt, stdout, stderr, structured-events, assistant-summary, and attempt-summary files directly from the UI.
+- Added service and JavaFX regressions for restart-safe history restoration, multi-attempt ordering, and opening stored artifacts from persisted run history; updated the Windows smoke checklist; ran `.\mvnw.cmd clean verify jacoco:report`; completed a Windows smoke launch by starting `.\mvnw.cmd -q -DskipTests javafx:run` and detecting a live `Ralphy` window.
+- Files changed:
+  - `.ralph-tui/progress.md`
+  - `docs/windows-smoke-checklist.md`
+  - `src/main/java/net/uberfoo/ai/ralphy/ActiveProjectService.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/AppShellController.java`
+  - `src/main/java/net/uberfoo/ai/ralphy/LocalMetadataStorage.java`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-shell-view.fxml`
+  - `src/main/resources/net/uberfoo/ai/ralphy/app-theme.css`
+  - `src/test/java/net/uberfoo/ai/ralphy/ActiveProjectServiceTest.java`
+  - `src/test/java/net/uberfoo/ai/ralphy/AppShellUiTest.java`
+- **Learnings:**
+  - The right seam for history rendering is a typed service-level join of task attempts and run metadata, not a JavaFX-side filesystem scan; the controller only needs stable artifact paths plus already-persisted attempt fields.
+  - Opening stored artifacts inside the shell is easier to verify than delegating to OS file associations, and it still satisfies the requirement to inspect prompts, logs, and summaries from the UI.
 ---

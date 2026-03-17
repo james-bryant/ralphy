@@ -1,5 +1,6 @@
 package net.uberfoo.ai.ralphy;
 
+import javafx.application.Platform;
 import javafx.scene.paint.Color;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -8,9 +9,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,8 +59,10 @@ class AppShellUiTest {
         assertEquals(shellDescriptor.appName(), harness.text("#brandLabel"));
         assertEquals(shellDescriptor.shellTagline(), harness.text("#taglineLabel"));
         assertEquals(shellDescriptor.navigationPlaceholder(), harness.text("#navigationPlaceholderLabel"));
-        assertEquals(shellDescriptor.workspacePlaceholder(), harness.text("#workspacePlaceholderLabel"));
-        assertEquals(shellDescriptor.statusPlaceholder(), harness.text("#statusLabel"));
+        assertEquals("Projects", harness.text("#workspaceTitleLabel"));
+        assertEquals("Repository onboarding, recent projects, and diagnostics will appear here.",
+                harness.text("#workspacePlaceholderLabel"));
+        assertEquals("Projects workspace ready.", harness.text("#statusLabel"));
         assertTrue(harness.sceneHasStylesheet(AppTheme.stylesheetUrl()));
         assertTrue(harness.hasRootStyleClass(AppTheme.rootStyleClass()));
         assertEquals(Color.web("#020617"), harness.backgroundColor("#shellRoot"));
@@ -86,11 +94,13 @@ class AppShellUiTest {
         harness = new JavaFxUiHarness();
         harness.launchPrimaryShell(tempDir.resolve("storage"));
 
-        assertEquals("Ralph/Codex PRD Creation", harness.text("#presetPreviewNameLabel"));
+        harness.clickOn("#executionNavButton");
+
+        assertEquals("Ralph/Codex Story Implementation", harness.text("#presetPreviewNameLabel"));
         assertTrue(harness.text("#presetPreviewVersionLabel").contains("v1"));
-        assertTrue(harness.text("#presetRequiredSkillsValueLabel").contains("ralph-tui-prd"));
+        assertTrue(harness.text("#presetRequiredSkillsValueLabel").contains("springboot-tdd"));
         assertTrue(harness.text("#presetPromptPreviewArea")
-                .contains("repository-owned Product Requirements Document"));
+                .contains("Implement exactly one approved story"));
         assertFalse(harness.isEditable("#presetPromptPreviewArea"));
         assertTrue(harness.textContent("#presetCatalogCard")
                 .contains("Preset preview is read-only in v1"));
@@ -102,6 +112,203 @@ class AppShellUiTest {
         assertTrue(harness.text("#presetAssumptionsValueLabel")
                 .contains(".\\mvnw.cmd clean verify jacoco:report"));
         assertTrue(harness.text("#presetPromptPreviewArea").contains("Implement exactly one approved story"));
+    }
+
+    @Test
+    void appShellAutoSelectsWorkflowPresetForTheActivePage() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("workflow-preset-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        seedStoryProgressArtifacts(repository, playAutoAdvanceMarkdown(), playAutoAdvancePrdJson());
+
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
+        seedStoredProject(storageDirectory, repository);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory, "--ralphy.preflight.native.auto-run=false");
+
+        harness.clickOn("#executionNavButton");
+
+        assertTrue(harness.isVisible("#presetCatalogCard"));
+        assertFalse(harness.isVisible("#prdCreationPresetRadioButton"));
+        assertEquals("Ralph/Codex Story Implementation", harness.text("#presetPreviewNameLabel"));
+        assertFalse(harness.isDisabled("#startSingleStoryButton"));
+        assertEquals("Play", harness.text("#startSingleStoryButton"));
+
+        harness.clickOn("#retryFixPresetRadioButton");
+        assertEquals("Ralph/Codex Retry and Fix", harness.text("#presetPreviewNameLabel"));
+
+        harness.clickOn("#prdEditorNavButton");
+        assertFalse(harness.isVisible("#presetCatalogCard"));
+
+        harness.clickOn("#executionNavButton");
+        assertEquals("Ralph/Codex Retry and Fix", harness.text("#presetPreviewNameLabel"));
+        assertFalse(harness.isVisible("#prdCreationPresetRadioButton"));
+    }
+
+    @Test
+    void appShellOnlyScrollsToThePrdDocumentWhenApplyingPlannerDraftAndReenablesPlay() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("planner-scroll-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
+        String plannerSessionTimestamp = "2026-03-17T12:00:00Z";
+        projectMetadataInitializer.writePrdPlanningSession(
+                activeProject,
+                new PrdPlanningSession(
+                        "Plan a structured Codex output viewer.",
+                        List.of(
+                                new PrdPlanningSession.Message(
+                                        "user",
+                                        "Plan a structured Codex output viewer.",
+                                        plannerSessionTimestamp
+                                ),
+                                new PrdPlanningSession.Message(
+                                        "assistant",
+                                        "Here is a draft to review and apply.",
+                                        plannerSessionTimestamp
+                                )
+                        ),
+                        """
+                                # PRD: Planner Draft
+
+                                ## Overview
+                                Validate PRDs before execution starts.
+
+                                ## Goals
+                                - Block malformed PRDs before execution.
+
+                                ## Quality Gates
+                                - .\\mvnw.cmd clean verify jacoco:report
+
+                                ## User Stories
+                                ### US-020: Validate PRD structure before execution
+                                **Description:** As a user, I want malformed task definitions blocked before execution.
+                                **Dependencies:** None.
+                                **Acceptance Criteria:**
+                                - [ ] Structural PRD validation blocks malformed stories.
+                                - [ ] .\\mvnw.cmd clean verify jacoco:report
+
+                                ## Scope Boundaries
+                                ### In Scope
+                                - Structural PRD validation
+
+                                ### Out of Scope
+                                - Codex launch orchestration
+                                """,
+                        plannerSessionTimestamp,
+                        plannerSessionTimestamp
+                )
+        );
+        seedStoredProject(storageDirectory, repository);
+        Path fakeCodexCommand = createFakeCodexCommandScript(50L);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(
+                storageDirectory,
+                "--ralphy.preflight.native.auto-run=false",
+                "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
+        );
+
+        harness.clickOn("#executionNavButton");
+        harness.clickOn("#retryFixPresetRadioButton");
+        assertTrue(harness.isDisabled("#startSingleStoryButton"));
+
+        harness.clickOn("#prdEditorNavButton");
+        harness.setScrollValue("#workspaceScrollPane", 1.0);
+        double beforeSendScroll = harness.scrollValue("#workspaceScrollPane");
+        harness.enterText("#prdPlannerInputArea", "Plan a structured Codex output viewer.");
+        harness.clickOn("#prdPlannerSendButton");
+        assertEquals("", harness.text("#prdPlannerInputArea"));
+        assertTrue(harness.isDisabled("#prdPlannerSendButton"));
+        assertTrue(harness.isDisabled("#prdPlannerInputArea"));
+        harness.waitUntil(() -> harness.scrollValue("#workspaceScrollPane") < 0.3);
+        double duringSendScroll = harness.scrollValue("#workspaceScrollPane");
+        assertTrue(
+                duringSendScroll < 0.3,
+                "Expected planner send to focus the Live PRD Planner card. scroll=" + duringSendScroll
+        );
+        assertTrue(harness.isVisible("#prdPlannerProgressRow"));
+        assertEquals("Waiting for Codex to continue the planner...", harness.text("#prdPlannerProgressLabel"));
+        harness.waitUntil(() -> !harness.isDisabled("#prdPlannerSendButton")
+                && harness.text("#prdPlannerTranscriptArea").contains("Completed story."));
+        assertTrue(harness.scrollValue("#workspaceScrollPane") < 0.3);
+
+        harness.setScrollValue("#workspaceScrollPane", 0.0);
+        assertFalse(harness.isDisabled("#prdPlannerApplyDraftButton"));
+        harness.clickOn("#prdPlannerApplyDraftButton");
+        harness.waitUntil(() -> harness.text("#prdPlannerMessageLabel").contains("Applied the latest planner draft"));
+        assertTrue(harness.text("#prdDocumentPreviewArea").contains("# PRD: Planner Draft"));
+        assertTrue(harness.scrollValue("#workspaceScrollPane") > 0.8);
+
+        harness.clickOn("#executionNavButton");
+        assertEquals("PRD ready for execution", harness.text("#prdValidationSummaryLabel"));
+        assertEquals("Ralph/Codex Story Implementation", harness.text("#presetPreviewNameLabel"));
+        assertEquals("Play", harness.text("#startSingleStoryButton"));
+        assertFalse(harness.isDisabled("#startSingleStoryButton"));
+    }
+
+    @Test
+    void appShellPlannerSendFocusesWorkspaceOnPlannerWhenStartingFromEmptySession() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("planner-send-no-jump-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        seedStoredProject(storageDirectory, repository);
+        Path fakeCodexCommand = createFakeCodexCommandScript(50L);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(
+                storageDirectory,
+                "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
+        );
+
+        harness.clickOn("#prdEditorNavButton");
+        harness.setScrollValue("#workspaceScrollPane", 0.15);
+        double beforeSendScroll = harness.scrollValue("#workspaceScrollPane");
+
+        harness.enterText("#prdPlannerInputArea", "Plan a dashboard for story-level retries.");
+        harness.clickOn("#prdPlannerSendButton");
+        assertEquals("", harness.text("#prdPlannerInputArea"));
+        assertTrue(harness.isDisabled("#prdPlannerSendButton"));
+        assertTrue(harness.isDisabled("#prdPlannerInputArea"));
+        harness.waitUntil(() -> harness.scrollValue("#workspaceScrollPane") < 0.3);
+        double duringSendScroll = harness.scrollValue("#workspaceScrollPane");
+        assertTrue(
+                duringSendScroll < 0.3,
+                "Expected planner send to bring the Live PRD Planner card into view. before="
+                        + beforeSendScroll
+                        + ", during="
+                        + duringSendScroll
+        );
+        assertTrue(harness.isVisible("#prdPlannerProgressRow"));
+        assertEquals("Waiting for Codex to continue the planner...", harness.text("#prdPlannerProgressLabel"));
+        harness.waitUntil(() -> !harness.isDisabled("#prdPlannerSendButton")
+                && harness.text("#prdPlannerTranscriptArea").contains("Completed story."));
+
+        double afterSendScroll = harness.scrollValue("#workspaceScrollPane");
+        assertTrue(
+                afterSendScroll < 0.3,
+                "Expected planner send to keep the Live PRD Planner card in view. before="
+                        + beforeSendScroll
+                        + ", after="
+                        + afterSendScroll
+        );
+    }
+
+    @Test
+    void appShellLoadsPlannerModelChoicesForPrdPlanning() throws Exception {
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(tempDir.resolve("storage"));
+
+        harness.clickOn("#prdEditorNavButton");
+        harness.waitUntil(() -> harness.text("#prdPlannerModelStatusLabel").contains("Loaded"));
+        assertTrue(harness.exists("#prdPlannerModelComboBox"));
     }
 
     @Test
@@ -118,6 +325,7 @@ class AppShellUiTest {
         assertEquals("0", harness.text("#storyProgressPendingCountLabel"));
         assertEquals("0", harness.text("#storyProgressPausedCountLabel"));
         assertEquals("No active project", harness.text("#runOutputSummaryLabel"));
+        assertEquals("No active project", harness.text("#runHistorySummaryLabel"));
     }
 
     @Test
@@ -132,12 +340,14 @@ class AppShellUiTest {
         projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
         seedStoredProject(storageDirectory, repository);
 
-        Path fakeCodexCommand = createFakeCodexCommandScript(400L);
+        Path fakeGitCommand = createFakeGitCommandScript();
+        Path fakeCodexCommand = createFakeCodexCommandScript(1200L);
 
         harness = new JavaFxUiHarness();
         harness.launchPrimaryShell(
                 storageDirectory,
                 "--ralphy.preflight.native.auto-run=false",
+                "--ralphy.git.command=" + fakeGitCommand.toAbsolutePath().normalize(),
                 "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
         );
 
@@ -147,11 +357,14 @@ class AppShellUiTest {
         assertTrue(harness.text("#singleStorySessionDetailLabel").contains("US-030 (status is BLOCKED)"));
 
         harness.clickOn("#startSingleStoryButton");
-        harness.waitUntil(() -> harness.text("#singleStorySessionMessageLabel").contains("Play complete.")
-                && "2".equals(harness.text("#storyProgressPassedCountLabel")));
+        harness.waitUntil(() -> harness.isVisible("#singleStorySessionProgressRow"));
+        assertTrue(harness.text("#singleStorySessionProgressLabel").contains("Codex is running"));
+        harness.waitUntil(() -> "2".equals(harness.text("#storyProgressPassedCountLabel"))
+                && !harness.isVisible("#singleStorySessionProgressRow"), 20L);
 
         assertEquals("1", harness.text("#storyProgressBlockedCountLabel"));
         assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
+        assertFalse(harness.isVisible("#singleStorySessionProgressRow"));
         assertTrue(harness.text("#singleStorySessionMessageLabel").contains("US-030 (status is BLOCKED)"));
         assertEquals("Play", harness.text("#startSingleStoryButton"));
 
@@ -174,14 +387,18 @@ class AppShellUiTest {
         seedStoredProject(storageDirectory, repository);
 
         Path invocationCounterPath = tempDir.resolve("flaky-codex-count.txt");
+        Path fakeGitCommand = createFakeGitCommandScript();
         Path fakeCodexCommand = createFlakyCodexCommandScript(invocationCounterPath);
 
         harness = new JavaFxUiHarness();
         harness.launchPrimaryShell(
                 storageDirectory,
                 "--ralphy.preflight.native.auto-run=false",
+                "--ralphy.git.command=" + fakeGitCommand.toAbsolutePath().normalize(),
                 "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
         );
+
+        harness.waitUntil(() -> harness.text("#executionModelStatusLabel").contains("Loaded"));
 
         harness.clickOn("#storyImplementationPresetRadioButton");
         harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to play US-032"));
@@ -219,16 +436,19 @@ class AppShellUiTest {
         projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
         seedStoredProject(storageDirectory, repository);
 
+        Path fakeGitCommand = createFakeGitCommandScript();
         Path fakeCodexCommand = createFakeCodexCommandScript();
 
         harness = new JavaFxUiHarness();
         harness.launchPrimaryShell(
                 storageDirectory,
                 "--ralphy.preflight.native.auto-run=false",
+                "--ralphy.git.command=" + fakeGitCommand.toAbsolutePath().normalize(),
                 "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
         );
 
         harness.clickOn("#storyImplementationPresetRadioButton");
+        harness.waitUntil(() -> harness.text("#executionModelStatusLabel").contains("Loaded"));
         harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to play US-030"));
         assertFalse(harness.isDisabled("#startSingleStoryButton"));
 
@@ -259,7 +479,7 @@ class AppShellUiTest {
                 activeProject,
                 "run-029-1",
                 "US-029",
-                "{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Planning...\"}",
+                codexOutputSample(),
                 "warning: stderr output",
                 "Implemented US-029. Ran verification."
         );
@@ -298,18 +518,309 @@ class AppShellUiTest {
 
         assertEquals("Latest run: US-029 | SUCCEEDED", harness.text("#runOutputSummaryLabel"));
         assertTrue(harness.text("#runOutputDetailLabel").contains("run-029-1"));
-        assertEquals("Implemented US-029. Ran verification.", harness.text("#runOutputTextArea"));
+        assertTrue(harness.isSelected("#structuredRunOutputViewRadioButton"));
+        assertTrue(harness.isVisible("#runOutputStructuredScrollPane"));
+        assertFalse(harness.isVisible("#runOutputTextArea"));
 
         harness.clickOn("#rawOutputViewRadioButton");
 
         String rawOutput = harness.text("#runOutputTextArea");
-        assertTrue(rawOutput.contains("assistant_message.delta"));
+        assertTrue(rawOutput.contains("\"type\" : \"thread.started\""));
         assertTrue(rawOutput.contains("[stderr]"));
         assertTrue(rawOutput.contains("warning: stderr output"));
+        double runOutputViewportHeight = harness.height("#runOutputTextArea");
+
+        harness.clickOn("#structuredRunOutputViewRadioButton");
+
+        assertTrue(harness.isVisible("#runOutputStructuredScrollPane"));
+        assertFalse(harness.isVisible("#runOutputTextArea"));
+        assertTrue(harness.height("#runOutputStructuredScrollPane") > runOutputViewportHeight);
+        String structuredOutput = harness.textContent("#runOutputStructuredContainer").toLowerCase();
+        assertTrue(structuredOutput.contains("agent message"));
+        assertTrue(structuredOutput.contains("command execution"));
+        assertTrue(structuredOutput.contains("web search"));
+        assertTrue(structuredOutput.contains("greetingcli.java"));
+        assertTrue(structuredOutput.contains("turn completed"));
+        assertTrue(structuredOutput.contains("warning: stderr output"));
+        assertEquals(1, harness.nodeCount("#structuredRunOutputEntryitemitem16"));
+        assertTrue(harness.exists("#structuredRunOutputToggleitemitem16"));
+
+        String commandPreview = harness.textContent("#structuredRunOutputBodyitemitem16");
+        assertTrue(commandPreview.contains("..."));
+        assertTrue(commandPreview.contains("private GreetingCli()"));
+        assertFalse(commandPreview.contains("public final class GreetingCli"));
+
+        harness.clickOn("#structuredRunOutputToggleitemitem16");
+        String expandedCommandOutput = harness.textContent("#structuredRunOutputBodyitemitem16");
+        assertTrue(expandedCommandOutput.contains("public final class GreetingCli"));
+        assertTrue(expandedCommandOutput.contains("private GreetingCli()"));
+
+        harness.clickOn("#structuredRunOutputToggleitemitem16");
+        String collapsedCommandOutput = harness.textContent("#structuredRunOutputBodyitemitem16");
+        assertTrue(collapsedCommandOutput.contains("..."));
+        assertFalse(collapsedCommandOutput.contains("public final class GreetingCli"));
 
         harness.clickOn("#assistantSummaryViewRadioButton");
 
         assertEquals("Implemented US-029. Ran verification.", harness.text("#runOutputTextArea"));
+    }
+
+    @Test
+    void appShellDisplaysReasoningItemsAsPlainTextInStructuredOutput() throws Exception {
+        Path storageDirectory = tempDir.resolve("structured-reasoning-storage");
+        Path repository = createGitRepository("structured-reasoning-repo");
+        seedStoredProject(storageDirectory, repository);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        AppShellController controller = harness.getRequiredRootController(AppShellController.class);
+        renderStructuredRunOutput(controller, """
+                {"type":"item.completed","item":{"id":"item_reasoning","type":"reasoning","status":"completed","text":"Thinking through the remaining edge cases."}}
+                """);
+
+        harness.waitUntil(() -> harness.exists("#structuredRunOutputEntryitemitemreasoning"));
+        String reasoningOutput = harness.textContent("#structuredRunOutputEntryitemitemreasoning");
+        String normalizedReasoningOutput = reasoningOutput.toLowerCase();
+        assertTrue(normalizedReasoningOutput.contains("reasoning"));
+        assertTrue(reasoningOutput.contains("Thinking through the remaining edge cases."));
+        assertFalse(reasoningOutput.contains("\"text\""));
+    }
+
+    @Test
+    void appShellDisplaysWebSearchAndFileChangeItemsInStructuredOutput() throws Exception {
+        Path storageDirectory = tempDir.resolve("structured-web-search-storage");
+        Path repository = createGitRepository("structured-web-search-repo");
+        seedStoredProject(storageDirectory, repository);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        AppShellController controller = harness.getRequiredRootController(AppShellController.class);
+        renderStructuredRunOutput(controller, """
+                {"type":"item.completed","item":{"id":"item_search","type":"web_search","status":"completed","query":"spotless maven plugin googleJavaFormatVersion property","action":{"type":"search","query":"spotless maven plugin googleJavaFormatVersion property","queries":["spotless maven plugin googleJavaFormatVersion property"]}}}
+                {"type":"item.completed","item":{"id":"item_file","type":"file_change","status":"completed","changes":[{"path":"C:\\\\Users\\\\james\\\\workspace\\\\project9\\\\pom.xml","kind":"update"},{"path":"C:\\\\Users\\\\james\\\\workspace\\\\project9\\\\src\\\\test\\\\java\\\\com\\\\example\\\\project9\\\\GreetingCliTest.java","kind":"update"}]}}
+                """);
+
+        harness.waitUntil(() -> harness.exists("#structuredRunOutputEntryitemitemsearch")
+                && harness.exists("#structuredRunOutputEntryitemitemfile"));
+
+        String webSearchOutput = harness.textContent("#structuredRunOutputEntryitemitemsearch");
+        assertTrue(webSearchOutput.contains("web search"));
+        assertTrue(webSearchOutput.contains("spotless maven plugin googleJavaFormatVersion property"));
+        assertTrue(webSearchOutput.contains("Action search"));
+        assertFalse(webSearchOutput.contains("\"queries\""));
+
+        String fileChangeOutput = harness.textContent("#structuredRunOutputEntryitemitemfile");
+        assertTrue(fileChangeOutput.contains("File changes"));
+        assertTrue(fileChangeOutput.contains("update C:\\Users\\james\\workspace\\project9\\pom.xml"));
+        assertTrue(fileChangeOutput.contains("update C:\\Users\\james\\workspace\\project9\\src\\test\\java\\com\\example\\project9\\GreetingCliTest.java"));
+        assertFalse(fileChangeOutput.contains("\"changes\""));
+    }
+
+    @Test
+    void appShellKeepsStructuredCommandOutputGroupedAndScrollAnchoredDuringLiveUpdates() throws Exception {
+        Path storageDirectory = tempDir.resolve("structured-live-storage");
+        Path repository = createGitRepository("structured-live-repo");
+        seedStoredProject(storageDirectory, repository);
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+        harness.clickOn("#executionNavButton");
+        harness.clickOn("#structuredRunOutputViewRadioButton");
+
+        AppShellController controller = harness.getRequiredRootController(AppShellController.class);
+        renderStructuredRunOutput(controller, """
+                {"type":"item.started","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+                {"type":"item.updated","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6","exit_code":null,"status":"in_progress"}}
+                """);
+
+        harness.waitUntil(() -> harness.exists("#structuredRunOutputToggleitemitemcmd"));
+        assertEquals(1, harness.nodeCount("#structuredRunOutputEntryitemitemcmd"));
+
+        String collapsedOutput = harness.textContent("#structuredRunOutputBodyitemitemcmd");
+        assertTrue(collapsedOutput.contains("..."));
+        assertTrue(collapsedOutput.contains("line 6"));
+        assertFalse(collapsedOutput.contains("line 1"));
+
+        harness.clickOn("#structuredRunOutputToggleitemitemcmd");
+        harness.waitUntil(() -> harness.textContent("#structuredRunOutputBodyitemitemcmd").contains("line 1"));
+        harness.setScrollValue("#structuredRunOutputBodyitemitemcmd", 0.0);
+
+        renderStructuredRunOutput(controller, """
+                {"type":"item.started","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+                {"type":"item.updated","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6","exit_code":null,"status":"in_progress"}}
+                {"type":"item.updated","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6\\nline 7\\nline 8","exit_code":null,"status":"in_progress"}}
+                """);
+
+        harness.waitUntil(() -> harness.textContent("#structuredRunOutputBodyitemitemcmd").contains("line 8"));
+        assertEquals(1, harness.nodeCount("#structuredRunOutputEntryitemitemcmd"));
+        assertTrue(harness.scrollValue("#structuredRunOutputBodyitemitemcmd") < 0.15);
+
+        harness.setScrollValue("#structuredRunOutputBodyitemitemcmd", 1.0);
+
+        renderStructuredRunOutput(controller, """
+                {"type":"item.started","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+                {"type":"item.updated","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6","exit_code":null,"status":"in_progress"}}
+                {"type":"item.updated","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6\\nline 7\\nline 8","exit_code":null,"status":"in_progress"}}
+                {"type":"item.completed","item":{"id":"item_cmd","type":"command_execution","command":"cmd.exe /c echo streaming","aggregated_output":"line 1\\nline 2\\nline 3\\nline 4\\nline 5\\nline 6\\nline 7\\nline 8\\nline 9\\nline 10","exit_code":0,"status":"completed"}}
+                """);
+
+        harness.waitUntil(() -> harness.textContent("#structuredRunOutputBodyitemitemcmd").contains("line 10"));
+        assertEquals(1, harness.nodeCount("#structuredRunOutputEntryitemitemcmd"));
+
+        harness.clickOn("#structuredRunOutputToggleitemitemcmd");
+        String collapsedFinalOutput = harness.textContent("#structuredRunOutputBodyitemitemcmd");
+        assertTrue(collapsedFinalOutput.contains("..."));
+        assertTrue(collapsedFinalOutput.contains("line 10"));
+        assertFalse(collapsedFinalOutput.contains("line 5"));
+
+        String baselineEvents = structuredAgentMessageEvents(120);
+        renderStructuredRunOutput(controller, baselineEvents);
+        harness.waitUntil(() -> harness.exists("#structuredRunOutputEntryitemitem120"));
+        harness.setScrollValue("#runOutputStructuredScrollPane", 1.0);
+        double bottomScrollBeforeAppend = harness.scrollValue("#runOutputStructuredScrollPane");
+
+        String appendedEvents = baselineEvents + System.lineSeparator() + structuredAgentMessageEvent(121);
+        renderStructuredRunOutput(controller, appendedEvents);
+        harness.waitUntil(() -> harness.exists("#structuredRunOutputEntryitemitem121"));
+        harness.waitUntil(() -> harness.scrollValue("#runOutputStructuredScrollPane")
+                >= Math.max(bottomScrollBeforeAppend - 0.1, 0.0));
+
+        harness.setScrollValue("#runOutputStructuredScrollPane", 0.0);
+        double topScrollBeforeAppend = harness.scrollValue("#runOutputStructuredScrollPane");
+        String appendedEventsAgain = appendedEvents + System.lineSeparator() + structuredAgentMessageEvent(122);
+        renderStructuredRunOutput(controller, appendedEventsAgain);
+        harness.waitUntil(() -> harness.exists("#structuredRunOutputEntryitemitem122"));
+        harness.waitUntil(() -> harness.scrollValue("#runOutputStructuredScrollPane")
+                <= Math.min(topScrollBeforeAppend + 0.1, 1.0));
+    }
+
+    @Test
+    void appShellShowsPersistedRunHistoryAndOpensStoredArtifactsAcrossRestarts() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("run-history-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        seedStoryProgressArtifacts(repository, runHistoryMarkdown(), runHistoryPrdJson());
+        seedRunOutputArtifacts(
+                activeProject,
+                "run-history-1",
+                "US-035",
+                "{\"event\":\"assistant_message.completed\",\"content\":\"First pass\"}",
+                "",
+                "First pass summary"
+        );
+        seedRunOutputArtifacts(
+                activeProject,
+                "run-history-2",
+                "US-035",
+                "Retry stdout",
+                "Retry stderr",
+                "Retry failed summary"
+        );
+        Files.writeString(activeProject.promptsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                .resolve("prompt.txt"), "Prompt for first attempt");
+        Files.writeString(activeProject.promptsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                .resolve("prompt.txt"), "Prompt for retry attempt");
+
+        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(
+                new LocalMetadataStorage.RunMetadataRecord(
+                        "run-history-1",
+                        projectId,
+                        "US-035",
+                        "SUCCEEDED",
+                        "2026-03-16T09:11:00Z",
+                        "2026-03-16T09:12:00Z",
+                        "POWERSHELL",
+                        repository.toString(),
+                        1234L,
+                        0,
+                        List.of("powershell.exe", "-NoLogo"),
+                        "ralph/run-history",
+                        "CREATED",
+                        new LocalMetadataStorage.RunArtifactPaths(
+                                activeProject.promptsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("prompt.txt").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("stdout.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("stderr.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("structured-events.jsonl").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("attempt-summary.json").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-1")
+                                        .resolve("assistant-summary.txt").toString()
+                        )
+                ),
+                new LocalMetadataStorage.RunMetadataRecord(
+                        "run-history-2",
+                        projectId,
+                        "US-035",
+                        "FAILED",
+                        "2026-03-16T09:16:00Z",
+                        "2026-03-16T09:18:00Z",
+                        "POWERSHELL",
+                        repository.toString(),
+                        2345L,
+                        1,
+                        List.of("powershell.exe", "-NoLogo"),
+                        "ralph/run-history",
+                        "SWITCHED",
+                        new LocalMetadataStorage.RunArtifactPaths(
+                                activeProject.promptsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("prompt.txt").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("stdout.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("stderr.log").toString(),
+                                activeProject.logsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("structured-events.jsonl").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("attempt-summary.json").toString(),
+                                activeProject.artifactsDirectoryPath().resolve("US-035").resolve("run-history-2")
+                                        .resolve("assistant-summary.txt").toString()
+                        )
+                )
+        ));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertTrue(harness.text("#runHistorySummaryLabel").contains("2 persisted attempts"));
+        assertTrue(harness.text("#runHistoryDetailLabel").contains("Latest: US-035 | FAILED"));
+
+        String historyText = harness.textContent("#runHistoryEntriesContainer");
+        assertTrue(historyText.contains("US-035 | View Run History and Artifacts"));
+        assertTrue(historyText.contains("Run run-history-2 | FAILED"));
+        assertTrue(historyText.contains("Branch ralph/run-history (SWITCHED)"));
+        assertTrue(historyText.contains("Commit commit-run-history-1 | US-035: View Run History and Artifacts"));
+        assertTrue(historyText.contains("Preset Ralph/Codex Story Implementation v1"));
+        assertTrue(historyText.contains("Preset Ralph/Codex Retry and Fix v1"));
+
+        harness.clickOn("#runHistoryOpenPromptrunhistory2");
+        assertEquals("US-035 | Prompt | run-history-2", harness.text("#runHistoryArtifactSummaryLabel"));
+        assertTrue(harness.text("#runHistoryArtifactPathField").endsWith("prompt.txt"));
+        assertEquals("Prompt for retry attempt", harness.text("#runHistoryArtifactTextArea"));
+
+        harness.clickOn("#runHistoryOpenStdoutrunhistory2");
+        assertEquals("Retry stdout", harness.text("#runHistoryArtifactTextArea"));
+
+        harness.clickOn("#runHistoryOpenAssistantSummaryrunhistory1");
+        assertEquals("First pass summary", harness.text("#runHistoryArtifactTextArea"));
+
+        harness.clickOn("#runHistoryOpenArtifactSummaryrunhistory1");
+        assertTrue(harness.text("#runHistoryArtifactTextArea").contains("\"runId\": \"run-history-1\""));
+
+        harness.closeShell();
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertTrue(harness.text("#runHistorySummaryLabel").contains("2 persisted attempts"));
+        harness.clickOn("#runHistoryOpenAssistantSummaryrunhistory2");
+        assertEquals("Retry failed summary", harness.text("#runHistoryArtifactTextArea"));
     }
 
     @Test
@@ -511,12 +1022,12 @@ class AppShellUiTest {
         repositoryDirectoryChooser.queueSelectionForTest(repository);
         harness.clickOn("#openRepositoryButton");
 
-        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("0 of 7 questions answered"));
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("0 of 7 planning inputs captured"));
         assertEquals("Question 1 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
-        assertEquals("Product Context", harness.text("#prdInterviewTitleLabel"));
+        assertEquals("Starter Prompt", harness.text("#prdInterviewTitleLabel"));
         assertTrue(harness.textContent("#prdInterviewQuestionsContainer").contains("Quality Gates"));
         assertTrue(harness.textContent("#prdInterviewQuestionsContainer").contains("User Stories"));
-        assertTrue(harness.textContent("#prdInterviewQuestionsContainer").contains("In Scope"));
+        assertTrue(harness.textContent("#prdInterviewQuestionsContainer").contains("Functional Requirements"));
         assertTrue(harness.text("#prdInterviewDraftStateLabel")
                 .contains(".ralph-tui/project-metadata.json"));
 
@@ -524,7 +1035,7 @@ class AppShellUiTest {
         harness.clickOn("#prdInterviewNextButton");
 
         assertEquals("Question 2 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
-        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("1 of 7 questions answered"));
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("1 of 7 planning inputs captured"));
         assertTrue(harness.text("#prdInterviewDraftStateLabel").contains("Answer saved."));
 
         harness.enterText("#prdInterviewAnswerArea", "Primary users are developers running one repository at a time.");
@@ -532,7 +1043,7 @@ class AppShellUiTest {
 
         assertEquals("Question 1 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
         assertEquals("Ralphy should guide users through PRD drafting.", harness.text("#prdInterviewAnswerArea"));
-        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("2 of 7 questions answered"));
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("2 of 7 planning inputs captured"));
 
         harness.closeShell();
         harness = new JavaFxUiHarness();
@@ -541,7 +1052,7 @@ class AppShellUiTest {
         assertEquals("prd-interview-repo", harness.text("#activeProjectNameLabel"));
         assertEquals("Question 1 of 7", harness.text("#prdInterviewQuestionCounterLabel"));
         assertEquals("Ralphy should guide users through PRD drafting.", harness.text("#prdInterviewAnswerArea"));
-        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("2 of 7 questions answered"));
+        assertTrue(harness.text("#prdInterviewSummaryLabel").contains("2 of 7 planning inputs captured"));
         assertTrue(harness.text("#prdInterviewDraftStateLabel").contains("Draft restored."));
     }
 
@@ -1253,8 +1764,15 @@ class AppShellUiTest {
         ActiveProject activeProject = new ActiveProject(repository);
         Files.createDirectories(activeProject.prdsDirectoryPath());
         Files.createDirectories(activeProject.prdJsonDirectoryPath());
+        seedQualityGateFiles(repository);
         Files.writeString(activeProject.activePrdPath(), markdown);
         Files.writeString(activeProject.activePrdJsonPath(), prdJson);
+    }
+
+    private void seedQualityGateFiles(Path repository) throws IOException {
+        Files.writeString(repository.resolve("mvnw.cmd"), "@echo off\r\nexit /b 0\r\n");
+        Files.writeString(repository.resolve("pom.xml"), "<project/>");
+        Files.createDirectories(repository.resolve(".mvn"));
     }
 
     private void seedRunOutputArtifacts(ActiveProject activeProject,
@@ -1281,6 +1799,94 @@ class AppShellUiTest {
                   "status": "SUCCEEDED"
                 }
                 """.formatted(runId, storyId));
+    }
+
+    private String runHistoryMarkdown() {
+        return """
+                # PRD: Run History
+
+                ## Overview
+                Restore prior story attempts and their stored artifacts in the desktop shell.
+
+                ## Goals
+                - Keep attempt history visible across restarts.
+                - Let users inspect stored prompt and log artifacts from the UI.
+
+                ## Quality Gates
+                - .\\mvnw.cmd clean verify jacoco:report
+
+                ## User Stories
+                ### US-035: View Run History and Artifacts
+                **Outcome:** Review prior attempts from the desktop shell.
+
+                ## Scope Boundaries
+                ### In Scope
+                - Persisted run history and artifact viewing
+
+                ### Out of Scope
+                - Editing stored run artifacts
+                """;
+    }
+
+    private String runHistoryPrdJson() {
+        return """
+                {
+                  "name": "Run History",
+                  "branchName": "ralph/run-history",
+                  "description": "Restore prior story attempts and artifacts in the desktop shell.",
+                  "qualityGates": [
+                    ".\\\\mvnw.cmd clean verify jacoco:report"
+                  ],
+                  "userStories": [
+                    {
+                      "id": "US-035",
+                      "title": "View Run History and Artifacts",
+                      "description": "As a user, I want to inspect prior attempts from the UI.",
+                      "acceptanceCriteria": [
+                        "The history view lists story attempts.",
+                        ".\\\\mvnw.cmd clean verify jacoco:report"
+                      ],
+                      "priority": 1,
+                      "passes": false,
+                      "dependsOn": [],
+                      "completionNotes": "",
+                      "outcome": "Review prior attempts from the desktop shell.",
+                      "ralphyStatus": "FAILED",
+                      "history": [],
+                      "attempts": [
+                        {
+                          "runId": "run-history-1",
+                          "presetId": "ralph-codex-implement-v1",
+                          "presetName": "Ralph/Codex Story Implementation",
+                          "presetVersion": "v1",
+                          "outcome": "PASSED",
+                          "queuedAt": "2026-03-16T09:10:00Z",
+                          "startedAt": "2026-03-16T09:11:00Z",
+                          "endedAt": "2026-03-16T09:12:00Z",
+                          "detail": "Created commit commit-run-history-1 after verification passed.",
+                          "commitHash": "commit-run-history-1",
+                          "commitMessage": "US-035: View Run History and Artifacts"
+                        },
+                        {
+                          "runId": "run-history-2",
+                          "presetId": "ralph-codex-fix-v1",
+                          "presetName": "Ralph/Codex Retry and Fix",
+                          "presetVersion": "v1",
+                          "outcome": "FAILED",
+                          "queuedAt": "2026-03-16T09:15:00Z",
+                          "startedAt": "2026-03-16T09:16:00Z",
+                          "endedAt": "2026-03-16T09:18:00Z",
+                          "detail": "Retry attempt failed verification and remains reviewable.",
+                          "commitHash": "",
+                          "commitMessage": ""
+                        }
+                      ],
+                      "createdAt": "2026-03-16T09:00:00Z",
+                      "updatedAt": "2026-03-16T09:18:00Z"
+                    }
+                  ]
+                }
+                """;
     }
 
     private String storyProgressDashboardMarkdown() {
@@ -1633,6 +2239,85 @@ class AppShellUiTest {
         return createFakeCodexCommandScript(3000L);
     }
 
+    private Path createFakeGitCommandScript() throws IOException {
+        Path commandPath = tempDir.resolve("fake-git.cmd");
+        Files.writeString(commandPath, """
+                @echo off
+                setlocal EnableExtensions EnableDelayedExpansion
+                set "STATE_DIR=%CD%\\.ralph-tui\\test-git-state"
+                set "CURRENT_BRANCH_FILE=%STATE_DIR%\\current-branch.txt"
+                set "HEAD_HASH_FILE=%STATE_DIR%\\head-hash.txt"
+                set "COMMIT_COUNT_FILE=%STATE_DIR%\\commit-count.txt"
+                if not exist "%STATE_DIR%" mkdir "%STATE_DIR%" >nul 2>&1
+
+                if "%~1"=="rev-parse" (
+                    if "%~2"=="--abbrev-ref" (
+                        if exist "%CURRENT_BRANCH_FILE%" (
+                            type "%CURRENT_BRANCH_FILE%"
+                        ) else (
+                            echo main
+                        )
+                        exit /b 0
+                    )
+                    if "%~2"=="HEAD" (
+                        if exist "%HEAD_HASH_FILE%" (
+                            type "%HEAD_HASH_FILE%"
+                        ) else (
+                            echo fake-commit-0
+                        )
+                        exit /b 0
+                    )
+                    exit /b 0
+                )
+
+                if "%~1"=="show-ref" (
+                    set "REF=%~5"
+                    set "BRANCH=%REF:refs/heads/=%"
+                    set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
+                    if exist "!BRANCH_FILE!" exit /b 0
+                    exit /b 1
+                )
+
+                if "%~1"=="switch" (
+                    if "%~2"=="-c" (
+                        set "BRANCH=%~3"
+                        set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
+                        > "!BRANCH_FILE!" echo !BRANCH!
+                        > "%CURRENT_BRANCH_FILE%" echo !BRANCH!
+                        exit /b 0
+                    )
+
+                    set "BRANCH=%~2"
+                    set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
+                    if not exist "!BRANCH_FILE!" exit /b 1
+                    > "%CURRENT_BRANCH_FILE%" echo !BRANCH!
+                    exit /b 0
+                )
+
+                if "%~1"=="add" (
+                    exit /b 0
+                )
+
+                if "%~1"=="status" (
+                    echo M src\\main\\java\\net\\uberfoo\\ai\\ralphy\\AppShellController.java
+                    exit /b 0
+                )
+
+                if "%~1"=="commit" (
+                    set /a COUNT=0
+                    if exist "%COMMIT_COUNT_FILE%" set /p COUNT=<"%COMMIT_COUNT_FILE%"
+                    set /a COUNT=!COUNT!+1
+                    > "%COMMIT_COUNT_FILE%" echo !COUNT!
+                    > "%HEAD_HASH_FILE%" echo fake-commit-!COUNT!
+                    exit /b 0
+                )
+
+                echo Unexpected fake git command 1>&2
+                exit /b 1
+                """);
+        return commandPath;
+    }
+
     private Path createFakeCodexCommandScript(long sleepMilliseconds) throws IOException {
         Path commandPath = tempDir.resolve("fake-codex.cmd");
         Files.writeString(commandPath, """
@@ -1667,7 +2352,71 @@ class AppShellUiTest {
         return commandPath;
     }
 
+    private String structuredAgentMessageEvents(int count) {
+        StringBuilder builder = new StringBuilder();
+        for (int index = 1; index <= count; index++) {
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
+            builder.append(structuredAgentMessageEvent(index));
+        }
+        return builder.toString();
+    }
+
+    private String structuredAgentMessageEvent(int index) {
+        return """
+                {"type":"item.completed","item":{"id":"item_%d","type":"agent_message","status":"completed","text":"message %d"}}
+                """.formatted(index, index).trim();
+    }
+
     private String normalizeLineEndings(String value) {
         return value.replace("\r\n", "\n");
+    }
+
+    private String codexOutputSample() throws IOException {
+        return Files.readString(Path.of("codex output sample.json"));
+    }
+
+    private void renderStructuredRunOutput(AppShellController controller, String rawOutput) throws Exception {
+        runOnFxThread(() -> {
+            Field runOutputPresentationStateField = AppShellController.class.getDeclaredField("runOutputPresentationState");
+            runOutputPresentationStateField.setAccessible(true);
+            runOutputPresentationStateField.set(controller, liveRunOutputPresentationState(rawOutput));
+
+            Method renderRunOutputViewMethod = AppShellController.class.getDeclaredMethod("renderRunOutputView");
+            renderRunOutputViewMethod.setAccessible(true);
+            renderRunOutputViewMethod.invoke(controller);
+        });
+    }
+
+    private Object liveRunOutputPresentationState(String rawOutput) throws Exception {
+        Class<?> stateClass = Class.forName("net.uberfoo.ai.ralphy.AppShellController$RunOutputPresentationState");
+        Method liveMethod = stateClass.getDeclaredMethod("live", String.class, String.class, String.class, String.class);
+        liveMethod.setAccessible(true);
+        return liveMethod.invoke(null, "Streaming US-040 | RUNNING", "Run run-040-1 started in test.", "", rawOutput);
+    }
+
+    private void runOnFxThread(ThrowingRunnable action) throws Exception {
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Platform.runLater(() -> {
+            try {
+                action.run();
+            } catch (Throwable throwable) {
+                failure.set(throwable);
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        assertTrue(latch.await(10, TimeUnit.SECONDS));
+        if (failure.get() != null) {
+            throw new AssertionError(failure.get());
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 }
