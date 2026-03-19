@@ -1387,7 +1387,7 @@ class AppShellUiTest {
 
         assertTrue(harness.text("#prdDocumentStateLabel").contains("Markdown PRD saved to"));
         assertTrue(harness.isDisabled("#savePrdDocumentButton"));
-        assertEquals(editedPreview.replace("\n", "\r\n"), Files.readString(importedPrdPath));
+        assertEquals(editedPreview, normalizeLineEndings(Files.readString(importedPrdPath)));
 
         harness.closeShell();
         harness = new JavaFxUiHarness();
@@ -2411,81 +2411,163 @@ class AppShellUiTest {
     }
 
     private Path createFakeGitCommandScript() throws IOException {
-        Path commandPath = tempDir.resolve("fake-git.cmd");
-        Files.writeString(commandPath, """
-                @echo off
-                setlocal EnableExtensions EnableDelayedExpansion
-                set "STATE_DIR=%CD%\\.ralph-tui\\test-git-state"
-                set "CURRENT_BRANCH_FILE=%STATE_DIR%\\current-branch.txt"
-                set "HEAD_HASH_FILE=%STATE_DIR%\\head-hash.txt"
-                set "COMMIT_COUNT_FILE=%STATE_DIR%\\commit-count.txt"
-                if not exist "%STATE_DIR%" mkdir "%STATE_DIR%" >nul 2>&1
+        if (HostOperatingSystem.detect(System.getProperty("os.name", "")).isWindows()) {
+            Path commandPath = tempDir.resolve("fake-git.cmd");
+            Files.writeString(commandPath, """
+                    @echo off
+                    setlocal EnableExtensions EnableDelayedExpansion
+                    set "STATE_DIR=%CD%\\.ralph-tui\\test-git-state"
+                    set "CURRENT_BRANCH_FILE=%STATE_DIR%\\current-branch.txt"
+                    set "HEAD_HASH_FILE=%STATE_DIR%\\head-hash.txt"
+                    set "COMMIT_COUNT_FILE=%STATE_DIR%\\commit-count.txt"
+                    if not exist "%STATE_DIR%" mkdir "%STATE_DIR%" >nul 2>&1
 
-                if "%~1"=="rev-parse" (
-                    if "%~2"=="--abbrev-ref" (
-                        if exist "%CURRENT_BRANCH_FILE%" (
-                            type "%CURRENT_BRANCH_FILE%"
-                        ) else (
-                            echo main
+                    if "%~1"=="rev-parse" (
+                        if "%~2"=="--abbrev-ref" (
+                            if exist "%CURRENT_BRANCH_FILE%" (
+                                type "%CURRENT_BRANCH_FILE%"
+                            ) else (
+                                echo main
+                            )
+                            exit /b 0
+                        )
+                        if "%~2"=="HEAD" (
+                            if exist "%HEAD_HASH_FILE%" (
+                                type "%HEAD_HASH_FILE%"
+                            ) else (
+                                echo fake-commit-0
+                            )
+                            exit /b 0
                         )
                         exit /b 0
                     )
-                    if "%~2"=="HEAD" (
-                        if exist "%HEAD_HASH_FILE%" (
-                            type "%HEAD_HASH_FILE%"
-                        ) else (
-                            echo fake-commit-0
-                        )
-                        exit /b 0
-                    )
-                    exit /b 0
-                )
 
-                if "%~1"=="show-ref" (
-                    set "REF=%~5"
-                    set "BRANCH=%REF:refs/heads/=%"
-                    set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
-                    if exist "!BRANCH_FILE!" exit /b 0
-                    exit /b 1
-                )
-
-                if "%~1"=="switch" (
-                    if "%~2"=="-c" (
-                        set "BRANCH=%~3"
+                    if "%~1"=="show-ref" (
+                        set "REF=%~5"
+                        set "BRANCH=%REF:refs/heads/=%"
                         set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
-                        > "!BRANCH_FILE!" echo !BRANCH!
+                        if exist "!BRANCH_FILE!" exit /b 0
+                        exit /b 1
+                    )
+
+                    if "%~1"=="switch" (
+                        if "%~2"=="-c" (
+                            set "BRANCH=%~3"
+                            set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
+                            > "!BRANCH_FILE!" echo !BRANCH!
+                            > "%CURRENT_BRANCH_FILE%" echo !BRANCH!
+                            exit /b 0
+                        )
+
+                        set "BRANCH=%~2"
+                        set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
+                        if not exist "!BRANCH_FILE!" exit /b 1
                         > "%CURRENT_BRANCH_FILE%" echo !BRANCH!
                         exit /b 0
                     )
 
-                    set "BRANCH=%~2"
-                    set "BRANCH_FILE=%STATE_DIR%\\!BRANCH:/=__!.txt"
-                    if not exist "!BRANCH_FILE!" exit /b 1
-                    > "%CURRENT_BRANCH_FILE%" echo !BRANCH!
-                    exit /b 0
-                )
+                    if "%~1"=="add" (
+                        exit /b 0
+                    )
 
-                if "%~1"=="add" (
-                    exit /b 0
-                )
+                    if "%~1"=="status" (
+                        echo M src\\main\\java\\net\\uberfoo\\ai\\ralphy\\AppShellController.java
+                        exit /b 0
+                    )
 
-                if "%~1"=="status" (
-                    echo M src\\main\\java\\net\\uberfoo\\ai\\ralphy\\AppShellController.java
-                    exit /b 0
-                )
+                    if "%~1"=="commit" (
+                        set /a COUNT=0
+                        if exist "%COMMIT_COUNT_FILE%" set /p COUNT=<"%COMMIT_COUNT_FILE%"
+                        set /a COUNT=!COUNT!+1
+                        > "%COMMIT_COUNT_FILE%" echo !COUNT!
+                        > "%HEAD_HASH_FILE%" echo fake-commit-!COUNT!
+                        exit /b 0
+                    )
 
-                if "%~1"=="commit" (
-                    set /a COUNT=0
-                    if exist "%COMMIT_COUNT_FILE%" set /p COUNT=<"%COMMIT_COUNT_FILE%"
-                    set /a COUNT=!COUNT!+1
-                    > "%COMMIT_COUNT_FILE%" echo !COUNT!
-                    > "%HEAD_HASH_FILE%" echo fake-commit-!COUNT!
-                    exit /b 0
-                )
+                    echo Unexpected fake git command 1>&2
+                    exit /b 1
+                    """);
+            return commandPath;
+        }
 
-                echo Unexpected fake git command 1>&2
-                exit /b 1
+        Path commandPath = tempDir.resolve("fake-git.sh");
+        Files.writeString(commandPath, """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                state_dir="$PWD/.ralph-tui/test-git-state"
+                current_branch_file="$state_dir/current-branch.txt"
+                head_hash_file="$state_dir/head-hash.txt"
+                commit_count_file="$state_dir/commit-count.txt"
+                mkdir -p "$state_dir"
+
+                if [ "${1:-}" = "rev-parse" ]; then
+                  if [ "${2:-}" = "--abbrev-ref" ]; then
+                    if [ -f "$current_branch_file" ]; then
+                      cat "$current_branch_file"
+                    else
+                      printf '%s\n' 'main'
+                    fi
+                    exit 0
+                  fi
+                  if [ "${2:-}" = "HEAD" ]; then
+                    if [ -f "$head_hash_file" ]; then
+                      cat "$head_hash_file"
+                    else
+                      printf '%s\n' 'fake-commit-0'
+                    fi
+                    exit 0
+                  fi
+                  exit 0
+                fi
+
+                if [ "${1:-}" = "show-ref" ]; then
+                  ref="${5:-}"
+                  branch="${ref#refs/heads/}"
+                  branch_file="$state_dir/${branch//\\//__}.txt"
+                  [ -f "$branch_file" ] && exit 0
+                  exit 1
+                fi
+
+                if [ "${1:-}" = "switch" ]; then
+                  if [ "${2:-}" = "-c" ]; then
+                    branch="${3:-}"
+                    branch_file="$state_dir/${branch//\\//__}.txt"
+                    printf '%s\n' "$branch" > "$branch_file"
+                    printf '%s\n' "$branch" > "$current_branch_file"
+                    exit 0
+                  fi
+
+                  branch="${2:-}"
+                  branch_file="$state_dir/${branch//\\//__}.txt"
+                  [ -f "$branch_file" ] || exit 1
+                  printf '%s\n' "$branch" > "$current_branch_file"
+                  exit 0
+                fi
+
+                if [ "${1:-}" = "add" ]; then
+                  exit 0
+                fi
+
+                if [ "${1:-}" = "status" ]; then
+                  printf '%s\n' ' M src/main/java/net/uberfoo/ai/ralphy/AppShellController.java'
+                  exit 0
+                fi
+
+                if [ "${1:-}" = "commit" ]; then
+                  count=0
+                  if [ -f "$commit_count_file" ]; then
+                    count=$(cat "$commit_count_file")
+                  fi
+                  count=$((count + 1))
+                  printf '%s\n' "$count" > "$commit_count_file"
+                  printf '%s\n' "fake-commit-$count" > "$head_hash_file"
+                  exit 0
+                fi
+
+                printf '%s\n' 'Unexpected fake git command' >&2
+                exit 1
                 """);
+        commandPath.toFile().setExecutable(true);
         return commandPath;
     }
 
@@ -2608,8 +2690,11 @@ class AppShellUiTest {
     }
 
     private String formatSleepSeconds(long sleepMilliseconds) {
-        long wholeSeconds = sleepMilliseconds / 1000;
-        long remainingMilliseconds = Math.floorMod(sleepMilliseconds, 1000);
+        long normalizedMilliseconds = HostOperatingSystem.detect(System.getProperty("os.name", "")).isWindows()
+                ? sleepMilliseconds
+                : Math.max(sleepMilliseconds, 250L);
+        long wholeSeconds = normalizedMilliseconds / 1000;
+        long remainingMilliseconds = Math.floorMod(normalizedMilliseconds, 1000);
         if (remainingMilliseconds == 0) {
             return Long.toString(wholeSeconds);
         }
