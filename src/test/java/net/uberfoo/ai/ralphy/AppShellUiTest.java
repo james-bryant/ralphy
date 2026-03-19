@@ -369,6 +369,7 @@ class AppShellUiTest {
 
     @Test
     void appShellPlayAutoAdvancesAcrossReadyStoriesAndShowsSkippedBlockedReasons() throws Exception {
+        useRuntimeHostOverride();
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("play-auto-advance-repo");
         ActiveProject activeProject = new ActiveProject(repository);
@@ -419,6 +420,7 @@ class AppShellUiTest {
 
     @Test
     void appShellPlayRetriesOnceAutomaticallyBeforeContinuing() throws Exception {
+        useRuntimeHostOverride();
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("play-retry-once-repo");
         ActiveProject activeProject = new ActiveProject(repository);
@@ -474,6 +476,7 @@ class AppShellUiTest {
 
     @Test
     void appShellPausesOnlyAfterTheCurrentStoryCompletes() throws Exception {
+        useRuntimeHostOverride();
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("pause-after-current-story-repo");
         ActiveProject activeProject = new ActiveProject(repository);
@@ -2736,6 +2739,10 @@ class AppShellUiTest {
 
     private String normalizeLineEndings(String value) {
         return value.replace("\r\n", "\n");
+    }
+
+    private void useRuntimeHostOverride() {
+        System.setProperty("ralphy.host.os-name", System.getProperty("os.name", ""));
     }
 
     private void waitForConditionWithStoryDiagnostics(JavaFxUiHarness.ThrowingBooleanSupplier condition,
