@@ -398,8 +398,12 @@ class AppShellUiTest {
         harness.clickOn("#startSingleStoryButton");
         harness.waitUntil(() -> harness.isVisible("#singleStorySessionProgressRow"));
         assertTrue(harness.text("#singleStorySessionProgressLabel").contains("Codex is running"));
-        harness.waitUntil(() -> "2".equals(harness.text("#storyProgressPassedCountLabel"))
-                && !harness.isVisible("#singleStorySessionProgressRow"), 30L);
+        waitForConditionWithStoryDiagnostics(
+                () -> "2".equals(harness.text("#storyProgressPassedCountLabel"))
+                        && !harness.isVisible("#singleStorySessionProgressRow"),
+                30L,
+                "Play session never reached two completed stories."
+        );
 
         assertEquals("1", harness.text("#storyProgressBlockedCountLabel"));
         assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
@@ -451,7 +455,11 @@ class AppShellUiTest {
                     .map(task -> task.attempts().size() == 2)
                     .orElse(false);
         });
-        harness.waitUntil(() -> harness.text("#singleStorySessionMessageLabel").contains("Play complete."), 20L);
+        waitForConditionWithStoryDiagnostics(
+                () -> harness.text("#singleStorySessionMessageLabel").contains("Play complete."),
+                20L,
+                "Retry flow never reported play completion."
+        );
 
         PrdTaskState taskState = harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElseThrow();
         PrdTaskRecord retriedTask = taskState.taskById("US-032").orElseThrow();
@@ -499,7 +507,11 @@ class AppShellUiTest {
                 "#singleStorySessionSummaryLabel"
         );
         assertEquals("Pause requested", pauseRequestedSummary);
-        harness.waitUntil(() -> "Execution paused".equals(harness.text("#storyProgressSummaryLabel")), 20L);
+        waitForConditionWithStoryDiagnostics(
+                () -> "Execution paused".equals(harness.text("#storyProgressSummaryLabel")),
+                20L,
+                "Pause flow never reached the paused dashboard state."
+        );
         assertTrue(harness.text("#storyProgressCurrentStoryLabel").contains("Paused | US-031"));
         assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
         assertEquals("1", harness.text("#storyProgressPassedCountLabel"));
@@ -2611,7 +2623,6 @@ class AppShellUiTest {
                   exit 0
                 fi
 
-                cat >/dev/null
                 sleep __SLEEP_SECONDS__
                 printf '%s\n' '{"event":"assistant_message.delta","role":"assistant","delta":"Working..."}'
                 printf '%s\n' '{"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Completed story."}]}'
@@ -2674,7 +2685,6 @@ class AppShellUiTest {
                   exit 0
                 fi
 
-                cat >/dev/null
                 count=0
                 if [ -f '__COUNTER_PATH__' ]; then
                   count=$(cat '__COUNTER_PATH__')
@@ -2726,6 +2736,43 @@ class AppShellUiTest {
 
     private String normalizeLineEndings(String value) {
         return value.replace("\r\n", "\n");
+    }
+
+    private void waitForConditionWithStoryDiagnostics(JavaFxUiHarness.ThrowingBooleanSupplier condition,
+                                                      long timeoutSeconds,
+                                                      String failureMessage) throws Exception {
+        try {
+            harness.waitUntil(condition, timeoutSeconds);
+        } catch (java.util.concurrent.TimeoutException timeoutException) {
+            throw new AssertionError(failureMessage + " " + storyExecutionDiagnostics(), timeoutException);
+        }
+    }
+
+    private String storyExecutionDiagnostics() throws Exception {
+        String sessionSummary = harness.text("#singleStorySessionSummaryLabel");
+        String sessionDetail = harness.text("#singleStorySessionDetailLabel");
+        String sessionMessage = harness.text("#singleStorySessionMessageLabel");
+        String progressSummary = harness.text("#storyProgressSummaryLabel");
+        String currentStory = harness.text("#storyProgressCurrentStoryLabel");
+        String runningCount = harness.text("#storyProgressRunningCountLabel");
+        String passedCount = harness.text("#storyProgressPassedCountLabel");
+        String failedCount = harness.text("#storyProgressFailedCountLabel");
+        String pausedCount = harness.text("#storyProgressPausedCountLabel");
+        boolean progressVisible = harness.isVisible("#singleStorySessionProgressRow");
+        String progressLabel = harness.text("#singleStorySessionProgressLabel");
+        PrdTaskState taskState = harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElse(null);
+        return "sessionSummary=" + sessionSummary
+                + ", sessionDetail=" + sessionDetail
+                + ", sessionMessage=" + sessionMessage
+                + ", progressSummary=" + progressSummary
+                + ", currentStory=" + currentStory
+                + ", runningCount=" + runningCount
+                + ", passedCount=" + passedCount
+                + ", failedCount=" + failedCount
+                + ", pausedCount=" + pausedCount
+                + ", progressVisible=" + progressVisible
+                + ", progressLabel=" + progressLabel
+                + ", taskState=" + taskState;
     }
 
     private String codexOutputSample() throws IOException {
