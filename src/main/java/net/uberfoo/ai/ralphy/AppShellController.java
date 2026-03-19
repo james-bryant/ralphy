@@ -2878,6 +2878,10 @@ public class AppShellController {
         structuredRunOutputViewRadioButton.setManaged(structuredAvailable);
         if (!structuredAvailable) {
             rawOutputViewRadioButton.setSelected(true);
+            return;
+        }
+        if (runOutputViewToggleGroup.getSelectedToggle() == null) {
+            structuredRunOutputViewRadioButton.setSelected(true);
         }
     }
 
