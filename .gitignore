@@ -40,3 +40,4 @@ build/
 .ralph-tui
 .mvn-home
 .codex
+.mvn/wrapper/dists
