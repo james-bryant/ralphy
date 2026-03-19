@@ -2490,21 +2490,45 @@ class AppShellUiTest {
     }
 
     private Path createFakeCodexCommandScript(long sleepMilliseconds) throws IOException {
-        Path commandPath = tempDir.resolve("fake-codex.cmd");
-        Files.writeString(commandPath, """
-                @echo off
-                if "%~1"=="--version" (
-                    echo codex-cli 0.114.0
-                    exit /b 0
-                )
-                if "%~1"=="app-server" (
-                    powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"init-1\",\"result\":{\"capabilities\":{}}}'; Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"model-list-1\",\"result\":{\"data\":[{\"id\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Frontier model\",\"isDefault\":true,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\",\"xhigh\"]},{\"id\":\"gpt-5.4-mini\",\"displayName\":\"GPT-5.4 Mini\",\"description\":\"Fast model\",\"isDefault\":false,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\"]}]}}'"
-                    exit /b 0
-                )
+        if (HostOperatingSystem.detect(System.getProperty("os.name", "")).isWindows()) {
+            Path commandPath = tempDir.resolve("fake-codex.cmd");
+            Files.writeString(commandPath, """
+                    @echo off
+                    if "%~1"=="--version" (
+                        echo codex-cli 0.114.0
+                        exit /b 0
+                    )
+                    if "%~1"=="app-server" (
+                        powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"init-1\",\"result\":{\"capabilities\":{}}}'; Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"model-list-1\",\"result\":{\"data\":[{\"id\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Frontier model\",\"isDefault\":true,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\",\"xhigh\"]},{\"id\":\"gpt-5.4-mini\",\"displayName\":\"GPT-5.4 Mini\",\"description\":\"Fast model\",\"isDefault\":false,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\"]}]}}'"
+                        exit /b 0
+                    )
 
-                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Start-Sleep -Milliseconds __SLEEP_MS__; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
-                exit /b 0
-                """.replace("__SLEEP_MS__", Long.toString(sleepMilliseconds)));
+                    powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Start-Sleep -Milliseconds __SLEEP_MS__; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
+                    exit /b 0
+                    """.replace("__SLEEP_MS__", Long.toString(sleepMilliseconds)));
+            return commandPath;
+        }
+
+        Path commandPath = tempDir.resolve("fake-codex.sh");
+        Files.writeString(commandPath, """
+                #!/usr/bin/env sh
+                if [ "$1" = "--version" ]; then
+                  printf '%s\n' 'codex-cli 0.114.0'
+                  exit 0
+                fi
+                if [ "$1" = "app-server" ]; then
+                  cat >/dev/null
+                  printf '%s\n' '{"jsonrpc":"2.0","id":"init-1","result":{"capabilities":{}}}'
+                  printf '%s\n' '{"jsonrpc":"2.0","id":"model-list-1","result":{"data":[{"id":"gpt-5.4","displayName":"GPT-5.4","description":"Frontier model","isDefault":true,"hidden":false,"reasoningEfforts":["low","medium","high","xhigh"]},{"id":"gpt-5.4-mini","displayName":"GPT-5.4 Mini","description":"Fast model","isDefault":false,"hidden":false,"reasoningEfforts":["low","medium","high"]}]}}'
+                  exit 0
+                fi
+
+                cat >/dev/null
+                sleep __SLEEP_SECONDS__
+                printf '%s\n' '{"event":"assistant_message.delta","role":"assistant","delta":"Working..."}'
+                printf '%s\n' '{"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Completed story."}]}'
+                """.replace("__SLEEP_SECONDS__", formatSleepSeconds(sleepMilliseconds)));
+        commandPath.toFile().setExecutable(true);
         return commandPath;
     }
 
@@ -2525,26 +2549,71 @@ class AppShellUiTest {
     }
 
     private Path createFlakyCodexCommandScript(Path invocationCounterPath) throws IOException {
-        Path commandPath = tempDir.resolve("fake-codex-flaky.cmd");
-        Files.writeString(commandPath, """
-                @echo off
-                if "%~1"=="--version" (
-                    echo codex-cli 0.114.0
-                    exit /b 0
-                )
-                if "%~1"=="app-server" (
-                    powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"init-1\",\"result\":{\"capabilities\":{}}}'; Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"model-list-1\",\"result\":{\"data\":[{\"id\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Frontier model\",\"isDefault\":true,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\",\"xhigh\"]},{\"id\":\"gpt-5.4-mini\",\"displayName\":\"GPT-5.4 Mini\",\"description\":\"Fast model\",\"isDefault\":false,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\"]}]}}'"
-                    exit /b 0
-                )
+        if (HostOperatingSystem.detect(System.getProperty("os.name", "")).isWindows()) {
+            Path commandPath = tempDir.resolve("fake-codex-flaky.cmd");
+            Files.writeString(commandPath, """
+                    @echo off
+                    if "%~1"=="--version" (
+                        echo codex-cli 0.114.0
+                        exit /b 0
+                    )
+                    if "%~1"=="app-server" (
+                        powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"init-1\",\"result\":{\"capabilities\":{}}}'; Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"model-list-1\",\"result\":{\"data\":[{\"id\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Frontier model\",\"isDefault\":true,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\",\"xhigh\"]},{\"id\":\"gpt-5.4-mini\",\"displayName\":\"GPT-5.4 Mini\",\"description\":\"Fast model\",\"isDefault\":false,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\"]}]}}'"
+                        exit /b 0
+                    )
 
-                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); $counterPath = '__COUNTER_PATH__'; $count = 0; if (Test-Path $counterPath) { $count = [int](Get-Content $counterPath -Raw) }; $count++; Set-Content -Path $counterPath -Value $count -NoNewline -Encoding ascii; if ($count -eq 1) { [Console]::Error.WriteLine('Transient failure.'); exit 1 }; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
-                set "EXITCODE=%ERRORLEVEL%"
-                exit /b %EXITCODE%
+                    powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); $counterPath = '__COUNTER_PATH__'; $count = 0; if (Test-Path $counterPath) { $count = [int](Get-Content $counterPath -Raw) }; $count++; Set-Content -Path $counterPath -Value $count -NoNewline -Encoding ascii; if ($count -eq 1) { [Console]::Error.WriteLine('Transient failure.'); exit 1 }; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
+                    set "EXITCODE=%ERRORLEVEL%"
+                    exit /b %EXITCODE%
+                    """.replace(
+                    "__COUNTER_PATH__",
+                    invocationCounterPath.toAbsolutePath().normalize().toString().replace("'", "''")
+            ));
+            return commandPath;
+        }
+
+        Path commandPath = tempDir.resolve("fake-codex-flaky.sh");
+        Files.writeString(commandPath, """
+                #!/usr/bin/env sh
+                if [ "$1" = "--version" ]; then
+                  printf '%s\n' 'codex-cli 0.114.0'
+                  exit 0
+                fi
+                if [ "$1" = "app-server" ]; then
+                  cat >/dev/null
+                  printf '%s\n' '{"jsonrpc":"2.0","id":"init-1","result":{"capabilities":{}}}'
+                  printf '%s\n' '{"jsonrpc":"2.0","id":"model-list-1","result":{"data":[{"id":"gpt-5.4","displayName":"GPT-5.4","description":"Frontier model","isDefault":true,"hidden":false,"reasoningEfforts":["low","medium","high","xhigh"]},{"id":"gpt-5.4-mini","displayName":"GPT-5.4 Mini","description":"Fast model","isDefault":false,"hidden":false,"reasoningEfforts":["low","medium","high"]}]}}'
+                  exit 0
+                fi
+
+                cat >/dev/null
+                count=0
+                if [ -f '__COUNTER_PATH__' ]; then
+                  count=$(cat '__COUNTER_PATH__')
+                fi
+                count=$((count + 1))
+                printf '%s' "$count" > '__COUNTER_PATH__'
+                if [ "$count" -eq 1 ]; then
+                  printf '%s\n' 'Transient failure.' >&2
+                  exit 1
+                fi
+                printf '%s\n' '{"event":"assistant_message.delta","role":"assistant","delta":"Working..."}'
+                printf '%s\n' '{"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Completed story."}]}'
                 """.replace(
                 "__COUNTER_PATH__",
-                invocationCounterPath.toAbsolutePath().normalize().toString().replace("'", "''")
+                invocationCounterPath.toAbsolutePath().normalize().toString().replace("'", "'\"'\"'")
         ));
+        commandPath.toFile().setExecutable(true);
         return commandPath;
+    }
+
+    private String formatSleepSeconds(long sleepMilliseconds) {
+        long wholeSeconds = sleepMilliseconds / 1000;
+        long remainingMilliseconds = Math.floorMod(sleepMilliseconds, 1000);
+        if (remainingMilliseconds == 0) {
+            return Long.toString(wholeSeconds);
+        }
+        return wholeSeconds + "." + "%03d".formatted(remainingMilliseconds);
     }
 
     private String structuredAgentMessageEvents(int count) {

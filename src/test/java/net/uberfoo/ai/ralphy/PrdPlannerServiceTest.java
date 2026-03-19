@@ -264,16 +264,32 @@ class PrdPlannerServiceTest {
     }
 
     private Path createFakeCodexCommandScript() throws IOException {
-        Path commandPath = tempDir.resolve("fake-codex.cmd");
-        Files.writeString(commandPath, """
-                @echo off
-                if "%~1"=="--version" (
-                    echo codex-cli 0.114.0
+        if (HostOperatingSystem.detect(System.getProperty("os.name", "")).isWindows()) {
+            Path commandPath = tempDir.resolve("fake-codex.cmd");
+            Files.writeString(commandPath, """
+                    @echo off
+                    if "%~1"=="--version" (
+                        echo codex-cli 0.114.0
+                        exit /b 0
+                    )
+                    powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
                     exit /b 0
-                )
-                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
-                exit /b 0
+                    """);
+            return commandPath;
+        }
+
+        Path commandPath = tempDir.resolve("fake-codex.sh");
+        Files.writeString(commandPath, """
+                #!/usr/bin/env sh
+                if [ "$1" = "--version" ]; then
+                  printf '%s\n' 'codex-cli 0.114.0'
+                  exit 0
+                fi
+                cat >/dev/null
+                printf '%s\n' '{"event":"assistant_message.delta","role":"assistant","delta":"Working..."}'
+                printf '%s\n' '{"event":"assistant_message.completed","role":"assistant","content":[{"type":"output_text","text":"Completed story."}]}'
                 """);
+        commandPath.toFile().setExecutable(true);
         return commandPath;
     }
 

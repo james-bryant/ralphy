@@ -50,6 +50,9 @@ jobs:
           java-version: "25"
           cache: maven
 
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Normalize shell scripts
         run: sed -i 's/\r$//' mvnw scripts/package-linux.sh
 
@@ -57,7 +60,7 @@ jobs:
         run: chmod +x mvnw scripts/package-linux.sh
 
       - name: Build Linux app image
-        run: ./scripts/package-linux.sh
+        run: xvfb-run -a ./scripts/package-linux.sh
 
       - name: Archive Linux app image
         run: tar -C target/dist/linux -czf target/dist/linux/Ralphy-linux.tar.gz Ralphy
