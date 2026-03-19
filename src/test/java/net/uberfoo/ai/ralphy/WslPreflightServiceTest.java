@@ -44,6 +44,10 @@ class WslPreflightServiceTest {
                 assertEquals("/bin/sh", command.get(command.size() - 3));
                 return WslPreflightService.CommandResult.success(0, "/mnt/c/workspaces/sample-repo");
             }
+            if (script.contains("GitHub Copilot CLI")) {
+                assertEquals("/bin/zsh", command.get(command.size() - 3));
+                return WslPreflightService.CommandResult.success(0, "copilot-cli 1.0.7");
+            }
             if (script.contains("configured interactive shell")) {
                 assertEquals("/bin/zsh", command.get(command.size() - 3));
                 return WslPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
@@ -66,6 +70,7 @@ class WslPreflightServiceTest {
         assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("wsl_distribution").status());
         assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("path_mapping").status());
         assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("codex_cli").status());
+        assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("copilot_cli").status());
         assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("codex_auth").status());
         assertEquals(WslPreflightReport.CheckStatus.PASS, checksById.get("git_ready").status());
         assertTrue(checksById.get("path_mapping").detail().contains("/mnt/c/workspaces/sample-repo"));
@@ -100,11 +105,13 @@ class WslPreflightServiceTest {
         assertEquals(WslPreflightReport.CheckCategory.DISTRIBUTION, checksById.get("wsl_distribution").category());
         assertEquals(WslPreflightReport.CheckCategory.PATH_MAPPING, checksById.get("path_mapping").category());
         assertEquals(WslPreflightReport.CheckCategory.TOOLING, checksById.get("codex_cli").category());
+        assertEquals(WslPreflightReport.CheckCategory.TOOLING, checksById.get("copilot_cli").category());
         assertEquals(WslPreflightReport.CheckCategory.AUTHENTICATION, checksById.get("codex_auth").category());
         assertEquals(WslPreflightReport.CheckCategory.GIT, checksById.get("git_ready").category());
         assertFalse(checksById.get("wsl_distribution").detail().isBlank());
         assertTrue(checksById.get("path_mapping").detail().contains("outside the configured Windows path prefix"));
         assertEquals(WslPreflightReport.CheckStatus.FAIL, checksById.get("codex_cli").status());
+        assertEquals(WslPreflightReport.CheckStatus.FAIL, checksById.get("copilot_cli").status());
         assertEquals(WslPreflightReport.CheckStatus.FAIL, checksById.get("codex_auth").status());
         assertEquals(WslPreflightReport.CheckStatus.FAIL, checksById.get("git_ready").status());
         assertTrue(checksById.get("wsl_distribution").remediationCommands().stream()

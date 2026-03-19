@@ -6,3 +6,4 @@ public class Launcher {
         Application.launch(RalphyApplication.class, args);
     }
 }
+

@@ -1,5 +1,6 @@
 package net.uberfoo.ai.ralphy;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -20,11 +21,20 @@ final class CodexCliSupport {
     static List<String> buildNativeCommand(String codexCommand,
                                            Map<String, String> environmentVariables,
                                            List<String> trailingArguments) {
+        return buildNativeCommand(codexCommand, environmentVariables, HostOperatingSystem.detectRuntime(),
+                trailingArguments);
+    }
+
+    static List<String> buildNativeCommand(String codexCommand,
+                                           Map<String, String> environmentVariables,
+                                           HostOperatingSystem hostOperatingSystem,
+                                           List<String> trailingArguments) {
         Objects.requireNonNull(environmentVariables, "environmentVariables must not be null");
         Objects.requireNonNull(trailingArguments, "trailingArguments must not be null");
 
         ParsedCommand parsedCommand = parseCommand(codexCommand);
-        String resolvedExecutable = resolveNativeExecutable(parsedCommand.executable(), environmentVariables);
+        String resolvedExecutable = resolveNativeExecutable(parsedCommand.executable(), environmentVariables,
+                hostOperatingSystem);
         List<String> command = new ArrayList<>();
         command.add(resolvedExecutable);
         command.addAll(parsedCommand.arguments());
@@ -33,7 +43,15 @@ final class CodexCliSupport {
     }
 
     static void prependNativePathEntries(Map<String, String> environmentVariables) {
+        prependNativePathEntries(environmentVariables, HostOperatingSystem.detectRuntime());
+    }
+
+    static void prependNativePathEntries(Map<String, String> environmentVariables,
+                                         HostOperatingSystem hostOperatingSystem) {
         Objects.requireNonNull(environmentVariables, "environmentVariables must not be null");
+        if (hostOperatingSystem == null || !hostOperatingSystem.isWindows()) {
+            return;
+        }
 
         List<String> pathEntries = nativePathEntries(environmentVariables);
         if (pathEntries.isEmpty()) {
@@ -49,12 +67,17 @@ final class CodexCliSupport {
         environmentVariables.put("PATH", combinedEntries.stream()
                 .filter(CodexCliSupport::hasText)
                 .distinct()
-                .collect(Collectors.joining(";")));
+                .collect(Collectors.joining(File.pathSeparator)));
     }
 
     static String buildWslCodexScript(String codexCommand, List<String> commandArguments) {
+        return buildWslCliScript("Codex CLI", codexCommand, commandArguments);
+    }
+
+    static String buildWslCliScript(String cliDisplayName, String command, List<String> commandArguments) {
+        Objects.requireNonNull(cliDisplayName, "cliDisplayName must not be null");
         Objects.requireNonNull(commandArguments, "commandArguments must not be null");
-        ParsedCommand parsedCommand = parseCommand(codexCommand);
+        ParsedCommand parsedCommand = parseCommand(command);
         List<String> configuredArguments = parsedCommand.arguments();
         List<String> versionArguments = new ArrayList<>(configuredArguments);
         versionArguments.add("--version");
@@ -64,11 +87,11 @@ final class CodexCliSupport {
         String launchCommand = shellCommand(parsedCommand.executable(), launchArguments);
         return """
                 if ! %s >/dev/null 2>&1; then
-                  printf '%%s\\n' 'Unable to locate a working Codex CLI inside WSL using the configured interactive shell.' >&2
+                  printf '%%s\\n' 'Unable to locate a working %s inside WSL using the configured interactive shell.' >&2
                   exit 1
                 fi
                 exec %s
-                """.formatted(versionCheckCommand, launchCommand);
+                """.formatted(versionCheckCommand, cliDisplayName, launchCommand);
     }
 
     static String buildShellCommand(String command, List<String> arguments) {
@@ -129,13 +152,15 @@ final class CodexCliSupport {
         return tokens;
     }
 
-    private static String resolveNativeExecutable(String executable, Map<String, String> environmentVariables) {
+    private static String resolveNativeExecutable(String executable,
+                                                  Map<String, String> environmentVariables,
+                                                  HostOperatingSystem hostOperatingSystem) {
         String normalizedExecutable = hasText(executable) ? executable.trim() : DEFAULT_COMMAND;
         if (looksLikePath(normalizedExecutable)) {
             return normalizedExecutable;
         }
 
-        for (String candidate : nativeExecutableCandidates(normalizedExecutable, environmentVariables)) {
+        for (String candidate : nativeExecutableCandidates(normalizedExecutable, environmentVariables, hostOperatingSystem)) {
             if (Files.isRegularFile(Path.of(candidate))) {
                 return candidate;
             }
@@ -160,9 +185,10 @@ final class CodexCliSupport {
     }
 
     private static List<String> nativeExecutableCandidates(String commandName,
-                                                           Map<String, String> environmentVariables) {
+                                                           Map<String, String> environmentVariables,
+                                                           HostOperatingSystem hostOperatingSystem) {
         List<String> candidates = new ArrayList<>();
-        for (String directory : nativePathEntries(environmentVariables)) {
+        for (String directory : nativePathEntries(environmentVariables, hostOperatingSystem)) {
             for (String executableName : nativeExecutableNames(commandName)) {
                 candidates.add(Path.of(directory, executableName).toString());
             }
@@ -171,7 +197,15 @@ final class CodexCliSupport {
     }
 
     private static List<String> nativePathEntries(Map<String, String> environmentVariables) {
+        return nativePathEntries(environmentVariables, HostOperatingSystem.detectRuntime());
+    }
+
+    private static List<String> nativePathEntries(Map<String, String> environmentVariables,
+                                                  HostOperatingSystem hostOperatingSystem) {
         Objects.requireNonNull(environmentVariables, "environmentVariables must not be null");
+        if (hostOperatingSystem == null || !hostOperatingSystem.isWindows()) {
+            return List.of();
+        }
 
         List<String> entries = new ArrayList<>();
         addPathEntry(entries, environmentVariables.get("APPDATA"), "npm");

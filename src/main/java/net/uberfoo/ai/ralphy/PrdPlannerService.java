@@ -29,12 +29,22 @@ public class PrdPlannerService {
     @Autowired
     public PrdPlannerService(CodexLauncherService codexLauncherService,
                              PresetCatalogService presetCatalogService) {
-        this(codexLauncherService, presetCatalogService, new SystemPlannerExecutor());
+        this(codexLauncherService,
+                presetCatalogService,
+                new SystemPlannerExecutor(HostOperatingSystem.detectRuntime()),
+                HostOperatingSystem.detectRuntime());
     }
 
     PrdPlannerService(CodexLauncherService codexLauncherService,
                       PresetCatalogService presetCatalogService,
                       PlannerExecutor plannerExecutor) {
+        this(codexLauncherService, presetCatalogService, plannerExecutor, HostOperatingSystem.detectRuntime());
+    }
+
+    PrdPlannerService(CodexLauncherService codexLauncherService,
+                      PresetCatalogService presetCatalogService,
+                      PlannerExecutor plannerExecutor,
+                      HostOperatingSystem hostOperatingSystem) {
         this.codexLauncherService = Objects.requireNonNull(codexLauncherService,
                 "codexLauncherService must not be null");
         this.presetCatalogService = Objects.requireNonNull(presetCatalogService,
@@ -52,7 +62,7 @@ public class PrdPlannerService {
                 executionProfile,
                 session,
                 userMessage,
-                "",
+                ExecutionAgentSelection.codexDefault(),
                 runOutputListener
         );
     }
@@ -63,8 +73,27 @@ public class PrdPlannerService {
                                                   String userMessage,
                                                   String modelId,
                                                   CodexLauncherService.RunOutputListener runOutputListener) {
+        return continueConversation(
+                activeProject,
+                executionProfile,
+                session,
+                userMessage,
+                new ExecutionAgentSelection(ExecutionAgentProvider.CODEX, modelId, ""),
+                runOutputListener
+        );
+    }
+
+    public PlannerTurnResult continueConversation(ActiveProject activeProject,
+                                                  ExecutionProfile executionProfile,
+                                                  PrdPlanningSession session,
+                                                  String userMessage,
+                                                  ExecutionAgentSelection executionAgentSelection,
+                                                  CodexLauncherService.RunOutputListener runOutputListener) {
         Objects.requireNonNull(activeProject, "activeProject must not be null");
         Objects.requireNonNull(executionProfile, "executionProfile must not be null");
+        ExecutionAgentSelection resolvedAgentSelection = executionAgentSelection == null
+                ? ExecutionAgentSelection.codexDefault()
+                : executionAgentSelection;
         if (!hasText(userMessage)) {
             return PlannerTurnResult.failure(session == null ? PrdPlanningSession.empty() : session,
                     "Enter a prompt or clarification before sending it to the planner.");
@@ -80,7 +109,8 @@ public class PrdPlannerService {
                 preset,
                 plannerPromptInputs(activeProject, sessionWithUserTurn),
                 plannerInstructions(sessionWithUserTurn),
-                plannerCodexOptions(modelId)
+                resolvedAgentSelection,
+                plannerCliOptions(resolvedAgentSelection)
         );
         CodexLauncherService.CodexLaunchPlan launchPlan = codexLauncherService.buildLaunch(launchRequest);
         CodexLauncherService.RunOutputListener listener =
@@ -90,7 +120,9 @@ public class PrdPlannerService {
             return PlannerTurnResult.failure(sessionWithUserTurn, plannerFailureMessage(execution));
         }
 
-        String assistantMessage = extractFinalAssistantSummary(execution.stdout());
+        String assistantMessage = resolvedAgentSelection.provider() == ExecutionAgentProvider.GITHUB_COPILOT
+                ? normalizeSummaryText(execution.stdout())
+                : extractFinalAssistantSummary(execution.stdout());
         if (!hasText(assistantMessage)) {
             assistantMessage = extractTrailingPlainTextBlock(execution.stdout());
         }
@@ -111,14 +143,8 @@ public class PrdPlannerService {
         return PlannerTurnResult.success(updatedSession, assistantMessage, latestPrdMarkdown);
     }
 
-    private List<String> plannerCodexOptions(String modelId) {
-        List<String> options = new ArrayList<>();
-        options.add("--json");
-        if (hasText(modelId)) {
-            options.add("--model");
-            options.add(modelId.trim());
-        }
-        return List.copyOf(options);
+    private List<String> plannerCliOptions(ExecutionAgentSelection executionAgentSelection) {
+        return ExecutionAgentCliOptions.build(executionAgentSelection);
     }
 
     private List<CodexLauncherService.PromptInput> plannerPromptInputs(ActiveProject activeProject,
@@ -624,6 +650,14 @@ public class PrdPlannerService {
     }
 
     private static final class SystemPlannerExecutor implements PlannerExecutor {
+        private final HostOperatingSystem hostOperatingSystem;
+
+        private SystemPlannerExecutor(HostOperatingSystem hostOperatingSystem) {
+            this.hostOperatingSystem = hostOperatingSystem == null
+                    ? HostOperatingSystem.detectRuntime()
+                    : hostOperatingSystem;
+        }
+
         @Override
         public PlannerExecution execute(CodexLauncherService.CodexLaunchPlan launchPlan,
                                         CodexLauncherService.RunOutputListener runOutputListener) {
@@ -631,8 +665,8 @@ public class PrdPlannerService {
             if (launchPlan.processWorkingDirectory() != null) {
                 processBuilder.directory(launchPlan.processWorkingDirectory().toFile());
             }
-            if (launchPlan.executionProfile().type() == ExecutionProfile.ProfileType.POWERSHELL) {
-                CodexCliSupport.prependNativePathEntries(processBuilder.environment());
+            if (launchPlan.executionProfile().type() == ExecutionProfile.ProfileType.NATIVE) {
+                CodexCliSupport.prependNativePathEntries(processBuilder.environment(), hostOperatingSystem);
             }
 
             try {

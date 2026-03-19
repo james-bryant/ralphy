@@ -14,6 +14,14 @@
         <junit.version>5.12.1</junit.version>
         <jacoco.version>0.8.14</jacoco.version>
         <spring-boot.version>3.4.5</spring-boot.version>
+        <application.name>Ralphy</application.name>
+        <application.mainClass>net.uberfoo.ai.ralphy.Launcher</application.mainClass>
+        <jpackage.type>app-image</jpackage.type>
+        <jpackage.appVersion>1.0.0</jpackage.appVersion>
+        <jpackage.vendor>Uberfoo AI</jpackage.vendor>
+        <jpackage.inputDirectory>${project.build.directory}/jpackage/input</jpackage.inputDirectory>
+        <jpackage.javafxDirectory>${project.build.directory}/jpackage/javafx-modules</jpackage.javafxDirectory>
+        <jpackage.outputDirectory>${project.build.directory}/dist</jpackage.outputDirectory>
     </properties>
 
     <dependencies>
@@ -104,6 +112,18 @@
                 <version>3.5.2</version>
             </plugin>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>${application.mainClass}</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>${jacoco.version}</version>
@@ -124,4 +144,130 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>package-native</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <version>3.8.1</version>
+                        <executions>
+                            <execution>
+                                <id>copy-jpackage-runtime-dependencies</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>copy-dependencies</goal>
+                                </goals>
+                                <configuration>
+                                    <includeScope>runtime</includeScope>
+                                    <excludeGroupIds>org.openjfx</excludeGroupIds>
+                                    <outputDirectory>${jpackage.inputDirectory}</outputDirectory>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>copy-jpackage-javafx-modules</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>copy-dependencies</goal>
+                                </goals>
+                                <configuration>
+                                    <includeScope>runtime</includeScope>
+                                    <includeGroupIds>org.openjfx</includeGroupIds>
+                                    <includeClassifiers>${javafx.platform}</includeClassifiers>
+                                    <outputDirectory>${jpackage.javafxDirectory}</outputDirectory>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>copy-app-jar-for-jpackage</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${jpackage.inputDirectory}</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.build.directory}</directory>
+                                            <includes>
+                                                <include>${project.build.finalName}.jar</include>
+                                            </includes>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>build-native-app-image</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>jpackage</executable>
+                                    <arguments>
+                                        <argument>--type</argument>
+                                        <argument>${jpackage.type}</argument>
+                                        <argument>--dest</argument>
+                                        <argument>${jpackage.outputDirectory}</argument>
+                                        <argument>--name</argument>
+                                        <argument>${application.name}</argument>
+                                        <argument>--app-version</argument>
+                                        <argument>${jpackage.appVersion}</argument>
+                                        <argument>--vendor</argument>
+                                        <argument>${jpackage.vendor}</argument>
+                                        <argument>--input</argument>
+                                        <argument>${jpackage.inputDirectory}</argument>
+                                        <argument>--main-jar</argument>
+                                        <argument>${project.build.finalName}.jar</argument>
+                                        <argument>--main-class</argument>
+                                        <argument>${application.mainClass}</argument>
+                                        <argument>--module-path</argument>
+                                        <argument>${jpackage.javafxDirectory}</argument>
+                                        <argument>--add-modules</argument>
+                                        <argument>javafx.controls,javafx.fxml</argument>
+                                        <argument>--java-options</argument>
+                                        <argument>-Dfile.encoding=UTF-8</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>package-windows</id>
+            <properties>
+                <javafx.platform>win</javafx.platform>
+                <jpackage.inputDirectory>${project.build.directory}/jpackage/windows/input</jpackage.inputDirectory>
+                <jpackage.javafxDirectory>${project.build.directory}/jpackage/windows/javafx-modules</jpackage.javafxDirectory>
+                <jpackage.outputDirectory>${project.build.directory}/dist/windows</jpackage.outputDirectory>
+            </properties>
+        </profile>
+        <profile>
+            <id>package-linux</id>
+            <properties>
+                <javafx.platform>linux</javafx.platform>
+                <jpackage.inputDirectory>${project.build.directory}/jpackage/linux/input</jpackage.inputDirectory>
+                <jpackage.javafxDirectory>${project.build.directory}/jpackage/linux/javafx-modules</jpackage.javafxDirectory>
+                <jpackage.outputDirectory>${project.build.directory}/dist/linux</jpackage.outputDirectory>
+            </properties>
+        </profile>
+    </profiles>
 </project>

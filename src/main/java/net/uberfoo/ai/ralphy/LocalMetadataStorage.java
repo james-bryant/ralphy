@@ -26,7 +26,7 @@ import java.util.UUID;
 public class LocalMetadataStorage {
     private static final int SCHEMA_VERSION = 6;
     private static final String STORAGE_FILE_NAME = "metadata-store.json";
-    private static final String DEFAULT_PROFILE_TYPE = ExecutionProfile.ProfileType.POWERSHELL.storageValue();
+    private static final String DEFAULT_PROFILE_TYPE = ExecutionProfile.ProfileType.NATIVE.storageValue();
 
     private final ObjectMapper objectMapper;
     private final Path storageFilePath;
@@ -135,7 +135,7 @@ public class LocalMetadataStorage {
 
         return findProfileByProjectId(projectRecord.get().projectId())
                 .map(this::toExecutionProfile)
-                .or(() -> Optional.of(ExecutionProfile.nativePowerShell()));
+                .or(() -> Optional.of(ExecutionProfile.nativeHost()));
     }
 
     public synchronized ExecutionProfile saveExecutionProfile(String projectId, ExecutionProfile executionProfile) {

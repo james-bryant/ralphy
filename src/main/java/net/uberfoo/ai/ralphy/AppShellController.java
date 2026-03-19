@@ -62,10 +62,10 @@ public class AppShellController {
             "Open or create a repository to configure its execution profile.";
     private static final String NO_ACTIVE_NATIVE_PREFLIGHT_SUMMARY = "No active project";
     private static final String NO_ACTIVE_NATIVE_PREFLIGHT_DETAIL =
-            "Open or create a repository to check native Windows Codex readiness.";
+            "Open or create a repository to check native Codex readiness.";
     private static final String NO_NATIVE_PREFLIGHT_SUMMARY = "Native preflight not run";
     private static final String NO_NATIVE_PREFLIGHT_DETAIL =
-            "Run native Windows preflight before starting a PowerShell loop.";
+            "Run native preflight before starting an execution loop.";
     private static final String NO_ACTIVE_WSL_PREFLIGHT_SUMMARY = "No active project";
     private static final String NO_ACTIVE_WSL_PREFLIGHT_DETAIL =
             "Open or create a repository to check WSL Codex readiness.";
@@ -136,7 +136,7 @@ public class AppShellController {
             "The selected artifact could not be read.";
     private static final String PENDING_ASSISTANT_SUMMARY_MESSAGE =
             "Waiting for the final assistant summary. Switch to Raw Output to follow the live stream.";
-    private static final String PENDING_RAW_OUTPUT_MESSAGE = "Waiting for Codex to emit live output...";
+    private static final String PENDING_RAW_OUTPUT_MESSAGE = "Waiting for the agent CLI to emit live output...";
     private static final String MISSING_ASSISTANT_SUMMARY_MESSAGE =
             "No final assistant summary is stored for this run.";
     private static final String MISSING_RAW_OUTPUT_MESSAGE = "No raw output is stored for this run.";
@@ -146,6 +146,11 @@ public class AppShellController {
             "Projects",
             "Repository onboarding, recent projects, and diagnostics will appear here.",
             "Projects workspace ready."
+    );
+    private static final ShellSection AGENT_CONFIGURATION_SECTION = new ShellSection(
+            "Agent Configuration",
+            "User-scoped execution profile and preflight diagnostics appear here.",
+            "Agent configuration workspace ready."
     );
     private static final ShellSection PRD_EDITOR_SECTION = new ShellSection(
             "PRD Editor",
@@ -165,10 +170,13 @@ public class AppShellController {
     private final PrdInterviewService prdInterviewService;
     private final PrdPlannerService prdPlannerService;
     private final ExecutionAgentModelCatalogService executionAgentModelCatalogService;
+    private final UserPreferencesSettingsService userPreferencesSettingsService;
     private final MarkdownPrdFileChooser markdownPrdFileChooser;
     private final PrdJsonFileChooser prdJsonFileChooser;
     private final RepositoryDirectoryChooser repositoryDirectoryChooser;
     private final Executor backgroundExecutor;
+    private final Executor modelCatalogExecutor;
+    private final HostOperatingSystem hostOperatingSystem;
     private final ToggleGroup executionProfileToggleGroup = new ToggleGroup();
     private final ToggleGroup presetCatalogToggleGroup = new ToggleGroup();
     private final ToggleGroup runOutputViewToggleGroup = new ToggleGroup();
@@ -201,7 +209,7 @@ public class AppShellController {
     private final Map<String, StructuredCommandOutputViewState> structuredRunOutputCommandViewStates = new HashMap<>();
     private RunOutputPresentationState runOutputPresentationState = RunOutputPresentationState.empty();
     private RunHistoryArtifactViewerState runHistoryArtifactViewerState = RunHistoryArtifactViewerState.empty();
-    private List<ExecutionAgentModelCatalogService.ProviderSupport> executionAgentProviderSupports = List.of();
+    private List<ExecutionAgentProviderChoice> availableExecutionAgentProviderChoices = List.of();
 
     @FXML
     private Label activeProjectNameLabel;
@@ -239,13 +247,52 @@ public class AppShellController {
     private Label executionProfileMessageLabel;
 
     @FXML
-    private ComboBox<ExecutionAgentProviderChoice> executionProviderComboBox;
+    private Button agentConfigurationNavButton;
 
     @FXML
-    private ComboBox<ExecutionModelChoice> executionModelComboBox;
+    private VBox projectContextCard;
 
     @FXML
-    private Label executionModelStatusLabel;
+    private VBox agentConfigurationProfileCard;
+
+    @FXML
+    private VBox planningAgentSettingsCard;
+
+    @FXML
+    private VBox executionAgentSettingsCard;
+
+    @FXML
+    private VBox prdValidationCard;
+
+    @FXML
+    private ComboBox<ExecutionAgentProviderChoice> executionSettingsProviderComboBox;
+
+    @FXML
+    private ComboBox<ExecutionModelChoice> executionSettingsModelComboBox;
+
+    @FXML
+    private ComboBox<ThinkingLevelChoice> executionThinkingLevelComboBox;
+
+    @FXML
+    private Label executionSettingsStatusLabel;
+
+    @FXML
+    private ComboBox<ExecutionAgentProviderChoice> planningSettingsProviderComboBox;
+
+    @FXML
+    private ComboBox<ExecutionModelChoice> planningSettingsModelComboBox;
+
+    @FXML
+    private ComboBox<ThinkingLevelChoice> planningThinkingLevelComboBox;
+
+    @FXML
+    private Label planningSettingsStatusLabel;
+
+    @FXML
+    private Label executionAgentSelectionSummaryLabel;
+
+    @FXML
+    private Label executionAgentSelectionDetailLabel;
 
     @FXML
     private Label executionProfileSummaryLabel;
@@ -377,6 +424,9 @@ public class AppShellController {
     private VBox nativePreflightRemediationSection;
 
     @FXML
+    private VBox wslExecutionProfileFieldsContainer;
+
+    @FXML
     private Label nativePreflightSummaryLabel;
 
     @FXML
@@ -419,7 +469,10 @@ public class AppShellController {
     private Button prdPlannerClearButton;
 
     @FXML
-    private ComboBox<ExecutionModelChoice> prdPlannerModelComboBox;
+    private Label prdPlannerAgentSummaryLabel;
+
+    @FXML
+    private Label prdPlannerAgentDetailLabel;
 
     @FXML
     private Label prdPlannerDetailLabel;
@@ -432,9 +485,6 @@ public class AppShellController {
 
     @FXML
     private Label prdPlannerProgressLabel;
-
-    @FXML
-    private Label prdPlannerModelStatusLabel;
 
     @FXML
     private HBox prdPlannerProgressRow;
@@ -527,6 +577,12 @@ public class AppShellController {
     private Button projectsNavButton;
 
     @FXML
+    private Button saveExecutionAgentSettingsButton;
+
+    @FXML
+    private Button savePlanningAgentSettingsButton;
+
+    @FXML
     private RadioButton retryFixPresetRadioButton;
 
     @FXML
@@ -593,6 +649,9 @@ public class AppShellController {
     private VBox wslPreflightRemediationSection;
 
     @FXML
+    private VBox wslPreflightSection;
+
+    @FXML
     private Label wslPreflightSummaryLabel;
 
     @FXML
@@ -611,10 +670,12 @@ public class AppShellController {
                               PrdInterviewService prdInterviewService,
                               PrdPlannerService prdPlannerService,
                               ExecutionAgentModelCatalogService executionAgentModelCatalogService,
+                              UserPreferencesSettingsService userPreferencesSettingsService,
                               MarkdownPrdFileChooser markdownPrdFileChooser,
                               PrdJsonFileChooser prdJsonFileChooser,
                               RepositoryDirectoryChooser repositoryDirectoryChooser,
-                              @Qualifier("ralphyBackgroundExecutor") Executor backgroundExecutor) {
+                              @Qualifier("ralphyBackgroundExecutor") Executor backgroundExecutor,
+                              @Qualifier("ralphyModelCatalogExecutor") Executor modelCatalogExecutor) {
         this.shellDescriptor = shellDescriptor;
         this.activeProjectService = activeProjectService;
         this.presetCatalogService = presetCatalogService;
@@ -622,10 +683,13 @@ public class AppShellController {
         this.prdInterviewService = prdInterviewService;
         this.prdPlannerService = prdPlannerService;
         this.executionAgentModelCatalogService = executionAgentModelCatalogService;
+        this.userPreferencesSettingsService = userPreferencesSettingsService;
         this.markdownPrdFileChooser = markdownPrdFileChooser;
         this.prdJsonFileChooser = prdJsonFileChooser;
         this.repositoryDirectoryChooser = repositoryDirectoryChooser;
         this.backgroundExecutor = backgroundExecutor;
+        this.modelCatalogExecutor = modelCatalogExecutor;
+        this.hostOperatingSystem = HostOperatingSystem.detectRuntime();
     }
 
     @FXML
@@ -643,14 +707,16 @@ public class AppShellController {
         wslPreflightMessageLabel.managedProperty().bind(wslPreflightMessageLabel.visibleProperty());
         nativePreflightRemediationSection.managedProperty().bind(nativePreflightRemediationSection.visibleProperty());
         wslPreflightRemediationSection.managedProperty().bind(wslPreflightRemediationSection.visibleProperty());
+        wslExecutionProfileFieldsContainer.managedProperty().bind(wslExecutionProfileFieldsContainer.visibleProperty());
+        wslPreflightSection.managedProperty().bind(wslPreflightSection.visibleProperty());
         prdInterviewDraftStateLabel.managedProperty().bind(prdInterviewDraftStateLabel.visibleProperty());
         prdPlannerMessageLabel.managedProperty().bind(prdPlannerMessageLabel.visibleProperty());
         prdPlannerProgressRow.managedProperty().bind(prdPlannerProgressRow.visibleProperty());
-        prdPlannerModelStatusLabel.managedProperty().bind(prdPlannerModelStatusLabel.visibleProperty());
         prdDocumentStateLabel.managedProperty().bind(prdDocumentStateLabel.visibleProperty());
         prdValidationErrorsLabel.managedProperty().bind(prdValidationErrorsLabel.visibleProperty());
         singleStorySessionMessageLabel.managedProperty().bind(singleStorySessionMessageLabel.visibleProperty());
-        executionModelStatusLabel.managedProperty().bind(executionModelStatusLabel.visibleProperty());
+        executionSettingsStatusLabel.managedProperty().bind(executionSettingsStatusLabel.visibleProperty());
+        planningSettingsStatusLabel.managedProperty().bind(planningSettingsStatusLabel.visibleProperty());
         singleStorySessionProgressRow.managedProperty().bind(singleStorySessionProgressRow.visibleProperty());
         prdPlannerTranscriptArea.textProperty().addListener((observable, oldValue, newValue) -> {
             if (activeProjectService.activeProject().isPresent()) {
@@ -659,6 +725,11 @@ public class AppShellController {
         });
         nativeExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
         wslExecutionProfileRadioButton.setToggleGroup(executionProfileToggleGroup);
+        nativeExecutionProfileRadioButton.setText(hostOperatingSystem.nativeProfileLabel());
+        boolean wslSupported = hostOperatingSystem.supportsWslProfiles();
+        wslExecutionProfileRadioButton.setVisible(wslSupported);
+        wslExecutionProfileRadioButton.setManaged(wslSupported);
+        wslPreflightSection.setVisible(wslSupported);
         executionProfileToggleGroup.selectedToggleProperty().addListener((observable, oldValue, newValue) ->
                 updateExecutionProfileFieldState()
         );
@@ -669,8 +740,7 @@ public class AppShellController {
                 renderRunOutputView()
         );
         configurePresetCatalog();
-        configureExecutionAgentSelection();
-        configurePrdPlannerModelSelection();
+        configureAgentSettingsSelection();
         configurePrdInterview();
         configurePrdDocumentEditor();
         setSectionVisible(prdCreationPresetRadioButton, false);
@@ -714,6 +784,11 @@ public class AppShellController {
     @FXML
     private void showProjects() {
         activateSection(PROJECTS_SECTION, projectsNavButton);
+    }
+
+    @FXML
+    private void showAgentConfiguration() {
+        activateSection(AGENT_CONFIGURATION_SECTION, agentConfigurationNavButton);
     }
 
     @FXML
@@ -810,6 +885,7 @@ public class AppShellController {
         renderExecutionProfile(saveResult.executionProfile());
         renderNativeWindowsPreflight();
         renderWslPreflight();
+        refreshAvailableAgentProviderChoices();
         renderPrdValidation();
         renderSingleStorySession();
         setExecutionProfileMessage("");
@@ -819,6 +895,7 @@ public class AppShellController {
     private void runNativeWindowsPreflight() {
         ActiveProjectService.NativeWindowsPreflightRunResult runResult = activeProjectService.runNativeWindowsPreflight();
         renderNativeWindowsPreflight();
+        refreshAvailableAgentProviderChoices();
         renderSingleStorySession();
         setNativePreflightMessage(runResult.message());
     }
@@ -827,6 +904,7 @@ public class AppShellController {
     private void runWslPreflight() {
         ActiveProjectService.WslPreflightRunResult runResult = activeProjectService.runWslPreflight();
         renderWslPreflight();
+        refreshAvailableAgentProviderChoices();
         renderSingleStorySession();
         setWslPreflightMessage(runResult.message());
     }
@@ -991,6 +1069,14 @@ public class AppShellController {
             return;
         }
 
+        ExecutionAgentSelection planningAgentSelection = selectedPlanningAgentSelection();
+        if (!planningAgentSelection.provider().executionSupported()) {
+            setPrdPlannerMessage(planningAgentSelection.provider().displayName()
+                    + " planning is not implemented yet.");
+            renderPrdPlanner(currentPrdPlanningSession);
+            return;
+        }
+
         String userMessage = prdPlannerInputArea.getText();
         if (!hasText(userMessage)) {
             setPrdPlannerMessage("Enter a prompt or clarification before sending it to the planner.");
@@ -998,7 +1084,8 @@ public class AppShellController {
         }
 
         ExecutionProfile executionProfile = activeProjectService.executionProfile()
-                .orElse(ExecutionProfile.nativePowerShell());
+                .orElse(ExecutionProfile.nativeHost());
+        ExecutionAgentSelection planningAgentSelectionForRequest = planningAgentSelection;
         PrdPlanningSession baseSession = currentPrdPlanningSession;
         pendingPrdPlannerUserMessage = userMessage.trim();
         currentPrdPlanningSession = baseSession.appendUserMessage(pendingPrdPlannerUserMessage);
@@ -1013,7 +1100,7 @@ public class AppShellController {
                                 executionProfile,
                                 baseSession,
                                 pendingPrdPlannerUserMessage,
-                                selectedPrdPlannerModelId(),
+                                planningAgentSelectionForRequest,
                                 CodexLauncherService.RunOutputListener.noop()
                         ),
                         backgroundExecutor
@@ -1143,12 +1230,18 @@ public class AppShellController {
 
     private boolean updateWorkspaceSectionVisibility(Button activeButton) {
         boolean projectsSectionActive = activeButton == projectsNavButton;
+        boolean agentConfigurationSectionActive = activeButton == agentConfigurationNavButton;
         boolean prdEditorSectionActive = activeButton == prdEditorNavButton;
         boolean executionSectionActive = activeButton == executionNavButton;
 
         boolean changed = false;
         changed |= setSectionVisible(projectsWorkspaceRow, projectsSectionActive);
+        changed |= setSectionVisible(projectContextCard, projectsSectionActive);
+        changed |= setSectionVisible(agentConfigurationProfileCard, agentConfigurationSectionActive);
+        changed |= setSectionVisible(planningAgentSettingsCard, prdEditorSectionActive);
+        changed |= setSectionVisible(prdValidationCard, prdEditorSectionActive);
         changed |= setSectionVisible(presetCatalogCard, executionSectionActive);
+        changed |= setSectionVisible(executionAgentSettingsCard, executionSectionActive);
         changed |= setSectionVisible(livePrdPlannerCard, prdEditorSectionActive);
         changed |= setSectionVisible(prdInterviewCard, prdEditorSectionActive && shouldShowLegacyPrdInterview());
         changed |= setSectionVisible(prdDocumentCard, prdEditorSectionActive);
@@ -1225,7 +1318,7 @@ public class AppShellController {
     }
 
     private List<Button> navigationButtons() {
-        return List.of(projectsNavButton, prdEditorNavButton, executionNavButton);
+        return List.of(agentConfigurationNavButton, projectsNavButton, prdEditorNavButton, executionNavButton);
     }
 
     private void updateActiveNavigationButton(Button activeButton) {
@@ -1249,10 +1342,11 @@ public class AppShellController {
             activeProjectNameLabel.setText(NO_ACTIVE_PROJECT_NAME);
             activeProjectPathLabel.setText(NO_ACTIVE_PROJECT_PATH);
             activeProjectStatusLabel.setText(NO_ACTIVE_PROJECT_STATUS);
-            renderExecutionProfile(null);
+            renderExecutionProfile(activeProjectService.executionProfile().orElse(ExecutionProfile.nativeHost()));
             renderExecutionOverview(null);
             renderNativeWindowsPreflight();
             renderWslPreflight();
+            refreshAvailableAgentProviderChoices();
             renderPrdValidation();
             renderSingleStorySession();
             renderStoryProgressDashboard();
@@ -1269,10 +1363,11 @@ public class AppShellController {
         activeProjectNameLabel.setText(activeProject.displayName());
         activeProjectPathLabel.setText(activeProject.displayPath());
         activeProjectStatusLabel.setText(activeProject.displayName());
-        renderExecutionProfile(activeProjectService.executionProfile().orElse(ExecutionProfile.nativePowerShell()));
+        renderExecutionProfile(activeProjectService.executionProfile().orElse(ExecutionProfile.nativeHost()));
         renderExecutionOverview(activeProject);
         renderNativeWindowsPreflight();
         renderWslPreflight();
+        refreshAvailableAgentProviderChoices();
         renderPrdValidation();
         renderSingleStorySession();
         renderStoryProgressDashboard();
@@ -1284,31 +1379,38 @@ public class AppShellController {
     }
 
     private void renderExecutionProfile(ExecutionProfile executionProfile) {
-        boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
         setExecutionProfileMessage("");
-        nativeExecutionProfileRadioButton.setDisable(!activeProjectPresent);
-        wslExecutionProfileRadioButton.setDisable(!activeProjectPresent);
-        saveExecutionProfileButton.setDisable(!activeProjectPresent);
+        nativeExecutionProfileRadioButton.setDisable(false);
+        wslExecutionProfileRadioButton.setDisable(!hostOperatingSystem.supportsWslProfiles());
+        saveExecutionProfileButton.setDisable(false);
 
-        if (!activeProjectPresent || executionProfile == null) {
+        if (executionProfile == null) {
             nativeExecutionProfileRadioButton.setSelected(true);
             wslDistributionField.clear();
             windowsPathPrefixField.clear();
             wslPathPrefixField.clear();
-            executionProfileSummaryLabel.setText(NO_ACTIVE_PROFILE_SUMMARY);
+            executionProfileSummaryLabel.setText(ExecutionProfile.nativeHost().summary(hostOperatingSystem));
             updateExecutionProfileFieldState();
             return;
         }
 
-        if (executionProfile.type() == ExecutionProfile.ProfileType.WSL) {
+        if (executionProfile.type() == ExecutionProfile.ProfileType.WSL && hostOperatingSystem.supportsWslProfiles()) {
             wslExecutionProfileRadioButton.setSelected(true);
         } else {
             nativeExecutionProfileRadioButton.setSelected(true);
+            if (executionProfile.type() == ExecutionProfile.ProfileType.WSL
+                    && !hostOperatingSystem.supportsWslProfiles()) {
+                setExecutionProfileMessage("WSL profiles are only available when Ralphy is running on Windows.");
+            }
         }
         wslDistributionField.setText(valueOrEmpty(executionProfile.wslDistribution()));
         windowsPathPrefixField.setText(valueOrEmpty(executionProfile.windowsPathPrefix()));
         wslPathPrefixField.setText(valueOrEmpty(executionProfile.wslPathPrefix()));
-        executionProfileSummaryLabel.setText(executionProfile.summary());
+        ExecutionProfile visibleExecutionProfile = executionProfile.type() == ExecutionProfile.ProfileType.WSL
+                && !hostOperatingSystem.supportsWslProfiles()
+                ? ExecutionProfile.nativeHost()
+                : executionProfile;
+        executionProfileSummaryLabel.setText(visibleExecutionProfile.summary(hostOperatingSystem));
         updateExecutionProfileFieldState();
     }
 
@@ -1335,10 +1437,12 @@ public class AppShellController {
     private void renderSingleStorySession() {
         PresetUseCase sessionPresetUseCase = sessionPresetUseCase();
         ActiveProjectService.SingleStorySessionAvailability availability =
-                activeProjectService.singleStorySessionAvailability(sessionPresetUseCase);
+                activeProjectService.singleStorySessionAvailability(sessionPresetUseCase, selectedExecutionAgentSelection());
         ExecutionAgentSelection executionAgentSelection = selectedExecutionAgentSelection();
         boolean providerSupported = executionAgentSelection.provider().executionSupported();
         boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
+        executionAgentSelectionSummaryLabel.setText(describeAgentSelection(executionAgentSelection));
+        executionAgentSelectionDetailLabel.setText(agentSelectionDetail(executionAgentSelection, StageConfigurationContext.EXECUTION));
 
         if (!providerSupported && !singleStorySessionInProgress) {
             singleStorySessionSummaryLabel.setText("Provider not supported");
@@ -1371,13 +1475,11 @@ public class AppShellController {
                 || !providerSupported);
         pauseSingleStoryButton.setText(pauseRequested ? "Pause Requested" : "Pause");
         pauseSingleStoryButton.setDisable(!singleStorySessionInProgress || pauseRequested);
-        executionProviderComboBox.setDisable(!activeProjectPresent || singleStorySessionInProgress);
-        executionModelComboBox.setDisable(!activeProjectPresent || singleStorySessionInProgress);
         singleStorySessionProgressRow.setVisible(singleStorySessionInProgress);
         if (singleStorySessionInProgress && hasText(singleStorySessionTaskId)) {
             singleStorySessionProgressLabel.setText(pauseRequested
                     ? "Finishing " + singleStorySessionTaskId + " before pausing..."
-                    : "Codex is running " + singleStorySessionTaskId + "...");
+                    : executionAgentSelection.provider().displayName() + " is running " + singleStorySessionTaskId + "...");
         } else {
             singleStorySessionProgressLabel.setText("");
         }
@@ -1433,12 +1535,17 @@ public class AppShellController {
         boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
         livePrdPlannerCard.setDisable(!activeProjectPresent);
         boolean plannerRequestActive = prdPlannerRequestInProgress;
+        ExecutionAgentSelection planningAgentSelection = selectedPlanningAgentSelection();
+        boolean providerSupported = planningAgentSelection.provider().executionSupported();
         prdPlannerTranscriptArea.setDisable(!activeProjectPresent);
         prdPlannerInputArea.setDisable(!activeProjectPresent || plannerRequestActive);
-        prdPlannerModelComboBox.setDisable(!activeProjectPresent || plannerRequestActive);
-        prdPlannerSendButton.setDisable(!activeProjectPresent || plannerRequestActive);
+        prdPlannerSendButton.setDisable(!activeProjectPresent || plannerRequestActive || !providerSupported);
         prdPlannerProgressRow.setVisible(activeProjectPresent && prdPlannerRequestInProgress);
-        prdPlannerProgressLabel.setText(prdPlannerRequestInProgress ? "Waiting for Codex to continue the planner..." : "");
+        prdPlannerProgressLabel.setText(prdPlannerRequestInProgress
+                ? "Waiting for " + planningAgentSelection.provider().displayName() + " to continue the planner..."
+                : "");
+        prdPlannerAgentSummaryLabel.setText(describeAgentSelection(planningAgentSelection));
+        prdPlannerAgentDetailLabel.setText(agentSelectionDetail(planningAgentSelection, StageConfigurationContext.PLANNING));
 
         if (!activeProjectPresent) {
             currentPrdPlanningSession = PrdPlanningSession.empty();
@@ -1449,6 +1556,17 @@ public class AppShellController {
             prdPlannerInputArea.clear();
             prdPlannerApplyDraftButton.setDisable(true);
             prdPlannerClearButton.setDisable(true);
+            return;
+        }
+
+        if (!providerSupported) {
+            currentPrdPlanningSession = session == null ? PrdPlanningSession.empty() : session;
+            prdPlannerSummaryLabel.setText("Planner provider not supported");
+            prdPlannerDetailLabel.setText(planningAgentSelection.provider().displayName()
+                    + " planning is not implemented yet. Choose Codex or GitHub Copilot in Planning Agent Settings.");
+            prdPlannerTranscriptArea.setText(formatPrdPlannerTranscript(currentPrdPlanningSession));
+            prdPlannerApplyDraftButton.setDisable(true);
+            prdPlannerClearButton.setDisable(!currentPrdPlanningSession.hasMessages());
             return;
         }
 
@@ -1466,7 +1584,7 @@ public class AppShellController {
         if (!currentPrdPlanningSession.hasMessages()) {
             prdPlannerSummaryLabel.setText("Planner ready | 0/100");
             prdPlannerDetailLabel.setText(
-                    "Send a feature prompt to start a live Codex-backed PRD planning conversation."
+                    "Send a feature prompt to start a live agent-backed PRD planning conversation."
             );
             return;
         }
@@ -1474,7 +1592,7 @@ public class AppShellController {
         PlannerReadinessStatus readinessStatus = plannerReadinessStatus(currentPrdPlanningSession);
         if (prdPlannerRequestInProgress) {
             prdPlannerSummaryLabel.setText("Planner working | " + readinessStatus.score() + "/100");
-            prdPlannerDetailLabel.setText("The latest message has been sent. Waiting for Codex to respond.");
+            prdPlannerDetailLabel.setText("The latest message has been sent. Waiting for the configured planner to respond.");
             return;
         }
 
@@ -1500,7 +1618,7 @@ public class AppShellController {
         if (prdPlannerRequestInProgress) {
             transcriptBlocks.add(formatPrdPlannerTranscriptBlock(
                     "assistant",
-                    "Waiting for Codex",
+                    "Waiting for " + selectedPlanningAgentSelection().provider().displayName(),
                     "Planner is thinking..."
             ));
         }
@@ -1536,11 +1654,12 @@ public class AppShellController {
         livePrdPlannerCard.setDisable(!activeProjectPresent);
         prdPlannerTranscriptArea.setDisable(!activeProjectPresent);
         prdPlannerInputArea.setDisable(!activeProjectPresent || prdPlannerRequestInProgress);
-        prdPlannerModelComboBox.setDisable(!activeProjectPresent || prdPlannerRequestInProgress);
-        prdPlannerSendButton.setDisable(!activeProjectPresent || prdPlannerRequestInProgress);
+        prdPlannerSendButton.setDisable(!activeProjectPresent
+                || prdPlannerRequestInProgress
+                || !selectedPlanningAgentSelection().provider().executionSupported());
         prdPlannerProgressRow.setVisible(activeProjectPresent && prdPlannerRequestInProgress);
         prdPlannerProgressLabel.setText(prdPlannerRequestInProgress
-                ? "Waiting for Codex to continue the planner..."
+                ? "Waiting for " + selectedPlanningAgentSelection().provider().displayName() + " to continue the planner..."
                 : "");
         prdPlannerApplyDraftButton.setDisable(
                 prdPlannerRequestInProgress || !currentPrdPlanningSession.hasLatestPrdMarkdown()
@@ -1948,6 +2067,7 @@ public class AppShellController {
     }
 
     private void renderRunOutputView() {
+        updateRunOutputViewAvailability(currentRunOutputProvider());
         if (activeProjectService.activeProject().isEmpty()) {
             runOutputSummaryLabel.setText(NO_ACTIVE_RUN_OUTPUT_SUMMARY);
             runOutputDetailLabel.setText(NO_ACTIVE_RUN_OUTPUT_DETAIL);
@@ -2025,11 +2145,19 @@ public class AppShellController {
         return new RunOutputPresentationState(
                 true,
                 "RUNNING".equalsIgnoreCase(status) && !hasText(runMetadataRecord.endedAt()),
+                providerForRun(runMetadataRecord),
                 summary,
                 detail,
                 readAssistantSummary(runMetadataRecord),
                 readCombinedRawOutput(runMetadataRecord)
         );
+    }
+
+    private ExecutionAgentProvider providerForRun(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
+        String normalizedCommand = String.join(" ", runMetadataRecord.command()).toLowerCase();
+        return normalizedCommand.contains("copilot")
+                ? ExecutionAgentProvider.GITHUB_COPILOT
+                : ExecutionAgentProvider.CODEX;
     }
 
     private String buildRunOutputDetail(String runId, String profileType, String startedAt, String endedAt) {
@@ -2038,7 +2166,7 @@ public class AppShellController {
             details.add("Run " + runId);
         }
         if (hasText(profileType)) {
-            details.add(profileType + " profile");
+            details.add(ExecutionProfile.storedProfileTypeLabel(profileType));
         }
         if (hasText(startedAt)) {
             details.add("Started " + startedAt);
@@ -2721,13 +2849,36 @@ public class AppShellController {
     }
 
     private RunOutputView selectedRunOutputView() {
+        if (currentRunOutputProvider() == ExecutionAgentProvider.GITHUB_COPILOT) {
+            return RunOutputView.RAW_OUTPUT;
+        }
         if (structuredRunOutputViewRadioButton.isSelected()) {
             return RunOutputView.STRUCTURED_OUTPUT;
         }
         if (rawOutputViewRadioButton.isSelected()) {
             return RunOutputView.RAW_OUTPUT;
         }
-        return RunOutputView.ASSISTANT_SUMMARY;
+        if (assistantSummaryViewRadioButton.isSelected()) {
+            return RunOutputView.ASSISTANT_SUMMARY;
+        }
+        return RunOutputView.STRUCTURED_OUTPUT;
+    }
+
+    private ExecutionAgentProvider currentRunOutputProvider() {
+        return runOutputPresentationState.available()
+                ? runOutputPresentationState.provider()
+                : selectedExecutionAgentSelection().provider();
+    }
+
+    private void updateRunOutputViewAvailability(ExecutionAgentProvider provider) {
+        boolean structuredAvailable = provider != ExecutionAgentProvider.GITHUB_COPILOT;
+        assistantSummaryViewRadioButton.setVisible(structuredAvailable);
+        assistantSummaryViewRadioButton.setManaged(structuredAvailable);
+        structuredRunOutputViewRadioButton.setVisible(structuredAvailable);
+        structuredRunOutputViewRadioButton.setManaged(structuredAvailable);
+        if (!structuredAvailable) {
+            rawOutputViewRadioButton.setSelected(true);
+        }
     }
 
     private StoryProgressDashboard buildStoryProgressDashboard() {
@@ -3001,12 +3152,16 @@ public class AppShellController {
                 ? "Ready for native execution"
                 : "Native execution blocked");
         nativePreflightDetailLabel.setText("Last checked " + report.executedAt()
-                + ". Native PowerShell runs stay blocked until every check passes.");
+                + ". " + hostOperatingSystem.nativeProfileLabel() + " runs stay blocked until every check passes.");
         nativePreflightChecksLabel.setText(formatNativeWindowsPreflightChecks(report));
         renderNativePreflightRemediation(report);
     }
 
     private void renderWslPreflight() {
+        if (!hostOperatingSystem.supportsWslProfiles()) {
+            clearWslPreflightRemediation();
+            return;
+        }
         boolean activeProjectPresent = activeProjectService.activeProject().isPresent();
         if (!activeProjectPresent) {
             runWslPreflightButton.setDisable(true);
@@ -3018,7 +3173,7 @@ public class AppShellController {
         }
 
         ExecutionProfile executionProfile = activeProjectService.executionProfile()
-                .orElse(ExecutionProfile.nativePowerShell());
+                .orElse(ExecutionProfile.nativeHost());
         if (executionProfile.type() != ExecutionProfile.ProfileType.WSL) {
             runWslPreflightButton.setDisable(true);
             wslPreflightSummaryLabel.setText(WSL_PREFLIGHT_PROFILE_REQUIRED_SUMMARY);
@@ -3202,7 +3357,7 @@ public class AppShellController {
 
         PresetUseCase presetUseCase = sessionPresetUseCase();
         ActiveProjectService.SingleStorySessionAvailability availability =
-                activeProjectService.singleStorySessionAvailability(presetUseCase);
+                activeProjectService.singleStorySessionAvailability(presetUseCase, executionAgentSelection);
         if (!availability.startable()) {
             setSingleStorySessionMessage(availability.detail());
             renderSingleStorySession();
@@ -3239,8 +3394,9 @@ public class AppShellController {
         activeSessionPresetUseCase = presetUseCase;
         resetLiveRunOutputBuffer();
         setSingleStorySessionMessage(startSessionMessage(availability));
-        rawOutputViewRadioButton.setSelected(true);
+        selectDefaultRunOutputViewForProvider(executionAgentSelection.provider());
         runOutputPresentationState = RunOutputPresentationState.live(
+                executionAgentSelection.provider(),
                 "Preparing " + availability.story().taskId(),
                 availability.story().taskId() + " is queued for execution.",
                 "",
@@ -3286,7 +3442,7 @@ public class AppShellController {
         }
 
         ActiveProjectService.SingleStorySessionAvailability nextAvailability =
-                activeProjectService.singleStorySessionAvailability(presetUseCase);
+                activeProjectService.singleStorySessionAvailability(presetUseCase, executionAgentSelection);
         if (pauseRequested) {
             pauseRequested = false;
             if (nextAvailability.startable()) {
@@ -3328,6 +3484,7 @@ public class AppShellController {
             public void onLaunchStarted(CodexLauncherService.CodexLaunchPlan launchPlan) {
                 Platform.runLater(() -> {
                     runOutputPresentationState = RunOutputPresentationState.live(
+                            launchPlan.agentSelection().provider(),
                             "Streaming " + launchPlan.storyId() + " | RUNNING",
                             "Run " + launchPlan.runId()
                                     + " started in "
@@ -3578,61 +3735,125 @@ public class AppShellController {
     }
 
     private void updateExecutionProfileFieldState() {
-        boolean enableWslFields = activeProjectService.activeProject().isPresent()
-                && wslExecutionProfileRadioButton.isSelected();
+        boolean enableWslFields = hostOperatingSystem.supportsWslProfiles() && wslExecutionProfileRadioButton.isSelected();
+        wslExecutionProfileFieldsContainer.setVisible(enableWslFields);
         wslDistributionField.setDisable(!enableWslFields);
         windowsPathPrefixField.setDisable(!enableWslFields);
         wslPathPrefixField.setDisable(!enableWslFields);
     }
 
-    private void configureExecutionAgentSelection() {
-        executionProviderComboBox.setCellFactory(listView -> new javafx.scene.control.ListCell<>() {
-            @Override
-            protected void updateItem(ExecutionAgentProviderChoice choice, boolean empty) {
-                super.updateItem(choice, empty);
-                if (empty || choice == null) {
-                    setText(null);
-                    return;
-                }
-                setText(choice.label());
-            }
-        });
-        executionProviderComboBox.setButtonCell(new javafx.scene.control.ListCell<>() {
-            @Override
-            protected void updateItem(ExecutionAgentProviderChoice choice, boolean empty) {
-                super.updateItem(choice, empty);
-                if (empty || choice == null) {
-                    setText(null);
-                    return;
-                }
-                setText(choice.label());
-            }
-        });
+    private void configureAgentSettingsSelection() {
+        configureProviderChoiceComboBox(executionSettingsProviderComboBox);
+        configureProviderChoiceComboBox(planningSettingsProviderComboBox);
+        configureExecutionModelChoiceComboBox(executionSettingsModelComboBox);
+        configureExecutionModelChoiceComboBox(planningSettingsModelComboBox);
+        configureThinkingLevelChoiceComboBox(executionThinkingLevelComboBox);
+        configureThinkingLevelChoiceComboBox(planningThinkingLevelComboBox);
 
-        configureExecutionModelChoiceComboBox(executionModelComboBox);
-
-        executionAgentProviderSupports = executionAgentModelCatalogService.providers();
-        executionProviderComboBox.getItems().setAll(executionAgentProviderSupports.stream()
-                .map(ExecutionAgentProviderChoice::fromProviderSupport)
-                .toList());
-        executionProviderComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
+        executionSettingsProviderComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
             selectDefaultRunOutputViewForProvider(newValue == null ? null : newValue.provider());
-            refreshExecutionModelChoices(newValue);
+            refreshStageModelChoices(
+                    StageConfigurationContext.EXECUTION,
+                    newValue,
+                    "",
+                    selectedThinkingLevel(StageConfigurationContext.EXECUTION)
+            );
         });
-        ExecutionAgentProviderChoice codexChoice = executionProviderComboBox.getItems().stream()
-                .filter(choice -> choice.provider() == ExecutionAgentProvider.CODEX)
-                .findFirst()
-                .orElse(null);
-        executionProviderComboBox.getSelectionModel().select(codexChoice);
-        selectDefaultRunOutputViewForProvider(codexChoice == null ? null : codexChoice.provider());
-        refreshExecutionModelChoices(codexChoice);
+        planningSettingsProviderComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) -> {
+            refreshStageModelChoices(
+                    StageConfigurationContext.PLANNING,
+                    newValue,
+                    "",
+                    selectedThinkingLevel(StageConfigurationContext.PLANNING)
+            );
+        });
+        executionSettingsModelComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) ->
+                refreshThinkingLevelChoices(
+                        StageConfigurationContext.EXECUTION,
+                        newValue,
+                        selectedThinkingLevel(StageConfigurationContext.EXECUTION)
+                )
+        );
+        planningSettingsModelComboBox.getSelectionModel().selectedItemProperty().addListener((observable, oldValue, newValue) ->
+                refreshThinkingLevelChoices(
+                        StageConfigurationContext.PLANNING,
+                        newValue,
+                        selectedThinkingLevel(StageConfigurationContext.PLANNING)
+                )
+        );
+
+        refreshAvailableAgentProviderChoices();
     }
 
-    private void configurePrdPlannerModelSelection() {
-        configureExecutionModelChoiceComboBox(prdPlannerModelComboBox);
-        prdPlannerModelComboBox.getItems().setAll(List.of(ExecutionModelChoice.cliDefault()));
-        prdPlannerModelComboBox.getSelectionModel().selectFirst();
-        refreshPrdPlannerModelChoices();
+    private void configureProviderChoiceComboBox(ComboBox<ExecutionAgentProviderChoice> comboBox) {
+        comboBox.setCellFactory(listView -> new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ExecutionAgentProviderChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : choice.label());
+            }
+        });
+        comboBox.setButtonCell(new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ExecutionAgentProviderChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : choice.label());
+            }
+        });
+    }
+
+    private void refreshAvailableAgentProviderChoices() {
+        availableExecutionAgentProviderChoices = availableProviderChoicesForCurrentProfile();
+        applyPersistedAgentSettings();
+    }
+
+    private List<ExecutionAgentProviderChoice> availableProviderChoicesForCurrentProfile() {
+        return executionAgentModelCatalogService.providers().stream()
+                .filter(providerSupport -> providerSupport.provider().executionSupported())
+                .map(ExecutionAgentProviderChoice::fromProviderSupport)
+                .filter(choice -> providerAvailableForCurrentProfile(choice.provider()))
+                .toList();
+    }
+
+    private boolean providerAvailableForCurrentProfile(ExecutionAgentProvider provider) {
+        if (provider == null || !provider.executionSupported()) {
+            return false;
+        }
+        Optional<ExecutionProfile> executionProfile = activeProjectService.executionProfile();
+        if (executionProfile.isEmpty()) {
+            return false;
+        }
+        if (executionProfile.get().type() == ExecutionProfile.ProfileType.WSL) {
+            Optional<WslPreflightReport> report = activeProjectService.latestWslPreflightReport();
+            return report.isPresent()
+                    && report.get().passed("wsl_distribution")
+                    && report.get().passed("path_mapping")
+                    && report.get().passed(provider.toolingCheckId());
+        }
+        Optional<NativeWindowsPreflightReport> report = activeProjectService.latestNativeWindowsPreflightReport();
+        return report.isPresent() && report.get().passed(provider.toolingCheckId());
+    }
+
+    private void applyPersistedAgentSettings() {
+        applyStageSelection(StageConfigurationContext.EXECUTION, userPreferencesSettingsService.executionStageSelection());
+        applyStageSelection(StageConfigurationContext.PLANNING, userPreferencesSettingsService.planningStageSelection());
+    }
+
+    private void applyStageSelection(StageConfigurationContext stageConfigurationContext,
+                                     ExecutionAgentSelection persistedSelection) {
+        ComboBox<ExecutionAgentProviderChoice> providerComboBox = stageProviderComboBox(stageConfigurationContext);
+        providerComboBox.getItems().setAll(availableExecutionAgentProviderChoices);
+        ExecutionAgentProviderChoice providerChoice = providerChoiceFor(persistedSelection.provider());
+        if (providerChoice == null && !availableExecutionAgentProviderChoices.isEmpty()) {
+            providerChoice = availableExecutionAgentProviderChoices.getFirst();
+        }
+        providerComboBox.getSelectionModel().select(providerChoice);
+        refreshStageModelChoices(
+                stageConfigurationContext,
+                providerChoice,
+                persistedSelection.modelId(),
+                persistedSelection.thinkingLevel()
+        );
     }
 
     private void configureExecutionModelChoiceComboBox(ComboBox<ExecutionModelChoice> comboBox) {
@@ -3652,74 +3873,108 @@ public class AppShellController {
         });
     }
 
-    private void refreshExecutionModelChoices(ExecutionAgentProviderChoice providerChoice) {
-        executionModelComboBox.getItems().setAll(List.of(ExecutionModelChoice.cliDefault()));
-        executionModelComboBox.getSelectionModel().selectFirst();
+    private void configureThinkingLevelChoiceComboBox(ComboBox<ThinkingLevelChoice> comboBox) {
+        comboBox.setCellFactory(listView -> new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ThinkingLevelChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : choice.label());
+            }
+        });
+        comboBox.setButtonCell(new javafx.scene.control.ListCell<>() {
+            @Override
+            protected void updateItem(ThinkingLevelChoice choice, boolean empty) {
+                super.updateItem(choice, empty);
+                setText(empty || choice == null ? null : choice.label());
+            }
+        });
+    }
+
+    private void refreshStageModelChoices(StageConfigurationContext stageConfigurationContext,
+                                          ExecutionAgentProviderChoice providerChoice,
+                                          String selectedModelId,
+                                          String selectedThinkingLevel) {
+        ComboBox<ExecutionModelChoice> modelComboBox = stageModelComboBox(stageConfigurationContext);
+        modelComboBox.getItems().setAll(List.of(ExecutionModelChoice.cliDefault()));
+        modelComboBox.getSelectionModel().selectFirst();
         if (providerChoice == null) {
-            setExecutionModelStatus("Select an execution provider.");
+            refreshThinkingLevelChoices(stageConfigurationContext, ExecutionModelChoice.cliDefault(), "");
+            stageSaveButton(stageConfigurationContext).setDisable(true);
+            setStageSettingsStatus(stageConfigurationContext, noAvailableAgentsMessage());
             return;
         }
-        setExecutionModelStatus("Loading models for " + providerChoice.label() + "...");
+        stageSaveButton(stageConfigurationContext).setDisable(false);
+        setStageSettingsStatus(stageConfigurationContext, "Loading models for " + providerChoice.label() + "...");
         CompletableFuture
-                .supplyAsync(() -> executionAgentModelCatalogService.modelsFor(providerChoice.provider()), backgroundExecutor)
+                .supplyAsync(() -> executionAgentModelCatalogService.modelsFor(providerChoice.provider()),
+                        modelCatalogExecutor)
                 .whenCompleteAsync((catalog, throwable) -> Platform.runLater(() -> {
                     if (throwable != null) {
-                        setExecutionModelStatus("Unable to load models (" + throwable.getMessage() + ")");
+                        refreshThinkingLevelChoices(stageConfigurationContext, ExecutionModelChoice.cliDefault(), "");
+                        setStageSettingsStatus(stageConfigurationContext, "Unable to load models (" + throwable.getMessage() + ")");
                         return;
                     }
                     if (catalog.models().isEmpty()) {
-                        setExecutionModelStatus("No models returned; using CLI defaults.");
+                        refreshThinkingLevelChoices(stageConfigurationContext, ExecutionModelChoice.cliDefault(), "");
+                        setStageSettingsStatus(stageConfigurationContext, catalog.message());
                         return;
                     }
                     List<ExecutionModelChoice> choices = catalog.models().stream()
                             .map(ExecutionModelChoice::fromModelOption)
                             .toList();
-                    executionModelComboBox.getItems().setAll(ExecutionModelChoice.cliDefault());
-                    executionModelComboBox.getItems().addAll(choices);
-                    executionModelComboBox.getSelectionModel().selectFirst();
+                    modelComboBox.getItems().setAll(ExecutionModelChoice.cliDefault());
+                    modelComboBox.getItems().addAll(choices);
+                    Optional<ExecutionModelChoice> selectedChoice = modelComboBox.getItems().stream()
+                            .filter(choice -> choice.modelId().equals(selectedModelId))
+                            .findFirst();
+                    ExecutionModelChoice appliedChoice = selectedChoice.orElseGet(ExecutionModelChoice::cliDefault);
+                    modelComboBox.getSelectionModel().select(appliedChoice);
+                    refreshThinkingLevelChoices(stageConfigurationContext, appliedChoice, selectedThinkingLevel);
                     String detail = hasText(providerChoice.detail()) ? providerChoice.detail() : "";
-                    setExecutionModelStatus(joinMessageParts(catalog.message(), detail));
+                    setStageSettingsStatus(stageConfigurationContext, joinMessageParts(catalog.message(), detail));
                 }), Platform::runLater);
     }
 
-    private void refreshPrdPlannerModelChoices() {
-        String selectedModelId = Optional.ofNullable(prdPlannerModelComboBox.getValue())
-                .map(ExecutionModelChoice::modelId)
-                .orElse("");
-        prdPlannerModelComboBox.getItems().setAll(List.of(ExecutionModelChoice.cliDefault()));
-        prdPlannerModelComboBox.getSelectionModel().selectFirst();
-        setPrdPlannerModelStatus("Loading planning models from Codex...");
-        CompletableFuture
-                .supplyAsync(() -> executionAgentModelCatalogService.modelsFor(ExecutionAgentProvider.CODEX), backgroundExecutor)
-                .whenCompleteAsync((catalog, throwable) -> Platform.runLater(() -> {
-                    if (throwable != null) {
-                        setPrdPlannerModelStatus("Unable to load planning models (" + throwable.getMessage() + ")");
-                        return;
-                    }
-                    if (catalog.models().isEmpty()) {
-                        setPrdPlannerModelStatus("No models returned; planning uses CLI defaults.");
-                        return;
-                    }
-                    List<ExecutionModelChoice> choices = catalog.models().stream()
-                            .map(ExecutionModelChoice::fromModelOption)
-                            .toList();
-                    prdPlannerModelComboBox.getItems().setAll(ExecutionModelChoice.cliDefault());
-                    prdPlannerModelComboBox.getItems().addAll(choices);
-                    Optional<ExecutionModelChoice> selectedChoice = prdPlannerModelComboBox.getItems().stream()
-                            .filter(choice -> choice.modelId().equals(selectedModelId))
-                            .findFirst();
-                    prdPlannerModelComboBox.getSelectionModel().select(selectedChoice.orElseGet(ExecutionModelChoice::cliDefault));
-                    setPrdPlannerModelStatus(catalog.message());
-                }), Platform::runLater);
+    private void refreshThinkingLevelChoices(StageConfigurationContext stageConfigurationContext,
+                                             ExecutionModelChoice modelChoice,
+                                             String selectedThinkingLevel) {
+        ComboBox<ThinkingLevelChoice> comboBox = stageThinkingLevelComboBox(stageConfigurationContext);
+        List<ThinkingLevelChoice> thinkingLevelChoices = new ArrayList<>();
+        thinkingLevelChoices.add(ThinkingLevelChoice.cliDefault());
+        if (modelChoice != null) {
+            thinkingLevelChoices.addAll(modelChoice.thinkingLevels().stream()
+                    .map(ThinkingLevelChoice::of)
+                    .toList());
+        }
+        comboBox.getItems().setAll(thinkingLevelChoices);
+        ThinkingLevelChoice selectedChoice = thinkingLevelChoices.stream()
+                .filter(choice -> choice.value().equalsIgnoreCase(valueOrEmpty(selectedThinkingLevel)))
+                .findFirst()
+                .orElseGet(ThinkingLevelChoice::cliDefault);
+        comboBox.getSelectionModel().select(selectedChoice);
+    }
+
+    private String noAvailableAgentsMessage() {
+        Optional<ExecutionProfile> executionProfile = activeProjectService.executionProfile();
+        if (executionProfile.isEmpty()) {
+            return "Save an execution profile and run preflight to detect available agents.";
+        }
+        return executionProfile.get().type() == ExecutionProfile.ProfileType.WSL
+                ? "Run WSL preflight to detect which agents are available in the selected distribution."
+                : "Run native preflight to detect which agents are available on this machine.";
     }
 
     private void selectDefaultRunOutputViewForProvider(ExecutionAgentProvider provider) {
-        if (provider == ExecutionAgentProvider.CODEX && !structuredRunOutputViewRadioButton.isSelected()) {
+        if (provider == ExecutionAgentProvider.GITHUB_COPILOT) {
+            rawOutputViewRadioButton.setSelected(true);
+            return;
+        }
+        if (provider == ExecutionAgentProvider.CODEX) {
             structuredRunOutputViewRadioButton.setSelected(true);
             return;
         }
         if (runOutputViewToggleGroup.getSelectedToggle() == null) {
-            assistantSummaryViewRadioButton.setSelected(true);
+            structuredRunOutputViewRadioButton.setSelected(true);
         }
     }
 
@@ -4087,7 +4342,7 @@ public class AppShellController {
     }
 
     private ExecutionProfile buildExecutionProfileFromForm() {
-        if (wslExecutionProfileRadioButton.isSelected()) {
+        if (hostOperatingSystem.supportsWslProfiles() && wslExecutionProfileRadioButton.isSelected()) {
             return new ExecutionProfile(
                     ExecutionProfile.ProfileType.WSL,
                     wslDistributionField.getText(),
@@ -4096,7 +4351,7 @@ public class AppShellController {
             );
         }
 
-        return ExecutionProfile.nativePowerShell();
+        return ExecutionProfile.nativeHost();
     }
 
     private String valueOrEmpty(String value) {
@@ -4104,19 +4359,52 @@ public class AppShellController {
     }
 
     private ExecutionAgentSelection selectedExecutionAgentSelection() {
-        ExecutionAgentProvider provider = Optional.ofNullable(executionProviderComboBox.getValue())
+        ExecutionAgentProvider provider = Optional.ofNullable(executionSettingsProviderComboBox.getValue())
                 .map(ExecutionAgentProviderChoice::provider)
                 .orElse(ExecutionAgentProvider.CODEX);
-        String modelId = Optional.ofNullable(executionModelComboBox.getValue())
+        String modelId = Optional.ofNullable(executionSettingsModelComboBox.getValue())
                 .map(ExecutionModelChoice::modelId)
                 .orElse("");
-        return new ExecutionAgentSelection(provider, modelId);
+        return new ExecutionAgentSelection(provider, modelId, selectedThinkingLevel(StageConfigurationContext.EXECUTION));
     }
 
-    private String selectedPrdPlannerModelId() {
-        return Optional.ofNullable(prdPlannerModelComboBox.getValue())
+    private ExecutionAgentSelection selectedPlanningAgentSelection() {
+        ExecutionAgentProvider provider = Optional.ofNullable(planningSettingsProviderComboBox.getValue())
+                .map(ExecutionAgentProviderChoice::provider)
+                .orElse(ExecutionAgentProvider.CODEX);
+        String modelId = Optional.ofNullable(planningSettingsModelComboBox.getValue())
                 .map(ExecutionModelChoice::modelId)
                 .orElse("");
+        return new ExecutionAgentSelection(provider, modelId, selectedThinkingLevel(StageConfigurationContext.PLANNING));
+    }
+
+    @FXML
+    private void saveExecutionAgentSettings() {
+        ExecutionAgentSelection savedSelection =
+                userPreferencesSettingsService.saveExecutionStageSelection(selectedExecutionAgentSelection());
+        refreshThinkingLevelChoices(
+                StageConfigurationContext.EXECUTION,
+                executionSettingsModelComboBox.getValue(),
+                savedSelection.thinkingLevel()
+        );
+        setStageSettingsStatus(StageConfigurationContext.EXECUTION,
+                "Saved execution agent settings for " + savedSelection.provider().displayName() + ".");
+        renderSingleStorySession();
+        renderRunOutputView();
+    }
+
+    @FXML
+    private void savePlanningAgentSettings() {
+        ExecutionAgentSelection savedSelection =
+                userPreferencesSettingsService.savePlanningStageSelection(selectedPlanningAgentSelection());
+        refreshThinkingLevelChoices(
+                StageConfigurationContext.PLANNING,
+                planningSettingsModelComboBox.getValue(),
+                savedSelection.thinkingLevel()
+        );
+        setStageSettingsStatus(StageConfigurationContext.PLANNING,
+                "Saved planning agent settings for " + savedSelection.provider().displayName() + ".");
+        renderPrdPlanner(currentPrdPlanningSession);
     }
 
     private void ensurePrdPlannerVisible() {
@@ -4220,10 +4508,11 @@ public class AppShellController {
         executionProfileMessageLabel.setVisible(hasMessage);
     }
 
-    private void setExecutionModelStatus(String message) {
+    private void setStageSettingsStatus(StageConfigurationContext stageConfigurationContext, String message) {
+        Label statusLabel = stageStatusLabel(stageConfigurationContext);
         boolean hasMessage = hasText(message);
-        executionModelStatusLabel.setText(hasMessage ? message : "");
-        executionModelStatusLabel.setVisible(hasMessage);
+        statusLabel.setText(hasMessage ? message : "");
+        statusLabel.setVisible(hasMessage);
     }
 
     private void setNativePreflightMessage(String message) {
@@ -4244,10 +4533,80 @@ public class AppShellController {
         prdPlannerMessageLabel.setVisible(hasMessage);
     }
 
-    private void setPrdPlannerModelStatus(String message) {
-        boolean hasMessage = hasText(message);
-        prdPlannerModelStatusLabel.setText(hasMessage ? message : "");
-        prdPlannerModelStatusLabel.setVisible(hasMessage);
+    private Label stageStatusLabel(StageConfigurationContext stageConfigurationContext) {
+        return stageConfigurationContext == StageConfigurationContext.PLANNING
+                ? planningSettingsStatusLabel
+                : executionSettingsStatusLabel;
+    }
+
+    private ComboBox<ExecutionModelChoice> stageModelComboBox(StageConfigurationContext stageConfigurationContext) {
+        return stageConfigurationContext == StageConfigurationContext.PLANNING
+                ? planningSettingsModelComboBox
+                : executionSettingsModelComboBox;
+    }
+
+    private ComboBox<ExecutionAgentProviderChoice> stageProviderComboBox(
+            StageConfigurationContext stageConfigurationContext) {
+        return stageConfigurationContext == StageConfigurationContext.PLANNING
+                ? planningSettingsProviderComboBox
+                : executionSettingsProviderComboBox;
+    }
+
+    private ComboBox<ThinkingLevelChoice> stageThinkingLevelComboBox(
+            StageConfigurationContext stageConfigurationContext) {
+        return stageConfigurationContext == StageConfigurationContext.PLANNING
+                ? planningThinkingLevelComboBox
+                : executionThinkingLevelComboBox;
+    }
+
+    private Button stageSaveButton(StageConfigurationContext stageConfigurationContext) {
+        return stageConfigurationContext == StageConfigurationContext.PLANNING
+                ? savePlanningAgentSettingsButton
+                : saveExecutionAgentSettingsButton;
+    }
+
+    private String selectedThinkingLevel(StageConfigurationContext stageConfigurationContext) {
+        return Optional.ofNullable(stageThinkingLevelComboBox(stageConfigurationContext).getValue())
+                .map(ThinkingLevelChoice::value)
+                .orElse("");
+    }
+
+    private ExecutionAgentProviderChoice providerChoiceFor(ExecutionAgentProvider provider) {
+        return availableExecutionAgentProviderChoices.stream()
+                .filter(choice -> choice.provider() == provider)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String describeAgentSelection(ExecutionAgentSelection executionAgentSelection) {
+        List<String> parts = new ArrayList<>();
+        parts.add(executionAgentSelection.provider().displayName());
+        if (hasText(executionAgentSelection.modelId())) {
+            parts.add("Model " + executionAgentSelection.modelId());
+        } else {
+            parts.add("Model CLI default");
+        }
+        if (hasText(executionAgentSelection.thinkingLevel())) {
+            parts.add("Thinking " + executionAgentSelection.thinkingLevel());
+        }
+        return String.join(" | ", parts);
+    }
+
+    private String agentSelectionDetail(ExecutionAgentSelection executionAgentSelection,
+                                        StageConfigurationContext stageConfigurationContext) {
+        String reasoningDetail = hasText(executionAgentSelection.thinkingLevel())
+                ? "Thinking level " + executionAgentSelection.thinkingLevel() + " will be passed to --reasoning-effort."
+                : "Thinking level will use the CLI default.";
+        if (executionAgentSelection.provider() == ExecutionAgentProvider.GITHUB_COPILOT) {
+            return joinMessageParts(
+                    "GitHub Copilot uses raw output only.",
+                    reasoningDetail
+            );
+        }
+        String statusText = stageStatusLabel(stageConfigurationContext).getText();
+        return hasText(statusText)
+                ? joinMessageParts(statusText, reasoningDetail)
+                : joinMessageParts("Codex structured output is enabled by default when runs start.", reasoningDetail);
     }
 
     private void setPrdInterviewDraftState(String message) {
@@ -4300,20 +4659,31 @@ public class AppShellController {
         }
     }
 
-    private record ExecutionModelChoice(String modelId, String label) {
+    private record ExecutionModelChoice(String modelId, String label, List<String> thinkingLevels) {
         private static ExecutionModelChoice cliDefault() {
-            return new ExecutionModelChoice("", "CLI Default");
+            return new ExecutionModelChoice("", "CLI Default", List.of());
         }
 
         private static ExecutionModelChoice fromModelOption(ExecutionAgentModelCatalogService.ModelOption modelOption) {
             String displayLabel = hasText(modelOption.displayName())
                     ? modelOption.displayName() + " (" + modelOption.modelId() + ")"
                     : modelOption.modelId();
-            return new ExecutionModelChoice(modelOption.modelId(), displayLabel);
+            return new ExecutionModelChoice(modelOption.modelId(), displayLabel, modelOption.thinkingLevels());
         }
 
         private static boolean hasText(String value) {
             return value != null && !value.isBlank();
+        }
+    }
+
+    private record ThinkingLevelChoice(String value, String label) {
+        private static ThinkingLevelChoice cliDefault() {
+            return new ThinkingLevelChoice("", "CLI Default");
+        }
+
+        private static ThinkingLevelChoice of(String value) {
+            String normalizedValue = value == null ? "" : value.trim().toLowerCase();
+            return new ThinkingLevelChoice(normalizedValue, normalizedValue);
         }
     }
 
@@ -4346,6 +4716,11 @@ public class AppShellController {
         private StructuredCommandOutputViewState withScrollPosition(ScrollPositionState replacementScrollPosition) {
             return new StructuredCommandOutputViewState(expanded, replacementScrollPosition);
         }
+    }
+
+    private enum StageConfigurationContext {
+        EXECUTION,
+        PLANNING
     }
 
     private enum RunOutputView {
@@ -4411,6 +4786,7 @@ public class AppShellController {
 
     private record RunOutputPresentationState(boolean available,
                                               boolean active,
+                                              ExecutionAgentProvider provider,
                                               String summary,
                                               String detail,
                                               String assistantSummary,
@@ -4419,6 +4795,7 @@ public class AppShellController {
             return new RunOutputPresentationState(
                     false,
                     false,
+                    ExecutionAgentProvider.CODEX,
                     NO_PERSISTED_RUN_OUTPUT_SUMMARY,
                     NO_PERSISTED_RUN_OUTPUT_DETAIL,
                     "",
@@ -4426,17 +4803,27 @@ public class AppShellController {
             );
         }
 
-        private static RunOutputPresentationState live(String summary,
+        private static RunOutputPresentationState live(ExecutionAgentProvider provider,
+                                                       String summary,
                                                        String detail,
                                                        String assistantSummary,
                                                        String rawOutput) {
-            return new RunOutputPresentationState(true, true, summary, detail, assistantSummary, rawOutput);
+            return new RunOutputPresentationState(
+                    true,
+                    true,
+                    provider == null ? ExecutionAgentProvider.CODEX : provider,
+                    summary,
+                    detail,
+                    assistantSummary,
+                    rawOutput
+            );
         }
 
         private RunOutputPresentationState withRawOutput(String replacementRawOutput) {
             return new RunOutputPresentationState(
                     available,
                     active,
+                    provider,
                     summary,
                     detail,
                     assistantSummary,

@@ -14,39 +14,71 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class ExecutionAgentModelCatalogService {
-    private static final long CODEX_MODEL_DISCOVERY_TIMEOUT_MILLIS = 4_000L;
+    private static final long CODEX_MODEL_DISCOVERY_TIMEOUT_MILLIS = 12_000L;
+    private static final Pattern MODEL_TOKEN_PATTERN = Pattern.compile(
+            "\\b(?:gpt(?:-[a-z0-9.]+)+|claude(?:-[a-z0-9.]+)+|gemini(?:-[a-z0-9.]+)+|o[1-9](?:-[a-z0-9.]+)*)\\b",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern QUOTED_CHOICE_PATTERN = Pattern.compile("\"([^\"]+)\"");
+    private static final List<String> DEFAULT_THINKING_LEVELS = List.of("low", "medium", "high", "xhigh");
 
     private final String codexCommand;
+    private final String copilotCommand;
     private final boolean stubModelCatalog;
     private final AppServerProcessLauncher appServerProcessLauncher;
+    private final TextCommandExecutor textCommandExecutor;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     public ExecutionAgentModelCatalogService(
             @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}") String codexCommand,
+            @Value("${ralphy.copilot.command:" + CopilotCliSupport.DEFAULT_COMMAND + "}") String copilotCommand,
             @Value("${ralphy.execution.model.catalog.stub:false}") boolean stubModelCatalog) {
-        this(codexCommand, stubModelCatalog, new SystemAppServerProcessLauncher());
+        this(codexCommand, copilotCommand, stubModelCatalog,
+                new SystemAppServerProcessLauncher(), new SystemTextCommandExecutor());
     }
 
     ExecutionAgentModelCatalogService(String codexCommand, AppServerProcessLauncher appServerProcessLauncher) {
-        this(codexCommand, false, appServerProcessLauncher);
+        this(codexCommand, CopilotCliSupport.DEFAULT_COMMAND, false,
+                appServerProcessLauncher, new SystemTextCommandExecutor());
     }
 
     ExecutionAgentModelCatalogService(String codexCommand,
-                                     boolean stubModelCatalog,
-                                     AppServerProcessLauncher appServerProcessLauncher) {
+                                      boolean stubModelCatalog,
+                                      AppServerProcessLauncher appServerProcessLauncher) {
+        this(codexCommand, CopilotCliSupport.DEFAULT_COMMAND, stubModelCatalog,
+                appServerProcessLauncher, new SystemTextCommandExecutor());
+    }
+
+    ExecutionAgentModelCatalogService(String codexCommand,
+                                      String copilotCommand,
+                                      AppServerProcessLauncher appServerProcessLauncher,
+                                      TextCommandExecutor textCommandExecutor) {
+        this(codexCommand, copilotCommand, false, appServerProcessLauncher, textCommandExecutor);
+    }
+
+    ExecutionAgentModelCatalogService(String codexCommand,
+                                      String copilotCommand,
+                                      boolean stubModelCatalog,
+                                      AppServerProcessLauncher appServerProcessLauncher,
+                                      TextCommandExecutor textCommandExecutor) {
         this.codexCommand = Objects.requireNonNull(codexCommand, "codexCommand must not be null");
+        this.copilotCommand = Objects.requireNonNull(copilotCommand, "copilotCommand must not be null");
         this.stubModelCatalog = stubModelCatalog;
         this.appServerProcessLauncher = Objects.requireNonNull(
                 appServerProcessLauncher,
                 "appServerProcessLauncher must not be null"
         );
+        this.textCommandExecutor = Objects.requireNonNull(textCommandExecutor, "textCommandExecutor must not be null");
     }
 
     public List<ProviderSupport> providers() {
@@ -69,31 +101,35 @@ public class ExecutionAgentModelCatalogService {
     public ModelCatalog modelsFor(ExecutionAgentProvider provider) {
         Objects.requireNonNull(provider, "provider must not be null");
 
-        if (provider != ExecutionAgentProvider.CODEX) {
+        if (stubModelCatalog && provider.executionSupported()) {
             return new ModelCatalog(
                     provider,
-                    List.of(),
-                    false,
-                    provider.displayName() + " model discovery is not implemented yet."
+                    provider == ExecutionAgentProvider.GITHUB_COPILOT ? COPILOT_STUB_MODEL_OPTIONS : STUB_MODEL_OPTIONS,
+                    true,
+                    "Loaded stub model catalog for " + provider.displayName() + "."
             );
         }
 
         try {
-            List<ModelOption> modelOptions = requestCodexModels();
+            List<ModelOption> modelOptions = switch (provider) {
+                case CODEX -> requestCodexModels();
+                case GITHUB_COPILOT -> requestCopilotModels();
+                default -> List.of();
+            };
             return new ModelCatalog(
                     provider,
                     modelOptions,
-                    true,
+                    provider.executionSupported(),
                     modelOptions.isEmpty()
-                            ? "No models were returned. Codex CLI default model will be used."
-                            : "Loaded " + modelOptions.size() + " model options from Codex."
+                            ? emptyModelMessage(provider)
+                            : "Loaded " + modelOptions.size() + " model options from " + provider.displayName() + "."
             );
         } catch (IOException exception) {
             return new ModelCatalog(
                     provider,
                     List.of(),
                     false,
-                    "Unable to load Codex models dynamically: " + exception.getMessage()
+                    "Unable to load " + provider.displayName() + " models dynamically: " + exception.getMessage()
             );
         }
     }
@@ -104,10 +140,6 @@ public class ExecutionAgentModelCatalogService {
                 System.getenv(),
                 List.of("app-server", "--listen", "stdio://")
         );
-        if (stubModelCatalog) {
-            return STUB_MODEL_OPTIONS;
-        }
-
         try (AppServerProcess appServerProcess = appServerProcessLauncher.start(command)) {
             BufferedWriter stdinWriter = appServerProcess.stdinWriter();
             stdinWriter.write("""
@@ -146,6 +178,17 @@ public class ExecutionAgentModelCatalogService {
         }
     }
 
+    private List<ModelOption> requestCopilotModels() throws IOException {
+        CommandOutput commandOutput = textCommandExecutor.execute(
+                CopilotCliSupport.buildNativeCommand(copilotCommand, System.getenv(), List.of("--no-color", "help")),
+                CODEX_MODEL_DISCOVERY_TIMEOUT_MILLIS
+        );
+        if (!commandOutput.successful()) {
+            throw new IOException(firstPopulated(commandOutput.stderr(), commandOutput.stdout()));
+        }
+        return parseCopilotModelHelp(firstPopulated(commandOutput.stdout(), commandOutput.stderr()));
+    }
+
     private List<ModelOption> parseModelListResponseLine(String line) {
         List<ModelOption> models = new ArrayList<>();
         String trimmedLine = line == null ? "" : line.trim();
@@ -181,13 +224,134 @@ public class ExecutionAgentModelCatalogService {
                     firstPopulated(modelNode.path("displayName").asText(""), model),
                     modelNode.path("description").asText(""),
                     modelNode.path("isDefault").asBoolean(false),
-                    modelNode.path("hidden").asBoolean(false)
+                    modelNode.path("hidden").asBoolean(false),
+                    thinkingLevelsForCodexModel(modelNode)
             ));
         }
         return models.stream()
                 .sorted(Comparator.comparing(ModelOption::defaultModel).reversed()
                         .thenComparing(ModelOption::displayName))
                 .toList();
+    }
+
+    private List<ModelOption> parseCopilotModelHelp(String helpText) {
+        if (!hasText(helpText)) {
+            return List.of();
+        }
+
+        List<String> thinkingLevels = parseOptionChoices(helpText, "--reasoning-effort <level>");
+        List<String> quotedModelChoices = parseOptionChoices(helpText, "--model <model>");
+        if (!quotedModelChoices.isEmpty()) {
+            List<String> supportedThinkingLevels = normalizeThinkingLevels(thinkingLevels);
+            List<ModelOption> modelOptions = new ArrayList<>();
+            for (int index = 0; index < quotedModelChoices.size(); index++) {
+                String modelId = quotedModelChoices.get(index);
+                modelOptions.add(new ModelOption(
+                        modelId,
+                        modelId,
+                        "",
+                        index == 0,
+                        false,
+                        supportedThinkingLevels
+                ));
+            }
+            return modelOptions;
+        }
+
+        LinkedHashSet<String> models = new LinkedHashSet<>();
+        String defaultModel = "";
+        for (String line : helpText.lines().toList()) {
+            Matcher matcher = MODEL_TOKEN_PATTERN.matcher(line);
+            List<String> lineModels = new ArrayList<>();
+            while (matcher.find()) {
+                lineModels.add(matcher.group().toLowerCase());
+            }
+            if (lineModels.isEmpty()) {
+                continue;
+            }
+            models.addAll(lineModels);
+            if (!hasText(defaultModel) && line.toLowerCase().contains("default")) {
+                defaultModel = lineModels.getFirst();
+            }
+        }
+
+        String detectedDefaultModel = defaultModel;
+        List<String> supportedThinkingLevels = normalizeThinkingLevels(thinkingLevels);
+        return models.stream()
+                .map(modelId -> new ModelOption(
+                        modelId,
+                        modelId,
+                        "",
+                        modelId.equals(detectedDefaultModel),
+                        false,
+                        supportedThinkingLevels
+                ))
+                .sorted(Comparator.comparing(ModelOption::defaultModel).reversed()
+                        .thenComparing(ModelOption::displayName))
+                .toList();
+    }
+
+    private List<String> parseOptionChoices(String helpText, String optionSignature) {
+        List<String> choices = new ArrayList<>();
+        boolean capturing = false;
+        StringBuilder capturedBlock = new StringBuilder();
+        for (String line : helpText.lines().toList()) {
+            String normalizedLine = line == null ? "" : line;
+            if (!capturing && normalizedLine.contains(optionSignature)) {
+                capturing = true;
+            }
+            if (!capturing) {
+                continue;
+            }
+            capturedBlock.append(normalizedLine.trim()).append(' ');
+            if (normalizedLine.contains(")")) {
+                Matcher matcher = QUOTED_CHOICE_PATTERN.matcher(capturedBlock.toString());
+                while (matcher.find()) {
+                    choices.add(matcher.group(1).trim());
+                }
+                return choices.stream().filter(this::hasText).distinct().toList();
+            }
+        }
+        return List.of();
+    }
+
+    private List<String> thinkingLevelsForCodexModel(JsonNode modelNode) {
+        List<String> explicitLevels = new ArrayList<>();
+        collectTextArray(explicitLevels, modelNode.path("reasoningEfforts"));
+        collectTextArray(explicitLevels, modelNode.path("thinkingLevels"));
+        collectTextArray(explicitLevels, modelNode.path("capabilities").path("reasoningEfforts"));
+        collectTextArray(explicitLevels, modelNode.path("capabilities").path("thinkingLevels"));
+        return normalizeThinkingLevels(explicitLevels);
+    }
+
+    private void collectTextArray(List<String> values, JsonNode arrayNode) {
+        if (!arrayNode.isArray()) {
+            return;
+        }
+        for (JsonNode valueNode : arrayNode) {
+            String value = valueNode.asText("");
+            if (hasText(value)) {
+                values.add(value.trim().toLowerCase());
+            }
+        }
+    }
+
+    private List<String> normalizeThinkingLevels(List<String> thinkingLevels) {
+        List<String> sourceLevels = thinkingLevels == null || thinkingLevels.isEmpty()
+                ? DEFAULT_THINKING_LEVELS
+                : thinkingLevels;
+        return sourceLevels.stream()
+                .filter(this::hasText)
+                .map(level -> level.trim().toLowerCase())
+                .distinct()
+                .toList();
+    }
+
+    private String emptyModelMessage(ExecutionAgentProvider provider) {
+        if (!provider.executionSupported()) {
+            return provider.displayName() + " model discovery is not implemented yet.";
+        }
+        return provider.displayName() + " did not report any models. The CLI default model will be used.";
     }
 
     private String firstPopulated(String primary, String fallback) {
@@ -227,20 +391,35 @@ public class ExecutionAgentModelCatalogService {
                               String displayName,
                               String description,
                               boolean defaultModel,
-                              boolean hidden) {
+                              boolean hidden,
+                              List<String> thinkingLevels) {
         public ModelOption {
             if (modelId == null || modelId.isBlank()) {
                 throw new IllegalArgumentException("modelId must not be blank");
             }
             displayName = displayName == null ? modelId : displayName;
             description = description == null ? "" : description;
+            thinkingLevels = List.copyOf(thinkingLevels == null ? DEFAULT_THINKING_LEVELS : thinkingLevels);
         }
     }
 
     private static final List<ModelOption> STUB_MODEL_OPTIONS = List.of(
-            new ModelOption("gpt-5.4", "GPT-5.4", "Frontier model", true, false),
-            new ModelOption("gpt-5.4-mini", "GPT-5.4 Mini", "Fast model", false, false)
+            new ModelOption("gpt-5.4", "GPT-5.4", "Frontier model", true, false, DEFAULT_THINKING_LEVELS),
+            new ModelOption("gpt-5.4-mini", "GPT-5.4 Mini", "Fast model", false, false, DEFAULT_THINKING_LEVELS)
     );
+
+    private static final List<ModelOption> COPILOT_STUB_MODEL_OPTIONS = List.of(
+            new ModelOption("claude-sonnet-4.5", "Claude Sonnet 4.5", "Default Copilot model", true, false,
+                    DEFAULT_THINKING_LEVELS),
+            new ModelOption("gpt-5.4", "GPT-5.4", "OpenAI GPT model", false, false, DEFAULT_THINKING_LEVELS)
+    );
+
+    interface TextCommandExecutor {
+        CommandOutput execute(List<String> command, long timeoutMillis) throws IOException;
+    }
+
+    record CommandOutput(boolean successful, String stdout, String stderr) {
+    }
 
     interface AppServerProcess extends AutoCloseable {
         BufferedWriter stdinWriter();
@@ -314,6 +493,53 @@ public class ExecutionAgentModelCatalogService {
             }
             if (process.isAlive()) {
                 process.destroyForcibly();
+            }
+        }
+    }
+
+    private static final class SystemTextCommandExecutor implements TextCommandExecutor {
+        @Override
+        public CommandOutput execute(List<String> command, long timeoutMillis) throws IOException {
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            CodexCliSupport.prependNativePathEntries(processBuilder.environment());
+            Process process = processBuilder.start();
+            try {
+                try {
+                    process.getOutputStream().close();
+                } catch (IOException ignored) {
+                    // The command does not need stdin for discovery.
+                }
+                java.util.concurrent.CompletableFuture<String> stdoutFuture = java.util.concurrent.CompletableFuture
+                        .supplyAsync(() -> readAll(process.getInputStream()));
+                java.util.concurrent.CompletableFuture<String> stderrFuture = java.util.concurrent.CompletableFuture
+                        .supplyAsync(() -> readAll(process.getErrorStream()));
+                boolean completed = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS);
+                if (!completed) {
+                    process.destroyForcibly();
+                    process.waitFor(2, TimeUnit.SECONDS);
+                    throw new IOException("Timed out while waiting for command output.");
+                }
+                String stdout;
+                String stderr;
+                try {
+                    stdout = stdoutFuture.join();
+                    stderr = stderrFuture.join();
+                } catch (java.util.concurrent.CompletionException exception) {
+                    Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+                    throw new IOException("Unable to read command output.", cause);
+                }
+                return new CommandOutput(process.exitValue() == 0, stdout, stderr);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for command output.", exception);
+            }
+        }
+
+        private String readAll(java.io.InputStream inputStream) {
+            try (java.io.InputStream stream = inputStream) {
+                return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException exception) {
+                throw new java.io.UncheckedIOException(exception);
             }
         }
     }

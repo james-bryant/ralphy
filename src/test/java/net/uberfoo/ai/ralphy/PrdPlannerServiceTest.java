@@ -156,7 +156,7 @@ class PrdPlannerServiceTest {
     }
 
     @Test
-    void continueConversationIncludesSelectedPlannerModelInCodexCommand() throws IOException {
+    void continueConversationIncludesSelectedPlannerModelAndThinkingInCodexCommand() throws IOException {
         ActiveProject activeProject = new ActiveProject(createRepository("planner-model-repo"));
         AtomicReference<CodexLauncherService.CodexLaunchPlan> executedPlan = new AtomicReference<>();
         PrdPlannerService plannerService = new PrdPlannerService(
@@ -180,16 +180,77 @@ class PrdPlannerServiceTest {
                 ExecutionProfile.nativePowerShell(),
                 PrdPlanningSession.empty(),
                 "Plan PRD updates.",
-                "gpt-5.4-mini",
+                new ExecutionAgentSelection(ExecutionAgentProvider.CODEX, "gpt-5.4-mini", "high"),
                 CodexLauncherService.RunOutputListener.noop()
         );
 
         assertTrue(result.successful());
+        assertTrue(executedPlan.get().command().contains("--json"));
         assertTrue(executedPlan.get().command().contains("--model"));
         assertTrue(executedPlan.get().command().contains("gpt-5.4-mini"));
+        assertTrue(executedPlan.get().command().contains("--reasoning-effort"));
+        assertTrue(executedPlan.get().command().contains("high"));
+    }
+
+    @Test
+    void continueConversationSupportsCopilotProviderModelAndThinkingSelection() throws IOException {
+        ActiveProject activeProject = new ActiveProject(createRepository("planner-copilot-repo"));
+        AtomicReference<CodexLauncherService.CodexLaunchPlan> executedPlan = new AtomicReference<>();
+        PrdPlannerService plannerService = new PrdPlannerService(
+                createLauncherService(),
+                new PresetCatalogService(),
+                (launchPlan, runOutputListener) -> {
+                    executedPlan.set(launchPlan);
+                    return PrdPlannerService.PlannerExecution.completed(46L, 0, "1. Clarify the target users.", "");
+                }
+        );
+
+        PrdPlannerService.PlannerTurnResult result = plannerService.continueConversation(
+                activeProject,
+                ExecutionProfile.nativePowerShell(),
+                PrdPlanningSession.empty(),
+                "Plan PRD updates with Copilot.",
+                new ExecutionAgentSelection(ExecutionAgentProvider.GITHUB_COPILOT, "gpt-5.4", "high"),
+                CodexLauncherService.RunOutputListener.noop()
+        );
+
+        assertTrue(result.successful());
+        assertEquals("1. Clarify the target users.", result.assistantMessage());
+        assertTrue(executedPlan.get().command().contains("-sp"));
+        assertTrue(executedPlan.get().command().contains("--no-ask-user"));
+        assertTrue(executedPlan.get().command().contains("--model"));
+        assertTrue(executedPlan.get().command().contains("gpt-5.4"));
+        assertTrue(executedPlan.get().command().contains("--reasoning-effort"));
+        assertTrue(executedPlan.get().command().contains("high"));
+    }
+
+    @Test
+    void continueConversationReadsAssistantMessagesFromTheFakeCodexCliProcess() throws IOException {
+        ActiveProject activeProject = new ActiveProject(createRepository("planner-fake-cli-repo"));
+        Path fakeCodexCommand = createFakeCodexCommandScript();
+        PrdPlannerService plannerService = new PrdPlannerService(
+                createLauncherService(fakeCodexCommand.toAbsolutePath().normalize().toString()),
+                new PresetCatalogService()
+        );
+
+        PrdPlannerService.PlannerTurnResult result = plannerService.continueConversation(
+                activeProject,
+                ExecutionProfile.nativePowerShell(),
+                PrdPlanningSession.empty(),
+                "Plan a structured output view.",
+                CodexLauncherService.RunOutputListener.noop()
+        );
+
+        assertTrue(result.successful());
+        assertTrue(result.assistantMessage().contains("Completed story."));
+        assertEquals(2, result.session().messages().size());
     }
 
     private CodexLauncherService createLauncherService() {
+        return createLauncherService("C:\\tools\\codex.cmd");
+    }
+
+    private CodexLauncherService createLauncherService(String codexCommand) {
         return new CodexLauncherService(
                 LocalMetadataStorage.forTest(tempDir.resolve("local-storage")),
                 Clock.fixed(Instant.parse("2026-03-16T18:00:00Z"), ZoneOffset.UTC),
@@ -197,9 +258,23 @@ class PrdPlannerServiceTest {
                 launchPlan -> {
                     throw new AssertionError("PrdPlannerService should use its own executor for process execution.");
                 },
-                "C:\\tools\\codex.cmd",
+                codexCommand,
                 distribution -> "/bin/bash"
         );
+    }
+
+    private Path createFakeCodexCommandScript() throws IOException {
+        Path commandPath = tempDir.resolve("fake-codex.cmd");
+        Files.writeString(commandPath, """
+                @echo off
+                if "%~1"=="--version" (
+                    echo codex-cli 0.114.0
+                    exit /b 0
+                )
+                powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
+                exit /b 0
+                """);
+        return commandPath;
     }
 
     private Path createRepository(String name) throws IOException {

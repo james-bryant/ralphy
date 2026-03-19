@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CodexLauncherServiceTest {
     private static final String TEST_NATIVE_CODEX_COMMAND = "C:\\tools\\codex.cmd";
+    private static final String TEST_NATIVE_COPILOT_COMMAND = "C:\\tools\\copilot.cmd";
     private final PresetCatalogService presetCatalogService = new PresetCatalogService();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,6 +74,66 @@ class CodexLauncherServiceTest {
     }
 
     @Test
+    void buildLaunchCreatesNativeCodexCommandWithModelAndThinkingOptions() throws IOException {
+        ActiveProject activeProject = new ActiveProject(createGitRepository("native-codex-thinking-repo"));
+        CodexLauncherService launcherService = createLauncherService(plan -> {
+            throw new AssertionError("buildLaunch should not execute the process");
+        });
+
+        CodexLauncherService.CodexLaunchPlan launchPlan = launcherService.buildLaunch(new CodexLauncherService.CodexLaunchRequest(
+                "US-026",
+                activeProject,
+                ExecutionProfile.nativePowerShell(),
+                presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
+                List.of(new CodexLauncherService.PromptInput("Story", "US-026: Add Codex reasoning selection")),
+                "Use Codex with an explicit reasoning level.",
+                new ExecutionAgentSelection(ExecutionAgentProvider.CODEX, "gpt-5.4", "high"),
+                List.of("--json", "--model", "gpt-5.4", "--reasoning-effort", "high"),
+                "ralph/codex-reasoning",
+                "CREATED"
+        ));
+
+        assertEquals(List.of(
+                TEST_NATIVE_CODEX_COMMAND,
+                "exec",
+                "--json",
+                "--model",
+                "gpt-5.4",
+                "--reasoning-effort",
+                "high",
+                "-"
+        ), launchPlan.command());
+        assertEquals(ExecutionAgentProvider.CODEX, launchPlan.agentSelection().provider());
+    }
+
+    @Test
+    void buildLaunchCreatesNativeLinuxCommandWhenRunningOnLinux() throws IOException {
+        ActiveProject activeProject = new ActiveProject(createGitRepository("linux-native-launch-repo"));
+        CodexLauncherService launcherService = createLauncherService(
+                plan -> {
+                    throw new AssertionError("buildLaunch should not execute the process");
+                },
+                HostOperatingSystem.LINUX,
+                "codex",
+                "copilot"
+        );
+
+        CodexLauncherService.CodexLaunchPlan launchPlan = launcherService.buildLaunch(new CodexLauncherService.CodexLaunchRequest(
+                "US-027",
+                activeProject,
+                ExecutionProfile.nativeHost(),
+                presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
+                List.of(new CodexLauncherService.PromptInput("Story", "US-027: Run natively on Linux")),
+                "",
+                List.of("--json")
+        ));
+
+        assertEquals(List.of("codex", "exec", "--json", "-"), launchPlan.command());
+        assertEquals(activeProject.repositoryPath(), launchPlan.processWorkingDirectory());
+        assertEquals(activeProject.repositoryPath().toString(), launchPlan.executionWorkingDirectory());
+    }
+
+    @Test
     void buildLaunchCreatesWslCommandWithMappedRepositoryPath() throws IOException {
         Path workspaceRoot = Files.createDirectories(tempDir.resolve("workspace-root"));
         ActiveProject activeProject = new ActiveProject(createGitRepository(workspaceRoot, "wsl-launch-repo"));
@@ -117,6 +178,85 @@ class CodexLauncherServiceTest {
         assertEquals("ralph/task-sync-plan", launchPlan.branchName());
         assertEquals("SWITCHED", launchPlan.branchAction());
         assertTrue(launchPlan.promptText().contains("- Story: US-025"));
+    }
+
+    @Test
+    void buildLaunchCreatesNativeCopilotCommandWithPromptModelAndThinkingOptions() throws IOException {
+        ActiveProject activeProject = new ActiveProject(createGitRepository("copilot-native-launch-repo"));
+        CodexLauncherService launcherService = createLauncherService(plan -> {
+            throw new AssertionError("buildLaunch should not execute the process");
+        });
+
+        CodexLauncherService.CodexLaunchPlan launchPlan = launcherService.buildLaunch(new CodexLauncherService.CodexLaunchRequest(
+                "US-030",
+                activeProject,
+                ExecutionProfile.nativePowerShell(),
+                presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
+                List.of(new CodexLauncherService.PromptInput("Story", "US-030: Add Copilot execution")),
+                "Use GitHub Copilot for execution.",
+                new ExecutionAgentSelection(ExecutionAgentProvider.GITHUB_COPILOT, "gpt-5.4", "high"),
+                List.of("--model", "gpt-5.4", "--reasoning-effort", "high"),
+                "ralph/copilot-support",
+                "CREATED"
+        ));
+
+        assertEquals(List.of(
+                TEST_NATIVE_COPILOT_COMMAND,
+                "-sp",
+                launchPlan.promptText(),
+                "--no-ask-user",
+                "--allow-all-tools",
+                "--model",
+                "gpt-5.4",
+                "--reasoning-effort",
+                "high"
+        ), launchPlan.command());
+        assertEquals(ExecutionAgentProvider.GITHUB_COPILOT, launchPlan.agentSelection().provider());
+    }
+
+    @Test
+    void buildLaunchCreatesWslCopilotCommand() throws IOException {
+        Path workspaceRoot = Files.createDirectories(tempDir.resolve("copilot-workspace-root"));
+        ActiveProject activeProject = new ActiveProject(createGitRepository(workspaceRoot, "copilot-wsl-launch-repo"));
+        CodexLauncherService launcherService = createLauncherService(plan -> {
+            throw new AssertionError("buildLaunch should not execute the process");
+        });
+
+        CodexLauncherService.CodexLaunchPlan launchPlan = launcherService.buildLaunch(new CodexLauncherService.CodexLaunchRequest(
+                "US-031",
+                activeProject,
+                new ExecutionProfile(
+                        ExecutionProfile.ProfileType.WSL,
+                        "Ubuntu-24.04",
+                        workspaceRoot.toString(),
+                        "/mnt/c/copilot-workspace-root"
+                ),
+                presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
+                List.of(new CodexLauncherService.PromptInput("Story", "US-031")),
+                "Use GitHub Copilot from WSL.",
+                new ExecutionAgentSelection(ExecutionAgentProvider.GITHUB_COPILOT, "claude-sonnet-4.5", "medium"),
+                List.of("--model", "claude-sonnet-4.5", "--reasoning-effort", "medium"),
+                "ralph/copilot-support",
+                "SWITCHED"
+        ));
+
+        assertEquals(List.of(
+                "wsl.exe",
+                "--distribution",
+                "Ubuntu-24.04",
+                "--cd",
+                "/mnt/c/copilot-workspace-root/copilot-wsl-launch-repo",
+                "--exec",
+                "/bin/zsh",
+                "-ic"
+        ), launchPlan.command().subList(0, 8));
+        String wslScript = launchPlan.command().get(8);
+        assertTrue(wslScript.contains("GitHub Copilot CLI"));
+        assertTrue(wslScript.contains("-sp"));
+        assertTrue(wslScript.contains("--no-ask-user"));
+        assertTrue(wslScript.contains("--reasoning-effort"));
+        assertNull(launchPlan.processWorkingDirectory());
+        assertEquals(ExecutionAgentProvider.GITHUB_COPILOT, launchPlan.agentSelection().provider());
     }
 
     @Test
@@ -196,7 +336,7 @@ class CodexLauncherServiceTest {
         assertEquals("run-789", summaryArtifact.path("runId").asText());
         assertEquals("US-025", summaryArtifact.path("storyId").asText());
         assertEquals("SUCCEEDED", summaryArtifact.path("status").asText());
-        assertEquals("POWERSHELL", summaryArtifact.path("profileType").asText());
+        assertEquals("NATIVE", summaryArtifact.path("profileType").asText());
         assertEquals(0, summaryArtifact.path("exitCode").asInt());
         assertEquals("ralph/task-sync-plan", summaryArtifact.path("branchName").asText());
         assertEquals("CREATED", summaryArtifact.path("branchAction").asText());
@@ -214,7 +354,7 @@ class CodexLauncherServiceTest {
         assertEquals("run-789", persistedRunMetadata.runId());
         assertEquals("US-025", persistedRunMetadata.storyId());
         assertEquals("SUCCEEDED", persistedRunMetadata.status());
-        assertEquals("POWERSHELL", persistedRunMetadata.profileType());
+        assertEquals("NATIVE", persistedRunMetadata.profileType());
         assertEquals(activeProject.repositoryPath().toString(), persistedRunMetadata.workingDirectory());
         assertEquals(Long.valueOf(4321L), persistedRunMetadata.processId());
         assertEquals(Integer.valueOf(0), persistedRunMetadata.exitCode());
@@ -455,13 +595,27 @@ class CodexLauncherServiceTest {
     }
 
     private CodexLauncherService createLauncherService(CodexLauncherService.ProcessExecutor processExecutor) {
+        return createLauncherService(
+                processExecutor,
+                HostOperatingSystem.WINDOWS,
+                TEST_NATIVE_CODEX_COMMAND,
+                TEST_NATIVE_COPILOT_COMMAND
+        );
+    }
+
+    private CodexLauncherService createLauncherService(CodexLauncherService.ProcessExecutor processExecutor,
+                                                       HostOperatingSystem hostOperatingSystem,
+                                                       String codexCommand,
+                                                       String copilotCommand) {
         return new CodexLauncherService(
                 LocalMetadataStorage.forTest(tempDir.resolve("unused-storage")),
                 Clock.fixed(Instant.parse("2026-03-15T21:00:00Z"), ZoneOffset.UTC),
                 () -> "run-123",
                 processExecutor,
-                TEST_NATIVE_CODEX_COMMAND,
-                distribution -> "/bin/zsh"
+                codexCommand,
+                copilotCommand,
+                distribution -> "/bin/zsh",
+                hostOperatingSystem
         );
     }
 

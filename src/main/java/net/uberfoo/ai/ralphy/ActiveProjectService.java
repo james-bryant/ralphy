@@ -30,6 +30,7 @@ public class ActiveProjectService {
     private final GitFeatureBranchService gitFeatureBranchService;
     private final GitRepositoryInitializer gitRepositoryInitializer;
     private final LocalMetadataStorage localMetadataStorage;
+    private final UserPreferencesSettingsService userPreferencesSettingsService;
     private final NativeWindowsPreflightService nativeWindowsPreflightService;
     private final PresetCatalogService presetCatalogService;
     private final PrdStructureValidator prdStructureValidator;
@@ -41,6 +42,7 @@ public class ActiveProjectService {
     private final ProjectStorageInitializer projectStorageInitializer;
     private final WslPreflightService wslPreflightService;
     private final CodexLauncherService codexLauncherService;
+    private final HostOperatingSystem hostOperatingSystem;
     private final boolean autoRunNativeWindowsPreflight;
     private final boolean autoRunWslPreflight;
     private final Object storySessionLock = new Object();
@@ -61,6 +63,7 @@ public class ActiveProjectService {
                                 ProjectMetadataInitializer projectMetadataInitializer,
                                 ProjectStorageInitializer projectStorageInitializer,
                                 LocalMetadataStorage localMetadataStorage,
+                                UserPreferencesSettingsService userPreferencesSettingsService,
                                 NativeWindowsPreflightService nativeWindowsPreflightService,
                                 PrdStructureValidator prdStructureValidator,
                                 PrdTaskStateStore prdTaskStateStore,
@@ -77,6 +80,7 @@ public class ActiveProjectService {
         this.projectMetadataInitializer = projectMetadataInitializer;
         this.projectStorageInitializer = projectStorageInitializer;
         this.localMetadataStorage = localMetadataStorage;
+        this.userPreferencesSettingsService = userPreferencesSettingsService;
         this.nativeWindowsPreflightService = nativeWindowsPreflightService;
         this.prdStructureValidator = prdStructureValidator;
         this.prdTaskStateStore = prdTaskStateStore;
@@ -86,6 +90,7 @@ public class ActiveProjectService {
         this.presetCatalogService = presetCatalogService;
         this.codexLauncherService = codexLauncherService;
         this.wslPreflightService = wslPreflightService;
+        this.hostOperatingSystem = HostOperatingSystem.detectRuntime();
         this.autoRunNativeWindowsPreflight = autoRunNativeWindowsPreflight;
         this.autoRunWslPreflight = autoRunWslPreflight;
         this.localMetadataStorage.startSession();
@@ -97,6 +102,7 @@ public class ActiveProjectService {
                          ProjectMetadataInitializer projectMetadataInitializer,
                          ProjectStorageInitializer projectStorageInitializer,
                          LocalMetadataStorage localMetadataStorage,
+                         UserPreferencesSettingsService userPreferencesSettingsService,
                          NativeWindowsPreflightService nativeWindowsPreflightService,
                          PrdStructureValidator prdStructureValidator,
                          PrdTaskStateStore prdTaskStateStore,
@@ -112,6 +118,7 @@ public class ActiveProjectService {
                 projectMetadataInitializer,
                 projectStorageInitializer,
                 localMetadataStorage,
+                userPreferencesSettingsService,
                 nativeWindowsPreflightService,
                 prdStructureValidator,
                 prdTaskStateStore,
@@ -121,9 +128,50 @@ public class ActiveProjectService {
                 presetCatalogService,
                 codexLauncherService,
                 wslPreflightService,
+                HostOperatingSystem.detectRuntime(),
                 true,
                 true
         );
+    }
+
+    ActiveProjectService(GitFeatureBranchService gitFeatureBranchService,
+                         GitRepositoryInitializer gitRepositoryInitializer,
+                         ProjectMetadataInitializer projectMetadataInitializer,
+                         ProjectStorageInitializer projectStorageInitializer,
+                         LocalMetadataStorage localMetadataStorage,
+                         UserPreferencesSettingsService userPreferencesSettingsService,
+                         NativeWindowsPreflightService nativeWindowsPreflightService,
+                         PrdStructureValidator prdStructureValidator,
+                         PrdTaskStateStore prdTaskStateStore,
+                         PrdTaskSynchronizer prdTaskSynchronizer,
+                         RalphPrdJsonMapper ralphPrdJsonMapper,
+                         StoryCompletionService storyCompletionService,
+                         PresetCatalogService presetCatalogService,
+                         CodexLauncherService codexLauncherService,
+                         WslPreflightService wslPreflightService,
+                         HostOperatingSystem hostOperatingSystem,
+                         boolean autoRunNativeWindowsPreflight,
+                         boolean autoRunWslPreflight) {
+        this.gitFeatureBranchService = gitFeatureBranchService;
+        this.gitRepositoryInitializer = gitRepositoryInitializer;
+        this.projectMetadataInitializer = projectMetadataInitializer;
+        this.projectStorageInitializer = projectStorageInitializer;
+        this.localMetadataStorage = localMetadataStorage;
+        this.userPreferencesSettingsService = userPreferencesSettingsService;
+        this.nativeWindowsPreflightService = nativeWindowsPreflightService;
+        this.prdStructureValidator = prdStructureValidator;
+        this.prdTaskStateStore = prdTaskStateStore;
+        this.prdTaskSynchronizer = prdTaskSynchronizer;
+        this.ralphPrdJsonMapper = ralphPrdJsonMapper;
+        this.storyCompletionService = storyCompletionService;
+        this.presetCatalogService = presetCatalogService;
+        this.codexLauncherService = codexLauncherService;
+        this.wslPreflightService = wslPreflightService;
+        this.hostOperatingSystem = hostOperatingSystem == null ? HostOperatingSystem.detectRuntime() : hostOperatingSystem;
+        this.autoRunNativeWindowsPreflight = autoRunNativeWindowsPreflight;
+        this.autoRunWslPreflight = autoRunWslPreflight;
+        this.localMetadataStorage.startSession();
+        restoreLastActiveProject();
     }
 
     public synchronized Optional<ActiveProject> activeProject() {
@@ -208,11 +256,7 @@ public class ActiveProjectService {
     }
 
     public synchronized Optional<ExecutionProfile> executionProfile() {
-        if (activeProject == null) {
-            return Optional.empty();
-        }
-
-        return localMetadataStorage.executionProfileForRepository(activeProject.repositoryPath());
+        return Optional.of(userPreferencesSettingsService.executionProfile());
     }
 
     public synchronized Optional<NativeWindowsPreflightReport> latestNativeWindowsPreflightReport() {
@@ -248,6 +292,11 @@ public class ActiveProjectService {
     }
 
     public synchronized SingleStorySessionAvailability singleStorySessionAvailability(PresetUseCase presetUseCase) {
+        return singleStorySessionAvailability(presetUseCase, userPreferencesSettingsService.executionStageSelection());
+    }
+
+    public synchronized SingleStorySessionAvailability singleStorySessionAvailability(PresetUseCase presetUseCase,
+                                                                                      ExecutionAgentSelection executionAgentSelection) {
         if (activeProject == null) {
             return SingleStorySessionAvailability.unavailable(
                     SingleStorySessionState.BLOCKED,
@@ -274,8 +323,10 @@ public class ActiveProjectService {
             );
         }
 
-        SingleStorySessionAvailability preflightAvailability = preflightAvailability(executionProfile()
-                .orElse(ExecutionProfile.nativePowerShell()));
+        SingleStorySessionAvailability preflightAvailability = preflightAvailability(
+                executionProfile().orElse(ExecutionProfile.nativeHost()),
+                executionAgentSelection == null ? userPreferencesSettingsService.executionStageSelection() : executionAgentSelection
+        );
         if (!preflightAvailability.startable()) {
             return preflightAvailability;
         }
@@ -336,7 +387,7 @@ public class ActiveProjectService {
     public SingleStoryStartResult startEligibleSingleStory(PresetUseCase presetUseCase) {
         return startEligibleSingleStory(
                 presetUseCase,
-                ExecutionAgentSelection.codexDefault(),
+                userPreferencesSettingsService.executionStageSelection(),
                 CodexLauncherService.RunOutputListener.noop()
         );
     }
@@ -345,7 +396,7 @@ public class ActiveProjectService {
                                                            CodexLauncherService.RunOutputListener runOutputListener) {
         return startEligibleSingleStory(
                 presetUseCase,
-                ExecutionAgentSelection.codexDefault(),
+                userPreferencesSettingsService.executionStageSelection(),
                 runOutputListener
         );
     }
@@ -354,7 +405,7 @@ public class ActiveProjectService {
                                                            ExecutionAgentSelection executionAgentSelection,
                                                            CodexLauncherService.RunOutputListener runOutputListener) {
         ExecutionAgentSelection resolvedAgentSelection = executionAgentSelection == null
-                ? ExecutionAgentSelection.codexDefault()
+                ? userPreferencesSettingsService.executionStageSelection()
                 : executionAgentSelection;
         if (!resolvedAgentSelection.provider().executionSupported()) {
             return SingleStoryStartResult.failure(
@@ -372,7 +423,7 @@ public class ActiveProjectService {
                 if (!availability.startable()) {
                     return SingleStoryStartResult.failure(availability.summary(), availability.detail());
                 }
-                executionProfile = executionProfile().orElse(ExecutionProfile.nativePowerShell());
+                executionProfile = executionProfile().orElse(ExecutionProfile.nativeHost());
             }
 
             String storyId = availability.story().taskId();
@@ -593,8 +644,19 @@ public class ActiveProjectService {
         );
     }
 
-    private SingleStorySessionAvailability preflightAvailability(ExecutionProfile executionProfile) {
+    private SingleStorySessionAvailability preflightAvailability(ExecutionProfile executionProfile,
+                                                                 ExecutionAgentSelection executionAgentSelection) {
+        ExecutionAgentProvider provider = executionAgentSelection == null
+                ? ExecutionAgentProvider.CODEX
+                : executionAgentSelection.provider();
         if (executionProfile.type() == ExecutionProfile.ProfileType.WSL) {
+            if (!hostOperatingSystem.supportsWslProfiles()) {
+                return SingleStorySessionAvailability.unavailable(
+                        SingleStorySessionState.BLOCKED,
+                        "WSL unavailable",
+                        "WSL execution is only available when Ralphy is running on Windows."
+                );
+            }
             if (latestWslPreflightReport == null) {
                 return SingleStorySessionAvailability.unavailable(
                         SingleStorySessionState.BLOCKED,
@@ -602,11 +664,11 @@ public class ActiveProjectService {
                         "Run WSL preflight before starting a WSL story session."
                 );
             }
-            if (!latestWslPreflightReport.passed()) {
+            if (!wslProviderReady(latestWslPreflightReport, provider)) {
                 return SingleStorySessionAvailability.unavailable(
                         SingleStorySessionState.BLOCKED,
                         "WSL preflight blocked",
-                        "WSL execution stays blocked until every WSL preflight check passes."
+                        providerPreflightBlockDetail(provider, true)
                 );
             }
             return SingleStorySessionAvailability.ready("", "", null, null, List.of());
@@ -616,17 +678,41 @@ public class ActiveProjectService {
             return SingleStorySessionAvailability.unavailable(
                     SingleStorySessionState.BLOCKED,
                     "Native preflight not run",
-                    "Run native preflight before starting a PowerShell story session."
+                    "Run native preflight before starting a " + hostOperatingSystem.nativeExecutionLabel() + " story session."
             );
         }
-        if (!latestNativeWindowsPreflightReport.passed()) {
+        if (!nativeProviderReady(latestNativeWindowsPreflightReport, provider)) {
             return SingleStorySessionAvailability.unavailable(
                     SingleStorySessionState.BLOCKED,
                     "Native preflight blocked",
-                    "Native PowerShell execution stays blocked until every native preflight check passes."
+                    providerPreflightBlockDetail(provider, false)
             );
         }
         return SingleStorySessionAvailability.ready("", "", null, null, List.of());
+    }
+
+    private boolean nativeProviderReady(NativeWindowsPreflightReport report, ExecutionAgentProvider provider) {
+        return report.passed(provider.toolingCheckId())
+                && (!provider.authenticationRequired() || report.passed("codex_auth"))
+                && report.passed("git_ready");
+    }
+
+    private boolean wslProviderReady(WslPreflightReport report, ExecutionAgentProvider provider) {
+        return report.passed("wsl_distribution")
+                && report.passed("path_mapping")
+                && report.passed(provider.toolingCheckId())
+                && (!provider.authenticationRequired() || report.passed("codex_auth"))
+                && report.passed("git_ready");
+    }
+
+    private String providerPreflightBlockDetail(ExecutionAgentProvider provider, boolean wslProfile) {
+        String profileLabel = wslProfile ? "WSL" : hostOperatingSystem.nativeProfileLabel();
+        if (provider.authenticationRequired()) {
+            return profileLabel + " execution stays blocked until " + provider.displayName()
+                    + " is installed, authenticated, and the profile preflight checks pass.";
+        }
+        return profileLabel + " execution stays blocked until " + provider.displayName()
+                + " is installed and the profile preflight checks pass.";
     }
 
     private BuiltInPreset presetForSingleStorySession(PresetUseCase presetUseCase) {
@@ -799,15 +885,6 @@ public class ActiveProjectService {
             ));
         }
 
-        List<String> codexOptions = new ArrayList<>();
-        codexOptions.add("--json");
-        if (executionAgentSelection != null
-                && executionAgentSelection.provider() == ExecutionAgentProvider.CODEX
-                && hasText(executionAgentSelection.modelId())) {
-            codexOptions.add("--model");
-            codexOptions.add(executionAgentSelection.modelId());
-        }
-
         return new CodexLauncherService.CodexLaunchRequest(
                 task.taskId(),
                 activeProject,
@@ -815,7 +892,8 @@ public class ActiveProjectService {
                 preset,
                 promptInputs,
                 "",
-                codexOptions,
+                executionAgentSelection,
+                ExecutionAgentCliOptions.build(executionAgentSelection),
                 branchSelection.branchName(),
                 branchSelection.branchAction()
         );
@@ -833,34 +911,23 @@ public class ActiveProjectService {
 
     public synchronized ExecutionProfileSaveResult saveExecutionProfile(ExecutionProfile executionProfile) {
         Objects.requireNonNull(executionProfile, "executionProfile must not be null");
-        if (activeProject == null) {
-            return ExecutionProfileSaveResult.failure(
-                    "Open or create a repository before saving an execution profile."
-            );
-        }
-
         String validationMessage = validateExecutionProfile(executionProfile);
         if (!validationMessage.isBlank()) {
             return ExecutionProfileSaveResult.failure(validationMessage);
         }
 
-        Optional<LocalMetadataStorage.ProjectRecord> projectRecord =
-                localMetadataStorage.projectRecordForRepository(activeProject.repositoryPath());
-        if (projectRecord.isEmpty()) {
-            return ExecutionProfileSaveResult.failure(
-                    "The active repository is missing local metadata. Reopen the repository and try again."
-            );
-        }
-
-        ExecutionProfile savedProfile =
-                localMetadataStorage.saveExecutionProfile(projectRecord.get().projectId(), executionProfile);
-        if (savedProfile.type() == ExecutionProfile.ProfileType.POWERSHELL) {
-            runNativeWindowsPreflightInternal();
-        } else {
-            clearWslPreflightState();
-            if (autoRunWslPreflight) {
-                runWslPreflightInternal();
+        ExecutionProfile savedProfile = userPreferencesSettingsService.saveExecutionProfile(executionProfile);
+        if (activeProject != null && codexConfiguredForAnyStage()) {
+            if (savedProfile.type() == ExecutionProfile.ProfileType.NATIVE) {
+                runNativeWindowsPreflightInternal();
+            } else {
+                clearWslPreflightState();
+                if (hostOperatingSystem.supportsWslProfiles() && autoRunWslPreflight) {
+                    runWslPreflightInternal();
+                }
             }
+        } else if (savedProfile.type() == ExecutionProfile.ProfileType.NATIVE) {
+            clearWslPreflightState();
         }
         return ExecutionProfileSaveResult.success(savedProfile);
     }
@@ -1135,7 +1202,7 @@ public class ActiveProjectService {
     public synchronized NativeWindowsPreflightRunResult runNativeWindowsPreflight() {
         if (activeProject == null) {
             return NativeWindowsPreflightRunResult.failure(
-                    "Open or create a repository before running native Windows preflight."
+                    "Open or create a repository before running native preflight."
             );
         }
 
@@ -1148,7 +1215,12 @@ public class ActiveProjectService {
                     "Open or create a repository before running WSL preflight."
             );
         }
-        if (executionProfile().orElse(ExecutionProfile.nativePowerShell()).type() != ExecutionProfile.ProfileType.WSL) {
+        if (!hostOperatingSystem.supportsWslProfiles()) {
+            return WslPreflightRunResult.failure(
+                    "WSL preflight is only available when Ralphy is running on Windows."
+            );
+        }
+        if (executionProfile().orElse(ExecutionProfile.nativeHost()).type() != ExecutionProfile.ProfileType.WSL) {
             return WslPreflightRunResult.failure(
                     "Save a WSL execution profile before running WSL preflight."
             );
@@ -1288,10 +1360,13 @@ public class ActiveProjectService {
     private void refreshPreflightState() {
         latestNativeWindowsPreflightReport = readStoredNativeWindowsPreflight().orElse(null);
         latestWslPreflightReport = readStoredWslPreflight().orElse(null);
-        ExecutionProfile executionProfile = executionProfile().orElse(ExecutionProfile.nativePowerShell());
-        if (executionProfile.type() == ExecutionProfile.ProfileType.POWERSHELL && autoRunNativeWindowsPreflight) {
+        if (!codexConfiguredForAnyStage()) {
+            return;
+        }
+        ExecutionProfile executionProfile = executionProfile().orElse(ExecutionProfile.nativeHost());
+        if (executionProfile.type() == ExecutionProfile.ProfileType.NATIVE && autoRunNativeWindowsPreflight) {
             runNativeWindowsPreflightInternal();
-        } else if (autoRunWslPreflight && latestWslPreflightReport == null) {
+        } else if (hostOperatingSystem.supportsWslProfiles() && autoRunWslPreflight && latestWslPreflightReport == null) {
             runWslPreflightInternal();
         }
     }
@@ -1782,7 +1857,7 @@ public class ActiveProjectService {
     private NativeWindowsPreflightRunResult runNativeWindowsPreflightInternal() {
         if (activeProject == null) {
             return NativeWindowsPreflightRunResult.failure(
-                    "Open or create a repository before running native Windows preflight."
+                    "Open or create a repository before running native preflight."
             );
         }
 
@@ -1794,7 +1869,7 @@ public class ActiveProjectService {
         } catch (IOException exception) {
             return NativeWindowsPreflightRunResult.failure(
                     report,
-                    "Unable to store the native Windows preflight result: " + exception.getMessage()
+                    "Unable to store the native preflight result: " + exception.getMessage()
             );
         }
     }
@@ -1839,6 +1914,11 @@ public class ActiveProjectService {
         }
     }
 
+    private boolean codexConfiguredForAnyStage() {
+        return userPreferencesSettingsService.executionStageSelection().provider() == ExecutionAgentProvider.CODEX
+                || userPreferencesSettingsService.planningStageSelection().provider() == ExecutionAgentProvider.CODEX;
+    }
+
     private Optional<RunRecoveryCandidate> toRunRecoveryCandidate(LocalMetadataStorage.RunMetadataRecord runMetadataRecord) {
         RunRecoveryAction recoveryAction = determineRunRecoveryAction(runMetadataRecord);
         if (recoveryAction == null) {
@@ -1870,6 +1950,10 @@ public class ActiveProjectService {
     private String validateExecutionProfile(ExecutionProfile executionProfile) {
         if (executionProfile.type() != ExecutionProfile.ProfileType.WSL) {
             return "";
+        }
+
+        if (!hostOperatingSystem.supportsWslProfiles()) {
+            return "WSL execution profiles are only available when Ralphy is running on Windows.";
         }
 
         if (!hasText(executionProfile.wslDistribution())) {

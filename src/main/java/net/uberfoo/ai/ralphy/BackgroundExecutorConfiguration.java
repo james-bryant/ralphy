@@ -17,4 +17,16 @@ public class BackgroundExecutorConfiguration {
         executor.setAwaitTerminationSeconds(5);
         return executor;
     }
+
+    @Bean(name = "ralphyModelCatalogExecutor")
+    public ThreadPoolTaskExecutor ralphyModelCatalogExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setThreadNamePrefix("ralphy-models-");
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(8);
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(5);
+        return executor;
+    }
 }

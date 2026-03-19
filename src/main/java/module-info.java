@@ -3,6 +3,7 @@ module net.uberfoo.ai.ralphy {
     requires com.fasterxml.jackson.databind;
     requires javafx.controls;
     requires javafx.fxml;
+    requires java.prefs;
 
     requires org.controlsfx.controls;
     requires com.dlsc.formsfx;

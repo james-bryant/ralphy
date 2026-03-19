@@ -22,7 +22,9 @@ class ExecutionAgentModelCatalogServiceTest {
                 """.trim();
         ExecutionAgentModelCatalogService service = new ExecutionAgentModelCatalogService(
                 CodexCliSupport.DEFAULT_COMMAND,
-                command -> new FakeAppServerProcess(stdout)
+                CopilotCliSupport.DEFAULT_COMMAND,
+                command -> new FakeAppServerProcess(stdout),
+                (command, timeoutMillis) -> new ExecutionAgentModelCatalogService.CommandOutput(true, "", "")
         );
 
         ExecutionAgentModelCatalogService.ModelCatalog modelCatalog = service.modelsFor(ExecutionAgentProvider.CODEX);
@@ -34,10 +36,39 @@ class ExecutionAgentModelCatalogServiceTest {
     }
 
     @Test
+    void modelsForCopilotParsesModelsFromHelpOutput() {
+        ExecutionAgentModelCatalogService service = new ExecutionAgentModelCatalogService(
+                CodexCliSupport.DEFAULT_COMMAND,
+                CopilotCliSupport.DEFAULT_COMMAND,
+                command -> new FakeAppServerProcess(""),
+                (command, timeoutMillis) -> new ExecutionAgentModelCatalogService.CommandOutput(
+                        true,
+                        """
+                        GitHub Copilot CLI
+
+                        The default model used by GitHub Copilot CLI is claude-sonnet-4.5.
+                        Available models: claude-sonnet-4.5, gpt-5.4, gemini-3-pro-preview
+                        """,
+                        ""
+                )
+        );
+
+        ExecutionAgentModelCatalogService.ModelCatalog modelCatalog =
+                service.modelsFor(ExecutionAgentProvider.GITHUB_COPILOT);
+
+        assertTrue(modelCatalog.successful());
+        assertEquals(List.of("claude-sonnet-4.5", "gemini-3-pro-preview", "gpt-5.4"),
+                modelCatalog.models().stream().map(ExecutionAgentModelCatalogService.ModelOption::modelId).toList());
+        assertTrue(modelCatalog.models().getFirst().defaultModel());
+    }
+
+    @Test
     void modelsForUnsupportedProviderReturnsPlannedMessage() {
         ExecutionAgentModelCatalogService service = new ExecutionAgentModelCatalogService(
                 CodexCliSupport.DEFAULT_COMMAND,
-                command -> new FakeAppServerProcess("")
+                CopilotCliSupport.DEFAULT_COMMAND,
+                command -> new FakeAppServerProcess(""),
+                (command, timeoutMillis) -> new ExecutionAgentModelCatalogService.CommandOutput(true, "", "")
         );
 
         ExecutionAgentModelCatalogService.ModelCatalog modelCatalog =
@@ -52,7 +83,9 @@ class ExecutionAgentModelCatalogServiceTest {
     void providersExposeFutureIntegrationsAsDisabledChoices() {
         ExecutionAgentModelCatalogService service = new ExecutionAgentModelCatalogService(
                 CodexCliSupport.DEFAULT_COMMAND,
-                command -> new FakeAppServerProcess("")
+                CopilotCliSupport.DEFAULT_COMMAND,
+                command -> new FakeAppServerProcess(""),
+                (command, timeoutMillis) -> new ExecutionAgentModelCatalogService.CommandOutput(true, "", "")
         );
 
         List<ExecutionAgentModelCatalogService.ProviderSupport> providers = service.providers();
@@ -60,7 +93,7 @@ class ExecutionAgentModelCatalogServiceTest {
         assertEquals(3, providers.size());
         assertEquals(ExecutionAgentProvider.CODEX, providers.getFirst().provider());
         assertTrue(providers.getFirst().enabled());
-        assertFalse(providers.get(1).enabled());
+        assertTrue(providers.get(1).enabled());
         assertFalse(providers.get(2).enabled());
     }
 

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record WslPreflightReport(String executedAt,
@@ -17,6 +18,20 @@ public record WslPreflightReport(String executedAt,
 
     public boolean passed() {
         return status == OverallStatus.PASS;
+    }
+
+    public Optional<CheckResult> check(String id) {
+        if (id == null || id.isBlank()) {
+            return Optional.empty();
+        }
+        return checks.stream().filter(checkResult -> id.equals(checkResult.id())).findFirst();
+    }
+
+    public boolean passed(String id) {
+        return check(id)
+                .map(CheckResult::status)
+                .filter(status -> status == CheckStatus.PASS)
+                .isPresent();
     }
 
     public enum OverallStatus {

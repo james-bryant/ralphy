@@ -18,42 +18,55 @@ import java.util.Optional;
 
 @Component
 public class NativeWindowsPreflightService {
-    static final String QUALITY_GATE_COMMAND = ".\\mvnw.cmd clean verify jacoco:report";
-    static final String GRADLE_QUALITY_GATE_COMMAND = ".\\gradlew.bat test";
+    static final String WINDOWS_QUALITY_GATE_COMMAND = ".\\mvnw.cmd clean verify jacoco:report";
+    static final String WINDOWS_GRADLE_QUALITY_GATE_COMMAND = ".\\gradlew.bat test";
+    static final String LINUX_QUALITY_GATE_COMMAND = "./mvnw clean verify jacoco:report";
+    static final String LINUX_GRADLE_QUALITY_GATE_COMMAND = "./gradlew test";
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, String> environmentVariables;
     private final Path codexHomeDirectory;
     private final CommandExecutor commandExecutor;
     private final String codexCommand;
+    private final String copilotCommand;
+    private final HostOperatingSystem hostOperatingSystem;
 
     public NativeWindowsPreflightService(
-            @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}") String codexCommand) {
+            @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}") String codexCommand,
+            @Value("${ralphy.copilot.command:" + CopilotCliSupport.DEFAULT_COMMAND + "}") String copilotCommand) {
         this(
                 codexCommand,
+                copilotCommand,
                 System.getenv(),
                 resolveCodexHomeDirectory(System.getenv(), System.getProperty("user.home")),
+                HostOperatingSystem.detectRuntime(),
                 new SystemCommandExecutor()
         );
     }
 
     NativeWindowsPreflightService(String codexCommand,
+                                  String copilotCommand,
                                   Map<String, String> environmentVariables,
                                   Path codexHomeDirectory,
+                                  HostOperatingSystem hostOperatingSystem,
                                   CommandExecutor commandExecutor) {
         this.codexCommand = hasText(codexCommand) ? codexCommand.trim() : CodexCliSupport.DEFAULT_COMMAND;
+        this.copilotCommand = hasText(copilotCommand) ? copilotCommand.trim() : CopilotCliSupport.DEFAULT_COMMAND;
         this.environmentVariables = Map.copyOf(Objects.requireNonNull(environmentVariables,
                 "environmentVariables must not be null"));
         this.codexHomeDirectory = Objects.requireNonNull(codexHomeDirectory, "codexHomeDirectory must not be null")
                 .toAbsolutePath()
                 .normalize();
+        this.hostOperatingSystem = hostOperatingSystem == null ? HostOperatingSystem.detectRuntime() : hostOperatingSystem;
         this.commandExecutor = Objects.requireNonNull(commandExecutor, "commandExecutor must not be null");
     }
 
     NativeWindowsPreflightService() {
         this(
                 CodexCliSupport.DEFAULT_COMMAND,
+                CopilotCliSupport.DEFAULT_COMMAND,
                 System.getenv(),
                 resolveCodexHomeDirectory(System.getenv(), System.getProperty("user.home")),
+                HostOperatingSystem.detectRuntime(),
                 new SystemCommandExecutor()
         );
     }
@@ -61,7 +74,28 @@ public class NativeWindowsPreflightService {
     NativeWindowsPreflightService(Map<String, String> environmentVariables,
                                   Path codexHomeDirectory,
                                   CommandExecutor commandExecutor) {
-        this(CodexCliSupport.DEFAULT_COMMAND, environmentVariables, codexHomeDirectory, commandExecutor);
+        this(
+                CodexCliSupport.DEFAULT_COMMAND,
+                CopilotCliSupport.DEFAULT_COMMAND,
+                environmentVariables,
+                codexHomeDirectory,
+                HostOperatingSystem.detectRuntime(),
+                commandExecutor
+        );
+    }
+
+    NativeWindowsPreflightService(Map<String, String> environmentVariables,
+                                  Path codexHomeDirectory,
+                                  HostOperatingSystem hostOperatingSystem,
+                                  CommandExecutor commandExecutor) {
+        this(
+                CodexCliSupport.DEFAULT_COMMAND,
+                CopilotCliSupport.DEFAULT_COMMAND,
+                environmentVariables,
+                codexHomeDirectory,
+                hostOperatingSystem,
+                commandExecutor
+        );
     }
 
     public NativeWindowsPreflightReport run(ActiveProject activeProject) {
@@ -69,6 +103,7 @@ public class NativeWindowsPreflightService {
 
         List<NativeWindowsPreflightReport.CheckResult> checks = new ArrayList<>();
         checks.add(checkCodexAvailability());
+        checks.add(checkCopilotAvailability());
         checks.add(checkAuthentication());
         checks.add(checkGitReadiness(activeProject));
         checks.add(checkQualityGateCommand(activeProject));
@@ -85,6 +120,7 @@ public class NativeWindowsPreflightService {
         List<String> commandResultArguments = CodexCliSupport.buildNativeCommand(
                 codexCommand,
                 environmentVariables,
+                hostOperatingSystem,
                 List.of("--version")
         );
         CommandResult commandResult = commandExecutor.execute(null, commandResultArguments);
@@ -103,6 +139,32 @@ public class NativeWindowsPreflightService {
                 "Codex CLI",
                 NativeWindowsPreflightReport.CheckCategory.TOOLING,
                 "Detected " + summarizeOutput(commandResult.output(), "the installed Codex CLI") + "."
+        );
+    }
+
+    private NativeWindowsPreflightReport.CheckResult checkCopilotAvailability() {
+        List<String> commandResultArguments = CopilotCliSupport.buildNativeCommand(
+                copilotCommand,
+                environmentVariables,
+                hostOperatingSystem,
+                List.of("--version")
+        );
+        CommandResult commandResult = commandExecutor.execute(null, commandResultArguments);
+        if (!commandResult.successful()) {
+            return fail(
+                    "copilot_cli",
+                    "GitHub Copilot CLI",
+                    NativeWindowsPreflightReport.CheckCategory.TOOLING,
+                    commandFailureDetail("GitHub Copilot CLI is unavailable", commandResult),
+                    copilotCliRemediationCommands()
+            );
+        }
+
+        return pass(
+                "copilot_cli",
+                "GitHub Copilot CLI",
+                NativeWindowsPreflightReport.CheckCategory.TOOLING,
+                "Detected " + summarizeOutput(commandResult.output(), "the installed GitHub Copilot CLI") + "."
         );
     }
 
@@ -228,18 +290,22 @@ public class NativeWindowsPreflightService {
     }
 
     private Optional<String> detectNativeQualityGateCommand(Path repositoryPath) {
-        Path mvnwPath = repositoryPath.resolve("mvnw.cmd");
+        Path mvnwPath = hostOperatingSystem.isWindows()
+                ? repositoryPath.resolve("mvnw.cmd")
+                : repositoryPath.resolve("mvnw");
         Path pomPath = repositoryPath.resolve("pom.xml");
         if (Files.isRegularFile(mvnwPath) && Files.isRegularFile(pomPath)) {
-            return Optional.of(QUALITY_GATE_COMMAND);
+            return Optional.of(mavenQualityGateCommand());
         }
 
-        Path gradleWrapperPath = repositoryPath.resolve("gradlew.bat");
+        Path gradleWrapperPath = hostOperatingSystem.isWindows()
+                ? repositoryPath.resolve("gradlew.bat")
+                : repositoryPath.resolve("gradlew");
         Path buildGradlePath = repositoryPath.resolve("build.gradle");
         Path buildGradleKtsPath = repositoryPath.resolve("build.gradle.kts");
         if (Files.isRegularFile(gradleWrapperPath)
                 && (Files.isRegularFile(buildGradlePath) || Files.isRegularFile(buildGradleKtsPath))) {
-            return Optional.of(GRADLE_QUALITY_GATE_COMMAND);
+            return Optional.of(gradleQualityGateCommand());
         }
 
         return Optional.empty();
@@ -331,8 +397,16 @@ public class NativeWindowsPreflightService {
         );
     }
 
+    private List<PreflightRemediationCommand> copilotCliRemediationCommands() {
+        return List.of(
+                remediation("Install GitHub Copilot CLI", CopilotCliSupport.INSTALL_COMMAND),
+                remediation("Authenticate GitHub Copilot CLI", CopilotCliSupport.LOGIN_COMMAND),
+                remediation("Verify GitHub Copilot CLI is available", "copilot --version")
+        );
+    }
+
     private List<PreflightRemediationCommand> gitRemediationCommands(ActiveProject activeProject) {
-        String repositoryPath = quoteForPowerShell(activeProject.repositoryPath().toString());
+        String repositoryPath = quoteForNativeShell(activeProject.repositoryPath().toString());
         return List.of(
                 remediation("Inspect Git status", "git -C " + repositoryPath + " status"),
                 remediation("Initialize Git metadata if this is a fresh repository",
@@ -344,8 +418,20 @@ public class NativeWindowsPreflightService {
         return new PreflightRemediationCommand(label, command);
     }
 
-    private String quoteForPowerShell(String value) {
-        return "\"" + value.replace("\"", "\"\"") + "\"";
+    private String quoteForNativeShell(String value) {
+        if (hostOperatingSystem.isWindows()) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        String safeValue = value == null ? "" : value;
+        return "'" + safeValue.replace("'", "'\"'\"'") + "'";
+    }
+
+    private String mavenQualityGateCommand() {
+        return hostOperatingSystem.isWindows() ? WINDOWS_QUALITY_GATE_COMMAND : LINUX_QUALITY_GATE_COMMAND;
+    }
+
+    private String gradleQualityGateCommand() {
+        return hostOperatingSystem.isWindows() ? WINDOWS_GRADLE_QUALITY_GATE_COMMAND : LINUX_GRADLE_QUALITY_GATE_COMMAND;
     }
 
     private static Path resolveCodexHomeDirectory(Map<String, String> environmentVariables, String userHome) {

@@ -34,17 +34,23 @@ public class CodexLauncherService {
     private final WslShellResolver wslShellResolver;
     private final ObjectMapper objectMapper;
     private final String codexCommand;
+    private final String copilotCommand;
+    private final HostOperatingSystem hostOperatingSystem;
 
     @Autowired
     public CodexLauncherService(LocalMetadataStorage localMetadataStorage,
                                 @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}")
-                                String codexCommand) {
+                                String codexCommand,
+                                @Value("${ralphy.copilot.command:" + CopilotCliSupport.DEFAULT_COMMAND + "}")
+                                String copilotCommand) {
         this(localMetadataStorage,
                 Clock.systemUTC(),
                 () -> UUID.randomUUID().toString(),
-                new SystemProcessExecutor(),
+                new SystemProcessExecutor(HostOperatingSystem.detectRuntime()),
                 codexCommand,
-                new SystemWslShellResolver());
+                copilotCommand,
+                new SystemWslShellResolver(),
+                HostOperatingSystem.detectRuntime());
     }
 
     CodexLauncherService(LocalMetadataStorage localMetadataStorage,
@@ -56,7 +62,9 @@ public class CodexLauncherService {
                 runIdGenerator,
                 processExecutor,
                 CodexCliSupport.DEFAULT_COMMAND,
-                new SystemWslShellResolver());
+                CopilotCliSupport.DEFAULT_COMMAND,
+                new SystemWslShellResolver(),
+                HostOperatingSystem.detectRuntime());
     }
 
     CodexLauncherService(LocalMetadataStorage localMetadataStorage,
@@ -69,7 +77,9 @@ public class CodexLauncherService {
                 runIdGenerator,
                 processExecutor,
                 codexCommand,
-                new SystemWslShellResolver());
+                CopilotCliSupport.DEFAULT_COMMAND,
+                new SystemWslShellResolver(),
+                HostOperatingSystem.detectRuntime());
     }
 
     CodexLauncherService(LocalMetadataStorage localMetadataStorage,
@@ -78,6 +88,41 @@ public class CodexLauncherService {
                          ProcessExecutor processExecutor,
                          String codexCommand,
                          WslShellResolver wslShellResolver) {
+        this(localMetadataStorage,
+                clock,
+                runIdGenerator,
+                processExecutor,
+                codexCommand,
+                CopilotCliSupport.DEFAULT_COMMAND,
+                wslShellResolver,
+                HostOperatingSystem.detectRuntime());
+    }
+
+    CodexLauncherService(LocalMetadataStorage localMetadataStorage,
+                         Clock clock,
+                         Supplier<String> runIdGenerator,
+                         ProcessExecutor processExecutor,
+                         String codexCommand,
+                         String copilotCommand,
+                         WslShellResolver wslShellResolver) {
+        this(localMetadataStorage,
+                clock,
+                runIdGenerator,
+                processExecutor,
+                codexCommand,
+                copilotCommand,
+                wslShellResolver,
+                HostOperatingSystem.detectRuntime());
+    }
+
+    CodexLauncherService(LocalMetadataStorage localMetadataStorage,
+                         Clock clock,
+                         Supplier<String> runIdGenerator,
+                         ProcessExecutor processExecutor,
+                         String codexCommand,
+                         String copilotCommand,
+                         WslShellResolver wslShellResolver,
+                         HostOperatingSystem hostOperatingSystem) {
         this.localMetadataStorage = Objects.requireNonNull(localMetadataStorage, "localMetadataStorage must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.runIdGenerator = Objects.requireNonNull(runIdGenerator, "runIdGenerator must not be null");
@@ -85,6 +130,8 @@ public class CodexLauncherService {
         this.wslShellResolver = Objects.requireNonNull(wslShellResolver, "wslShellResolver must not be null");
         this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         this.codexCommand = Objects.requireNonNull(codexCommand, "codexCommand must not be null");
+        this.copilotCommand = Objects.requireNonNull(copilotCommand, "copilotCommand must not be null");
+        this.hostOperatingSystem = hostOperatingSystem == null ? HostOperatingSystem.detectRuntime() : hostOperatingSystem;
     }
 
     public CodexLaunchPlan buildLaunch(CodexLaunchRequest request) {
@@ -92,20 +139,23 @@ public class CodexLauncherService {
 
         String runId = normalizeRunId(runIdGenerator.get());
         String promptText = renderPrompt(request);
-        List<String> codexArguments = codexArguments(request.codexOptions());
+        ExecutionAgentSelection executionAgentSelection = request.agentSelection();
+        ExecutionAgentProvider provider = executionAgentSelection.provider();
+        List<String> commandArguments = providerArguments(provider, request.codexOptions(), promptText);
 
-        if (request.executionProfile().type() == ExecutionProfile.ProfileType.POWERSHELL) {
-            List<String> nativeCommand = CodexCliSupport.buildNativeCommand(
-                    codexCommand,
-                    System.getenv(),
-                    codexArguments
-            );
+        if (request.executionProfile().type() == ExecutionProfile.ProfileType.NATIVE) {
+            List<String> nativeCommand = provider == ExecutionAgentProvider.GITHUB_COPILOT
+                    ? CopilotCliSupport.buildNativeCommand(copilotCommand, System.getenv(), hostOperatingSystem,
+                    commandArguments)
+                    : CodexCliSupport.buildNativeCommand(codexCommand, System.getenv(), hostOperatingSystem,
+                    commandArguments);
             return new CodexLaunchPlan(
                     runId,
                     request.storyId(),
                     request.activeProject(),
                     request.executionProfile(),
                     request.preset(),
+                    executionAgentSelection,
                     nativeCommand,
                     request.activeProject().repositoryPath(),
                     request.activeProject().repositoryPath().toString(),
@@ -113,6 +163,10 @@ public class CodexLauncherService {
                     request.branchAction(),
                     promptText
             );
+        }
+
+        if (!hostOperatingSystem.supportsWslProfiles()) {
+            throw new IllegalArgumentException("WSL execution requires Ralphy to run on Windows.");
         }
 
         WslPathMapper.PathMappingResult pathMappingResult =
@@ -128,7 +182,8 @@ public class CodexLauncherService {
                 request.activeProject(),
                 request.executionProfile(),
                 request.preset(),
-                    List.of(
+                executionAgentSelection,
+                List.of(
                         "wsl.exe",
                         "--distribution",
                         request.executionProfile().wslDistribution(),
@@ -137,7 +192,9 @@ public class CodexLauncherService {
                         "--exec",
                         shellPath,
                         "-ic",
-                        CodexCliSupport.buildWslCodexScript(codexCommand, codexArguments)
+                        provider == ExecutionAgentProvider.GITHUB_COPILOT
+                                ? CopilotCliSupport.buildWslCopilotScript(copilotCommand, commandArguments)
+                                : CodexCliSupport.buildWslCodexScript(codexCommand, commandArguments)
                 ),
                 null,
                 pathMappingResult.wslPath(),
@@ -170,7 +227,7 @@ public class CodexLauncherService {
         String endedAt = Instant.now(clock).toString();
         boolean successful = processExecution.successful();
         String status = successful ? "SUCCEEDED" : "FAILED";
-        String message = launchMessage(processExecution);
+        String message = launchMessage(launchPlan, processExecution);
         RunArtifacts artifacts = persistRunArtifacts(
                 launchPlan,
                 status,
@@ -649,20 +706,34 @@ public class CodexLauncherService {
         return promptBuilder.toString().trim();
     }
 
-    private List<String> codexArguments(List<String> codexOptions) {
+    private List<String> providerArguments(ExecutionAgentProvider provider,
+                                           List<String> providerOptions,
+                                           String promptText) {
         List<String> commandArguments = new ArrayList<>();
+        if (provider == ExecutionAgentProvider.GITHUB_COPILOT) {
+            commandArguments.add("-sp");
+            commandArguments.add(promptText);
+            commandArguments.add("--no-ask-user");
+            commandArguments.add("--allow-all-tools");
+            commandArguments.addAll(providerOptions);
+            return List.copyOf(commandArguments);
+        }
+
         commandArguments.add("exec");
-        commandArguments.addAll(codexOptions);
+        commandArguments.addAll(providerOptions);
         commandArguments.add("-");
         return List.copyOf(commandArguments);
     }
 
-    private String launchMessage(ProcessExecution processExecution) {
+    private String launchMessage(CodexLaunchPlan launchPlan, ProcessExecution processExecution) {
         if (hasText(processExecution.failureMessage())) {
             return processExecution.failureMessage();
         }
         if (processExecution.exitCode() != null && processExecution.exitCode() != 0) {
-            return "Codex exited with code " + processExecution.exitCode() + ".";
+            return launchPlan.agentSelection().provider().displayName()
+                    + " exited with code "
+                    + processExecution.exitCode()
+                    + ".";
         }
         return "";
     }
@@ -698,6 +769,7 @@ public class CodexLauncherService {
                                      BuiltInPreset preset,
                                      List<PromptInput> presetInputs,
                                      String additionalInstructions,
+                                     ExecutionAgentSelection agentSelection,
                                      List<String> codexOptions,
                                      String branchName,
                                      String branchAction) {
@@ -709,6 +781,7 @@ public class CodexLauncherService {
             Objects.requireNonNull(executionProfile, "executionProfile must not be null");
             Objects.requireNonNull(preset, "preset must not be null");
             presetInputs = List.copyOf(presetInputs == null ? List.of() : presetInputs);
+            agentSelection = agentSelection == null ? ExecutionAgentSelection.codexDefault() : agentSelection;
             codexOptions = List.copyOf(codexOptions == null ? List.of() : codexOptions);
             additionalInstructions = additionalInstructions == null ? "" : additionalInstructions;
             branchName = branchName == null ? "" : branchName;
@@ -721,9 +794,35 @@ public class CodexLauncherService {
                                   BuiltInPreset preset,
                                   List<PromptInput> presetInputs,
                                   String additionalInstructions,
+                                  ExecutionAgentSelection agentSelection,
                                   List<String> codexOptions) {
-            this(storyId, activeProject, executionProfile, preset, presetInputs, additionalInstructions, codexOptions,
+            this(storyId, activeProject, executionProfile, preset, presetInputs, additionalInstructions,
+                    agentSelection, codexOptions,
                     "", "");
+        }
+
+        public CodexLaunchRequest(String storyId,
+                                  ActiveProject activeProject,
+                                  ExecutionProfile executionProfile,
+                                  BuiltInPreset preset,
+                                  List<PromptInput> presetInputs,
+                                  String additionalInstructions,
+                                  List<String> codexOptions,
+                                  String branchName,
+                                  String branchAction) {
+            this(storyId, activeProject, executionProfile, preset, presetInputs, additionalInstructions,
+                    ExecutionAgentSelection.codexDefault(), codexOptions, branchName, branchAction);
+        }
+
+        public CodexLaunchRequest(String storyId,
+                                  ActiveProject activeProject,
+                                  ExecutionProfile executionProfile,
+                                  BuiltInPreset preset,
+                                  List<PromptInput> presetInputs,
+                                  String additionalInstructions,
+                                  List<String> codexOptions) {
+            this(storyId, activeProject, executionProfile, preset, presetInputs, additionalInstructions,
+                    ExecutionAgentSelection.codexDefault(), codexOptions, "", "");
         }
     }
 
@@ -741,6 +840,7 @@ public class CodexLauncherService {
                                   ActiveProject activeProject,
                                   ExecutionProfile executionProfile,
                                   BuiltInPreset preset,
+                                  ExecutionAgentSelection agentSelection,
                                   List<String> command,
                                   Path processWorkingDirectory,
                                   String executionWorkingDirectory,
@@ -757,6 +857,7 @@ public class CodexLauncherService {
             Objects.requireNonNull(activeProject, "activeProject must not be null");
             Objects.requireNonNull(executionProfile, "executionProfile must not be null");
             Objects.requireNonNull(preset, "preset must not be null");
+            agentSelection = agentSelection == null ? ExecutionAgentSelection.codexDefault() : agentSelection;
             command = List.copyOf(Objects.requireNonNull(command, "command must not be null"));
             if (executionWorkingDirectory == null || executionWorkingDirectory.isBlank()) {
                 throw new IllegalArgumentException("executionWorkingDirectory must not be blank");
@@ -903,6 +1004,14 @@ public class CodexLauncherService {
     }
 
     private static final class SystemProcessExecutor implements ProcessExecutor {
+        private final HostOperatingSystem hostOperatingSystem;
+
+        private SystemProcessExecutor(HostOperatingSystem hostOperatingSystem) {
+            this.hostOperatingSystem = hostOperatingSystem == null
+                    ? HostOperatingSystem.detectRuntime()
+                    : hostOperatingSystem;
+        }
+
         @Override
         public ProcessExecution execute(CodexLaunchPlan launchPlan) {
             return execute(launchPlan, RunOutputListener.noop());
@@ -914,8 +1023,8 @@ public class CodexLauncherService {
             if (launchPlan.processWorkingDirectory() != null) {
                 processBuilder.directory(launchPlan.processWorkingDirectory().toFile());
             }
-            if (launchPlan.executionProfile().type() == ExecutionProfile.ProfileType.POWERSHELL) {
-                CodexCliSupport.prependNativePathEntries(processBuilder.environment());
+            if (launchPlan.executionProfile().type() == ExecutionProfile.ProfileType.NATIVE) {
+                CodexCliSupport.prependNativePathEntries(processBuilder.environment(), hostOperatingSystem);
             }
 
             try {
@@ -929,7 +1038,7 @@ public class CodexLauncherService {
                         () -> readFully(process.getErrorStream(), stderrBuffer, runOutputListener::onStderr)
                 );
 
-                writePrompt(process, launchPlan.promptText());
+                prepareProcessInput(process, launchPlan);
                 int exitCode = process.waitFor();
 
                 return ProcessExecution.completed(
@@ -942,13 +1051,15 @@ public class CodexLauncherService {
                 return ProcessExecution.failure(exception.getMessage());
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                return ProcessExecution.failure("Codex launch was interrupted.");
+                return ProcessExecution.failure(launchPlan.agentSelection().provider().displayName() + " launch was interrupted.");
             }
         }
 
-        private static void writePrompt(Process process, String promptText) throws IOException {
+        private static void prepareProcessInput(Process process, CodexLaunchPlan launchPlan) throws IOException {
             try (OutputStream outputStream = process.getOutputStream()) {
-                outputStream.write(promptText.getBytes(StandardCharsets.UTF_8));
+                if (launchPlan.agentSelection().provider() != ExecutionAgentProvider.GITHUB_COPILOT) {
+                    outputStream.write(launchPlan.promptText().getBytes(StandardCharsets.UTF_8));
+                }
             }
         }
 

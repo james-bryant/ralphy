@@ -15,22 +15,25 @@ import java.util.Objects;
 public class WslPreflightService {
     private final CommandExecutor commandExecutor;
     private final String codexCommand;
+    private final String copilotCommand;
 
     public WslPreflightService(
-            @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}") String codexCommand) {
-        this(codexCommand, new SystemCommandExecutor());
+            @Value("${ralphy.codex.command:" + CodexCliSupport.DEFAULT_COMMAND + "}") String codexCommand,
+            @Value("${ralphy.copilot.command:" + CopilotCliSupport.DEFAULT_COMMAND + "}") String copilotCommand) {
+        this(codexCommand, copilotCommand, new SystemCommandExecutor());
     }
 
     WslPreflightService() {
-        this(CodexCliSupport.DEFAULT_COMMAND, new SystemCommandExecutor());
+        this(CodexCliSupport.DEFAULT_COMMAND, CopilotCliSupport.DEFAULT_COMMAND, new SystemCommandExecutor());
     }
 
     WslPreflightService(CommandExecutor commandExecutor) {
-        this(CodexCliSupport.DEFAULT_COMMAND, commandExecutor);
+        this(CodexCliSupport.DEFAULT_COMMAND, CopilotCliSupport.DEFAULT_COMMAND, commandExecutor);
     }
 
-    WslPreflightService(String codexCommand, CommandExecutor commandExecutor) {
+    WslPreflightService(String codexCommand, String copilotCommand, CommandExecutor commandExecutor) {
         this.codexCommand = hasText(codexCommand) ? codexCommand.trim() : CodexCliSupport.DEFAULT_COMMAND;
+        this.copilotCommand = hasText(copilotCommand) ? copilotCommand.trim() : CopilotCliSupport.DEFAULT_COMMAND;
         this.commandExecutor = Objects.requireNonNull(commandExecutor, "commandExecutor must not be null");
     }
 
@@ -47,6 +50,7 @@ public class WslPreflightService {
         checks.add(checkPathMapping(executionProfile, pathMappingResult));
 
         checks.add(checkCodexAvailability(executionProfile, distroAvailability.available()));
+        checks.add(checkCopilotAvailability(executionProfile, distroAvailability.available()));
         checks.add(checkAuthentication(executionProfile, distroAvailability.available()));
         checks.add(checkGitReadiness(executionProfile, distroAvailability.available(), pathMappingResult));
 
@@ -165,6 +169,45 @@ public class WslPreflightService {
                 "Codex CLI",
                 WslPreflightReport.CheckCategory.TOOLING,
                 "Detected " + summarizeOutput(commandResult.output(), "the installed Codex CLI") + "."
+        );
+    }
+
+    private WslPreflightReport.CheckResult checkCopilotAvailability(ExecutionProfile executionProfile,
+                                                                    boolean distroAvailable) {
+        if (!distroAvailable) {
+            return fail(
+                    "copilot_cli",
+                    "GitHub Copilot CLI",
+                    WslPreflightReport.CheckCategory.TOOLING,
+                    "GitHub Copilot CLI could not be checked because the configured WSL distribution is unavailable.",
+                    distributionRemediationCommands(executionProfile)
+            );
+        }
+
+        CommandResult commandResult = executeInDistro(
+                executionProfile.wslDistribution(),
+                null,
+                CopilotCliSupport.buildWslCopilotScript(copilotCommand, List.of("--version")),
+                true
+        );
+        if (!commandResult.successful()) {
+            return fail(
+                    "copilot_cli",
+                    "GitHub Copilot CLI",
+                    WslPreflightReport.CheckCategory.TOOLING,
+                    commandFailureDetail(
+                            "GitHub Copilot CLI is unavailable inside the selected WSL distribution",
+                            commandResult
+                    ),
+                    copilotCliRemediationCommands(executionProfile)
+            );
+        }
+
+        return pass(
+                "copilot_cli",
+                "GitHub Copilot CLI",
+                WslPreflightReport.CheckCategory.TOOLING,
+                "Detected " + summarizeOutput(commandResult.output(), "the installed GitHub Copilot CLI") + "."
         );
     }
 
@@ -387,6 +430,20 @@ public class WslPreflightService {
                         commandInUserShell(
                                 executionProfile.wslDistribution(),
                                 CodexCliSupport.buildShellCommand(codexCommand, List.of("--version"))
+                        ))
+        );
+    }
+
+    private List<PreflightRemediationCommand> copilotCliRemediationCommands(ExecutionProfile executionProfile) {
+        return List.of(
+                remediation("Install GitHub Copilot CLI in the selected WSL distribution",
+                        commandInUserShell(executionProfile.wslDistribution(), CopilotCliSupport.INSTALL_COMMAND)),
+                remediation("Authenticate GitHub Copilot CLI in the selected WSL distribution",
+                        commandInUserShell(executionProfile.wslDistribution(), CopilotCliSupport.LOGIN_COMMAND)),
+                remediation("Verify GitHub Copilot CLI in the selected WSL distribution",
+                        commandInUserShell(
+                                executionProfile.wslDistribution(),
+                                CodexCliSupport.buildShellCommand(copilotCommand, List.of("--version"))
                         ))
         );
     }

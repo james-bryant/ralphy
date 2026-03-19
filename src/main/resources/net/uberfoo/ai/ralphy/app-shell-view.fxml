@@ -45,6 +45,12 @@
                     <String fx:value="section-title"/>
                 </styleClass>
             </Label>
+            <Button id="agentConfigurationNavButton" fx:id="agentConfigurationNavButton" maxWidth="Infinity"
+                    mnemonicParsing="false" onAction="#showAgentConfiguration" text="Agent Configuration">
+                <styleClass>
+                    <String fx:value="shell-nav-button"/>
+                </styleClass>
+            </Button>
             <Button id="projectsNavButton" fx:id="projectsNavButton" maxWidth="Infinity" mnemonicParsing="false"
                     onAction="#showProjects" text="Projects">
                 <styleClass>
@@ -96,7 +102,7 @@
                         </styleClass>
                     </Label>
                     <HBox id="projectsWorkspaceRow" fx:id="projectsWorkspaceRow" spacing="16.0">
-                        <VBox HBox.hgrow="ALWAYS" spacing="8.0">
+                        <VBox id="projectContextCard" fx:id="projectContextCard" HBox.hgrow="ALWAYS" spacing="8.0">
                             <styleClass>
                                 <String fx:value="shell-card"/>
                             </styleClass>
@@ -155,141 +161,125 @@
                                 </styleClass>
                             </Label>
                         </VBox>
-                        <VBox HBox.hgrow="ALWAYS" spacing="8.0">
+                    </HBox>
+                    <VBox id="agentConfigurationProfileCard" fx:id="agentConfigurationProfileCard"
+                          spacing="8.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Execution Profile">
                             <styleClass>
-                                <String fx:value="shell-card"/>
+                                <String fx:value="card-title"/>
                             </styleClass>
-                            <padding>
-                                <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
-                            </padding>
-                            <Label text="Execution Profile">
-                                <styleClass>
-                                    <String fx:value="card-title"/>
-                                </styleClass>
-                            </Label>
-                            <Label text="Save the Codex execution mode for the active project before starting native Windows or WSL runs."
-                                   wrapText="true">
-                                <styleClass>
-                                    <String fx:value="muted-text"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="executionProfileSummaryLabel" fx:id="executionProfileSummaryLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="section-title"/>
-                                </styleClass>
-                            </Label>
-                            <HBox spacing="12.0">
-                                <RadioButton id="nativeExecutionProfileRadioButton" fx:id="nativeExecutionProfileRadioButton"
-                                             mnemonicParsing="false" text="Native PowerShell"/>
-                                <RadioButton id="wslExecutionProfileRadioButton" fx:id="wslExecutionProfileRadioButton"
-                                             mnemonicParsing="false" text="WSL"/>
-                            </HBox>
+                        </Label>
+                        <Label text="Configure the execution mode used by your local agent settings."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="executionProfileSummaryLabel" fx:id="executionProfileSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <HBox spacing="12.0">
+                            <RadioButton id="nativeExecutionProfileRadioButton" fx:id="nativeExecutionProfileRadioButton"
+                                         mnemonicParsing="false" text="Native Shell"/>
+                            <RadioButton id="wslExecutionProfileRadioButton" fx:id="wslExecutionProfileRadioButton"
+                                         mnemonicParsing="false" text="WSL"/>
+                        </HBox>
+                        <VBox id="wslExecutionProfileFieldsContainer" fx:id="wslExecutionProfileFieldsContainer"
+                              spacing="8.0">
                             <TextField id="wslDistributionField" fx:id="wslDistributionField"
                                        promptText="Ubuntu-24.04"/>
                             <TextField id="windowsPathPrefixField" fx:id="windowsPathPrefixField"
                                        promptText="C:\Users\james\workspaces"/>
                             <TextField id="wslPathPrefixField" fx:id="wslPathPrefixField"
                                        promptText="/mnt/c/Users/james/workspaces"/>
-                            <Button id="saveExecutionProfileButton" fx:id="saveExecutionProfileButton"
-                                    mnemonicParsing="false" onAction="#saveExecutionProfile" text="Save Execution Profile"/>
-                            <Label id="executionProfileMessageLabel" fx:id="executionProfileMessageLabel" visible="false"
-                                   wrapText="true">
-                                <styleClass>
-                                    <String fx:value="validation-text"/>
-                                </styleClass>
-                            </Label>
+                        </VBox>
+                        <Button id="saveExecutionProfileButton" fx:id="saveExecutionProfileButton"
+                                mnemonicParsing="false" onAction="#saveExecutionProfile" text="Save Execution Profile"/>
+                        <Label id="executionProfileMessageLabel" fx:id="executionProfileMessageLabel" visible="false"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="validation-text"/>
+                            </styleClass>
+                        </Label>
+                        <Separator/>
+                        <Label text="Execution Overview">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="executionOverviewHeadlineLabel" fx:id="executionOverviewHeadlineLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="executionOverviewDetailLabel" fx:id="executionOverviewDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Separator/>
+                        <Label text="Native Preflight">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="nativePreflightSummaryLabel" fx:id="nativePreflightSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="nativePreflightDetailLabel" fx:id="nativePreflightDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Button id="runNativePreflightButton" fx:id="runNativePreflightButton"
+                                mnemonicParsing="false" onAction="#runNativeWindowsPreflight"
+                                text="Run Native Preflight"/>
+                        <Label id="nativePreflightChecksLabel" fx:id="nativePreflightChecksLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <VBox id="nativePreflightRemediationSection" fx:id="nativePreflightRemediationSection"
+                              spacing="12.0" visible="false">
                             <Separator/>
-                            <Label text="Execution Overview">
-                                <styleClass>
-                                    <String fx:value="card-title"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="executionOverviewHeadlineLabel" fx:id="executionOverviewHeadlineLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="section-title"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="executionOverviewDetailLabel" fx:id="executionOverviewDetailLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="muted-text"/>
-                                </styleClass>
-                            </Label>
-                            <Separator/>
-                            <Label text="PRD Validation">
-                                <styleClass>
-                                    <String fx:value="card-title"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="prdValidationSummaryLabel" fx:id="prdValidationSummaryLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="section-title"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="prdValidationDetailLabel" fx:id="prdValidationDetailLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="muted-text"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="prdValidationErrorsLabel" fx:id="prdValidationErrorsLabel" visible="false"
-                                   wrapText="true">
-                                <styleClass>
-                                    <String fx:value="validation-text"/>
-                                </styleClass>
-                            </Label>
-                            <Separator/>
-                            <Label text="Native Windows Preflight">
-                                <styleClass>
-                                    <String fx:value="card-title"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="nativePreflightSummaryLabel" fx:id="nativePreflightSummaryLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="section-title"/>
-                                </styleClass>
-                            </Label>
-                            <Label id="nativePreflightDetailLabel" fx:id="nativePreflightDetailLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="muted-text"/>
-                                </styleClass>
-                            </Label>
-                            <Button id="runNativePreflightButton" fx:id="runNativePreflightButton"
-                                    mnemonicParsing="false" onAction="#runNativeWindowsPreflight"
-                                    text="Run Native Preflight"/>
-                            <Label id="nativePreflightChecksLabel" fx:id="nativePreflightChecksLabel" wrapText="true">
-                                <styleClass>
-                                    <String fx:value="muted-text"/>
-                                </styleClass>
-                            </Label>
-                            <VBox id="nativePreflightRemediationSection" fx:id="nativePreflightRemediationSection"
-                                  spacing="12.0" visible="false">
-                                <Separator/>
-                                <HBox alignment="CENTER_LEFT" spacing="12.0">
-                                    <Label text="Native Remediation">
-                                        <styleClass>
-                                            <String fx:value="section-title"/>
-                                        </styleClass>
-                                    </Label>
-                                    <Region HBox.hgrow="ALWAYS"/>
-                                    <Button id="rerunNativePreflightFromRemediationButton"
-                                            fx:id="rerunNativePreflightFromRemediationButton"
-                                            mnemonicParsing="false" onAction="#runNativeWindowsPreflight"
-                                            text="Rerun Native Preflight"/>
-                                </HBox>
-                                <Label text="Copy the commands you want to run. Ralphy never installs or authenticates Codex automatically."
-                                       wrapText="true">
+                            <HBox alignment="CENTER_LEFT" spacing="12.0">
+                                <Label text="Native Remediation">
                                     <styleClass>
-                                        <String fx:value="muted-text"/>
+                                        <String fx:value="section-title"/>
                                     </styleClass>
                                 </Label>
-                                <VBox id="nativePreflightRemediationContainer" fx:id="nativePreflightRemediationContainer"
-                                      spacing="12.0"/>
-                            </VBox>
-                            <Label id="nativePreflightMessageLabel" fx:id="nativePreflightMessageLabel" visible="false"
+                                <Region HBox.hgrow="ALWAYS"/>
+                                <Button id="rerunNativePreflightFromRemediationButton"
+                                        fx:id="rerunNativePreflightFromRemediationButton"
+                                        mnemonicParsing="false" onAction="#runNativeWindowsPreflight"
+                                        text="Rerun Native Preflight"/>
+                            </HBox>
+                            <Label text="Copy the commands you want to run. Ralphy never installs or authenticates Codex automatically."
                                    wrapText="true">
                                 <styleClass>
-                                    <String fx:value="validation-text"/>
+                                    <String fx:value="muted-text"/>
                                 </styleClass>
                             </Label>
+                            <VBox id="nativePreflightRemediationContainer" fx:id="nativePreflightRemediationContainer"
+                                  spacing="12.0"/>
+                        </VBox>
+                        <Label id="nativePreflightMessageLabel" fx:id="nativePreflightMessageLabel" visible="false"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="validation-text"/>
+                            </styleClass>
+                        </Label>
+                        <VBox id="wslPreflightSection" fx:id="wslPreflightSection" spacing="8.0">
                             <Separator/>
                             <Label text="WSL Preflight">
                                 <styleClass>
@@ -345,7 +335,61 @@
                                 </styleClass>
                             </Label>
                         </VBox>
-                    </HBox>
+                    </VBox>
+                    <VBox id="executionAgentSettingsCard" fx:id="executionAgentSettingsCard" spacing="16.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Execution Agent Settings">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Choose the provider, model, and thinking level used by the execution stage."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="Provider">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <ComboBox id="executionSettingsProviderComboBox"
+                                      fx:id="executionSettingsProviderComboBox"
+                                      prefWidth="220.0"/>
+                        </HBox>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="Model">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <ComboBox id="executionSettingsModelComboBox" fx:id="executionSettingsModelComboBox"
+                                      HBox.hgrow="ALWAYS"/>
+                        </HBox>
+                        <Label text="Thinking Level">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <ComboBox id="executionThinkingLevelComboBox" fx:id="executionThinkingLevelComboBox"
+                                  prefWidth="220.0"/>
+                        <Label id="executionSettingsStatusLabel" fx:id="executionSettingsStatusLabel"
+                               visible="false" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Button id="saveExecutionAgentSettingsButton" fx:id="saveExecutionAgentSettingsButton"
+                                mnemonicParsing="false" onAction="#saveExecutionAgentSettings"
+                                text="Save Execution Agent Settings"/>
+                    </VBox>
                     <VBox id="presetCatalogCard" fx:id="presetCatalogCard" spacing="16.0">
                         <styleClass>
                             <String fx:value="shell-card"/>
@@ -444,7 +488,7 @@
                                 <String fx:value="card-title"/>
                             </styleClass>
                         </Label>
-                        <Label text="Start with a prompt, get clarifying questions back from Codex, and iterate until the planner produces a PRD draft you want to apply. Conversation state is saved with the project, and the planner status tracks draft readiness."
+                        <Label text="Start with a prompt, get clarifying questions back from the configured planning agent, and iterate until the planner produces a PRD draft you want to apply. Conversation state is saved with the project, and the planner status tracks draft readiness."
                                wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
@@ -460,17 +504,17 @@
                                 <String fx:value="muted-text"/>
                             </styleClass>
                         </Label>
-                        <HBox alignment="CENTER_LEFT" spacing="12.0">
-                            <Label text="Planning Model">
-                                <styleClass>
-                                    <String fx:value="section-title"/>
-                                </styleClass>
-                            </Label>
-                            <ComboBox id="prdPlannerModelComboBox" fx:id="prdPlannerModelComboBox"
-                                      HBox.hgrow="ALWAYS"/>
-                        </HBox>
-                        <Label id="prdPlannerModelStatusLabel" fx:id="prdPlannerModelStatusLabel" visible="false"
-                               wrapText="true">
+                        <Label text="Configured Planner">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="prdPlannerAgentSummaryLabel" fx:id="prdPlannerAgentSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="prdPlannerAgentDetailLabel" fx:id="prdPlannerAgentDetailLabel" wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
                             </styleClass>
@@ -553,23 +597,18 @@
                                 <String fx:value="muted-text"/>
                             </styleClass>
                         </Label>
-                        <HBox alignment="CENTER_LEFT" spacing="12.0">
-                            <Label text="Provider">
-                                <styleClass>
-                                    <String fx:value="section-title"/>
-                                </styleClass>
-                            </Label>
-                            <ComboBox id="executionProviderComboBox" fx:id="executionProviderComboBox"
-                                      prefWidth="220.0"/>
-                            <Label text="Model">
-                                <styleClass>
-                                    <String fx:value="section-title"/>
-                                </styleClass>
-                            </Label>
-                            <ComboBox id="executionModelComboBox" fx:id="executionModelComboBox"
-                                      HBox.hgrow="ALWAYS"/>
-                        </HBox>
-                        <Label id="executionModelStatusLabel" fx:id="executionModelStatusLabel" visible="false"
+                        <Label text="Configured Agent">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="executionAgentSelectionSummaryLabel" fx:id="executionAgentSelectionSummaryLabel"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="executionAgentSelectionDetailLabel" fx:id="executionAgentSelectionDetailLabel"
                                wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
@@ -616,7 +655,7 @@
                                 <String fx:value="card-title"/>
                             </styleClass>
                         </Label>
-                        <Label text="Follow the current run without opening raw log files. Assistant Summary shows the stored final assistant message, Raw Output pretty-prints JSON log lines, and Structured Output parses Codex events into a richer timeline."
+                        <Label text="Follow the current run without opening raw log files. Assistant Summary shows the stored final assistant message, Raw Output pretty-prints streamed output, and Structured Output parses Codex events into a richer timeline when available. GitHub Copilot runs expose raw output only."
                                 wrapText="true">
                             <styleClass>
                                 <String fx:value="muted-text"/>
@@ -960,6 +999,95 @@
                             </VBox>
                         </HBox>
                     </VBox>
+                    <VBox id="planningAgentSettingsCard" fx:id="planningAgentSettingsCard" spacing="16.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="Planning Agent Settings">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Choose the provider, model, and thinking level used by the PRD planning stage."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="Provider">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <ComboBox id="planningSettingsProviderComboBox"
+                                      fx:id="planningSettingsProviderComboBox"
+                                      prefWidth="220.0"/>
+                        </HBox>
+                        <HBox alignment="CENTER_LEFT" spacing="12.0">
+                            <Label text="Model">
+                                <styleClass>
+                                    <String fx:value="section-title"/>
+                                </styleClass>
+                            </Label>
+                            <ComboBox id="planningSettingsModelComboBox" fx:id="planningSettingsModelComboBox"
+                                      HBox.hgrow="ALWAYS"/>
+                        </HBox>
+                        <Label text="Thinking Level">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <ComboBox id="planningThinkingLevelComboBox" fx:id="planningThinkingLevelComboBox"
+                                  prefWidth="220.0"/>
+                        <Label id="planningSettingsStatusLabel" fx:id="planningSettingsStatusLabel"
+                               visible="false" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Button id="savePlanningAgentSettingsButton" fx:id="savePlanningAgentSettingsButton"
+                                mnemonicParsing="false" onAction="#savePlanningAgentSettings"
+                                text="Save Planning Agent Settings"/>
+                    </VBox>
+                    <VBox id="prdValidationCard" fx:id="prdValidationCard" spacing="12.0">
+                        <styleClass>
+                            <String fx:value="shell-card"/>
+                        </styleClass>
+                        <padding>
+                            <Insets bottom="18.0" left="18.0" right="18.0" top="18.0"/>
+                        </padding>
+                        <Label text="PRD Validation">
+                            <styleClass>
+                                <String fx:value="card-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label text="Structural validation for the active PRD lives with the PRD editing workflow."
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="prdValidationSummaryLabel" fx:id="prdValidationSummaryLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="section-title"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="prdValidationDetailLabel" fx:id="prdValidationDetailLabel" wrapText="true">
+                            <styleClass>
+                                <String fx:value="muted-text"/>
+                            </styleClass>
+                        </Label>
+                        <Label id="prdValidationErrorsLabel" fx:id="prdValidationErrorsLabel" visible="false"
+                               wrapText="true">
+                            <styleClass>
+                                <String fx:value="validation-text"/>
+                            </styleClass>
+                        </Label>
+                    </VBox>
                     <VBox id="prdDocumentCard" fx:id="prdDocumentCard" spacing="12.0">
                         <styleClass>
                             <String fx:value="shell-card"/>
@@ -1045,7 +1173,7 @@
                 </styleClass>
             </Label>
             <Label id="activeProjectStatusLabel" fx:id="activeProjectStatusLabel"/>
-            <Label text="Windows-first application shell">
+            <Label text="Cross-platform application shell">
                 <styleClass>
                     <String fx:value="muted-text"/>
                 </styleClass>

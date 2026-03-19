@@ -5,6 +5,7 @@ import javafx.scene.paint.Color;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.prefs.Preferences;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AppShellUiTest {
     private JavaFxUiHarness harness;
+    private String previousHostOverride;
 
     @TempDir
     Path tempDir;
@@ -34,10 +37,21 @@ class AppShellUiTest {
         JavaFxUiHarness.startToolkit();
     }
 
+    @BeforeEach
+    void setWindowsHostOverride() {
+        previousHostOverride = System.getProperty("ralphy.host.os-name");
+        System.setProperty("ralphy.host.os-name", "Windows");
+    }
+
     @AfterEach
     void tearDown() throws Exception {
         if (harness != null) {
             harness.closeShell();
+        }
+        if (previousHostOverride == null) {
+            System.clearProperty("ralphy.host.os-name");
+        } else {
+            System.setProperty("ralphy.host.os-name", previousHostOverride);
         }
     }
 
@@ -71,6 +85,22 @@ class AppShellUiTest {
         assertEquals(Color.web("#0f172a"), harness.backgroundColor("#statusPane"));
         assertEquals(Color.web("#e5eefc"), harness.textFill("#brandLabel"));
         assertEquals(Color.web("#94a3b8"), harness.textFill("#taglineLabel"));
+        assertTrue(harness.isVisible("#projectContextCard"));
+        assertFalse(harness.isVisible("#agentConfigurationProfileCard"));
+        assertFalse(harness.isVisible("#planningAgentSettingsCard"));
+        assertFalse(harness.isVisible("#executionAgentSettingsCard"));
+        assertFalse(harness.isVisible("#prdValidationCard"));
+
+        harness.clickOn("#agentConfigurationNavButton");
+
+        assertEquals("Agent Configuration", harness.text("#workspaceTitleLabel"));
+        assertEquals("User-scoped execution profile and preflight diagnostics appear here.",
+                harness.text("#workspacePlaceholderLabel"));
+        assertEquals("Agent configuration workspace ready.", harness.text("#statusLabel"));
+        assertFalse(harness.isVisible("#projectContextCard"));
+        assertTrue(harness.isVisible("#agentConfigurationProfileCard"));
+        assertFalse(harness.isVisible("#planningAgentSettingsCard"));
+        assertFalse(harness.isVisible("#executionAgentSettingsCard"));
 
         harness.clickOn("#prdEditorNavButton");
 
@@ -79,6 +109,8 @@ class AppShellUiTest {
                 harness.text("#workspacePlaceholderLabel"));
         assertEquals("PRD Editor workspace ready.", harness.text("#statusLabel"));
         assertTrue(harness.hasStyleClass("#prdEditorNavButton", "shell-nav-button-active"));
+        assertTrue(harness.isVisible("#planningAgentSettingsCard"));
+        assertTrue(harness.isVisible("#prdValidationCard"));
 
         harness.clickOn("#executionNavButton");
 
@@ -87,6 +119,7 @@ class AppShellUiTest {
                 harness.text("#workspacePlaceholderLabel"));
         assertEquals("Execution workspace ready.", harness.text("#statusLabel"));
         assertTrue(harness.hasStyleClass("#executionNavButton", "shell-nav-button-active"));
+        assertTrue(harness.isVisible("#executionAgentSettingsCard"));
     }
 
     @Test
@@ -234,8 +267,7 @@ class AppShellUiTest {
         );
         assertTrue(harness.isVisible("#prdPlannerProgressRow"));
         assertEquals("Waiting for Codex to continue the planner...", harness.text("#prdPlannerProgressLabel"));
-        harness.waitUntil(() -> !harness.isDisabled("#prdPlannerSendButton")
-                && harness.text("#prdPlannerTranscriptArea").contains("Completed story."));
+        waitForPlannerReply(harness);
         assertTrue(harness.scrollValue("#workspaceScrollPane") < 0.3);
 
         harness.setScrollValue("#workspaceScrollPane", 0.0);
@@ -288,8 +320,7 @@ class AppShellUiTest {
         );
         assertTrue(harness.isVisible("#prdPlannerProgressRow"));
         assertEquals("Waiting for Codex to continue the planner...", harness.text("#prdPlannerProgressLabel"));
-        harness.waitUntil(() -> !harness.isDisabled("#prdPlannerSendButton")
-                && harness.text("#prdPlannerTranscriptArea").contains("Completed story."));
+        waitForPlannerReply(harness);
 
         double afterSendScroll = harness.scrollValue("#workspaceScrollPane");
         assertTrue(
@@ -303,12 +334,20 @@ class AppShellUiTest {
 
     @Test
     void appShellLoadsPlannerModelChoicesForPrdPlanning() throws Exception {
+        Path storageDirectory = tempDir.resolve("storage");
+        Path repository = createGitRepository("planner-models-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        ProjectMetadataInitializer projectMetadataInitializer = new ProjectMetadataInitializer();
+        projectMetadataInitializer.writeMetadata(activeProject);
+        projectMetadataInitializer.writeNativeWindowsPreflight(activeProject, passedNativePreflightReport(repository));
+        seedStoredProject(storageDirectory, repository);
+
         harness = new JavaFxUiHarness();
-        harness.launchPrimaryShell(tempDir.resolve("storage"));
+        harness.launchPrimaryShell(storageDirectory, "--ralphy.preflight.native.auto-run=false");
 
         harness.clickOn("#prdEditorNavButton");
-        harness.waitUntil(() -> harness.text("#prdPlannerModelStatusLabel").contains("Loaded"));
-        assertTrue(harness.exists("#prdPlannerModelComboBox"));
+        harness.waitUntil(() -> harness.text("#planningSettingsStatusLabel").contains("Loaded"));
+        assertTrue(harness.exists("#planningSettingsModelComboBox"));
     }
 
     @Test
@@ -398,7 +437,8 @@ class AppShellUiTest {
                 "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
         );
 
-        harness.waitUntil(() -> harness.text("#executionModelStatusLabel").contains("Loaded"));
+        harness.clickOn("#executionNavButton");
+        harness.waitUntil(() -> harness.text("#executionSettingsStatusLabel").contains("Loaded"));
 
         harness.clickOn("#storyImplementationPresetRadioButton");
         harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to play US-032"));
@@ -447,8 +487,9 @@ class AppShellUiTest {
                 "--ralphy.codex.command=" + fakeCodexCommand.toAbsolutePath().normalize()
         );
 
+        harness.clickOn("#executionNavButton");
+        harness.waitUntil(() -> harness.text("#executionSettingsStatusLabel").contains("Loaded"));
         harness.clickOn("#storyImplementationPresetRadioButton");
-        harness.waitUntil(() -> harness.text("#executionModelStatusLabel").contains("Loaded"));
         harness.waitUntil(() -> harness.text("#singleStorySessionSummaryLabel").contains("Ready to play US-030"));
         assertFalse(harness.isDisabled("#startSingleStoryButton"));
 
@@ -563,6 +604,58 @@ class AppShellUiTest {
         harness.clickOn("#assistantSummaryViewRadioButton");
 
         assertEquals("Implemented US-029. Ran verification.", harness.text("#runOutputTextArea"));
+    }
+
+    @Test
+    void appShellForcesRawOutputWhenLatestRunUsedCopilot() throws Exception {
+        Path storageDirectory = tempDir.resolve("copilot-run-output-storage");
+        Path repository = createGitRepository("copilot-run-output-repo");
+        ActiveProject activeProject = new ActiveProject(repository);
+        seedRunOutputArtifacts(
+                activeProject,
+                "run-copilot-1",
+                "US-044",
+                "Copilot raw output",
+                "",
+                ""
+        );
+        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
+        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
+        localMetadataStorage.replaceRunMetadataForTest(List.of(new LocalMetadataStorage.RunMetadataRecord(
+                "run-copilot-1",
+                projectId,
+                "US-044",
+                "SUCCEEDED",
+                "2026-03-18T14:00:00Z",
+                "2026-03-18T14:02:00Z",
+                "POWERSHELL",
+                repository.toString(),
+                2233L,
+                0,
+                List.of("copilot", "-sp", "prompt", "--no-ask-user", "--allow-all-tools"),
+                new LocalMetadataStorage.RunArtifactPaths(
+                        activeProject.promptsDirectoryPath().resolve("US-044").resolve("run-copilot-1").resolve("prompt.txt")
+                                .toString(),
+                        activeProject.logsDirectoryPath().resolve("US-044").resolve("run-copilot-1").resolve("stdout.log")
+                                .toString(),
+                        activeProject.logsDirectoryPath().resolve("US-044").resolve("run-copilot-1").resolve("stderr.log")
+                                .toString(),
+                        null,
+                        activeProject.artifactsDirectoryPath().resolve("US-044").resolve("run-copilot-1")
+                                .resolve("attempt-summary.json").toString(),
+                        activeProject.artifactsDirectoryPath().resolve("US-044").resolve("run-copilot-1")
+                                .resolve("assistant-summary.txt").toString()
+                )
+        )));
+
+        harness = new JavaFxUiHarness();
+        harness.launchPrimaryShell(storageDirectory);
+
+        assertTrue(harness.isSelected("#rawOutputViewRadioButton"));
+        assertFalse(harness.isVisible("#assistantSummaryViewRadioButton"));
+        assertFalse(harness.isVisible("#structuredRunOutputViewRadioButton"));
+        assertTrue(harness.isVisible("#runOutputTextArea"));
+        assertEquals("Copilot raw output", harness.text("#runOutputTextArea"));
     }
 
     @Test
@@ -1515,6 +1608,7 @@ class AppShellUiTest {
         harness.clickOn("#projectsNavButton");
         repositoryDirectoryChooser.queueSelectionForTest(repository);
         harness.clickOn("#openRepositoryButton");
+        harness.clickOn("#agentConfigurationNavButton");
 
         assertEquals("Native Windows PowerShell", harness.text("#executionProfileSummaryLabel"));
 
@@ -1531,6 +1625,7 @@ class AppShellUiTest {
         harness.closeShell();
         harness = new JavaFxUiHarness();
         harness.launchPrimaryShell(storageDirectory);
+        harness.clickOn("#agentConfigurationNavButton");
 
         assertEquals("profile-repo", harness.text("#activeProjectNameLabel"));
         assertEquals("WSL: Ubuntu-24.04 (C:\\Users\\james\\workspaces -> /mnt/c/Users/james/workspaces)",
@@ -1547,13 +1642,38 @@ class AppShellUiTest {
     }
 
     @Test
+    void appShellShowsOnlyLinuxExecutionConfigurationWhenRunningOnLinux() throws Exception {
+        String previousHostOverride = System.getProperty("ralphy.host.os-name");
+        System.setProperty("ralphy.host.os-name", "Linux");
+        try {
+            Path storageDirectory = tempDir.resolve("linux-storage");
+            Path repository = createGitRepository("linux-profile-repo");
+            seedStoredProject(storageDirectory, repository);
+
+            harness = new JavaFxUiHarness();
+            harness.launchPrimaryShell(storageDirectory);
+            harness.clickOn("#agentConfigurationNavButton");
+
+            assertEquals("Native Linux Shell", harness.text("#executionProfileSummaryLabel"));
+            assertFalse(harness.isVisible("#wslExecutionProfileRadioButton"));
+            assertFalse(harness.isVisible("#wslPreflightSection"));
+            assertFalse(harness.isVisible("#wslExecutionProfileFieldsContainer"));
+        } finally {
+            if (previousHostOverride == null) {
+                System.clearProperty("ralphy.host.os-name");
+            } else {
+                System.setProperty("ralphy.host.os-name", previousHostOverride);
+            }
+        }
+    }
+
+    @Test
     void appShellShowsStoredNativePreflightFailuresWithCategories() throws Exception {
         Path storageDirectory = tempDir.resolve("storage");
         Path repository = createGitRepository("preflight-repo");
         ActiveProject activeProject = new ActiveProject(repository);
-        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
-        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
-        localMetadataStorage.saveExecutionProfile(projectId, new ExecutionProfile(
+        seedStoredProject(storageDirectory, repository);
+        seedUserPreferencesSettings(storageDirectory).saveExecutionProfile(new ExecutionProfile(
                 ExecutionProfile.ProfileType.WSL,
                 "Ubuntu-24.04",
                 "C:\\Users\\james\\workspaces",
@@ -1572,6 +1692,23 @@ class AppShellUiTest {
                                 NativeWindowsPreflightReport.CheckCategory.TOOLING,
                                 NativeWindowsPreflightReport.CheckStatus.PASS,
                                 "Detected codex-cli 0.114.0."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
+                                "copilot_cli",
+                                "GitHub Copilot CLI",
+                                NativeWindowsPreflightReport.CheckCategory.TOOLING,
+                                NativeWindowsPreflightReport.CheckStatus.FAIL,
+                                "GitHub Copilot CLI is unavailable: copilot: not found",
+                                List.of(
+                                        new PreflightRemediationCommand(
+                                                "Install GitHub Copilot CLI",
+                                                "npm install -g @github/copilot"
+                                        ),
+                                        new PreflightRemediationCommand(
+                                                "Authenticate GitHub Copilot CLI",
+                                                "copilot login"
+                                        )
+                                )
                         ),
                         new NativeWindowsPreflightReport.CheckResult(
                                 "codex_auth",
@@ -1616,17 +1753,20 @@ class AppShellUiTest {
 
         harness = new JavaFxUiHarness();
         harness.launchPrimaryShell(storageDirectory);
+        harness.clickOn("#agentConfigurationNavButton");
 
         assertEquals("Native execution blocked", harness.text("#nativePreflightSummaryLabel"));
-        assertTrue(harness.text("#nativePreflightDetailLabel").contains("Native PowerShell runs stay blocked"));
+        assertTrue(harness.text("#nativePreflightDetailLabel").contains("Native Windows PowerShell runs stay blocked"));
         String checks = harness.text("#nativePreflightChecksLabel");
         assertTrue(checks.contains("PASS | Tooling | Codex CLI"));
+        assertTrue(checks.contains("FAIL | Tooling | GitHub Copilot CLI"));
         assertTrue(checks.contains("FAIL | Authentication | Codex Auth"));
         assertTrue(checks.contains("PASS | Git | Git Readiness"));
         assertTrue(checks.contains("FAIL | Quality Gate | Quality Gate Command"));
         assertTrue(harness.isVisible("#nativePreflightRemediationSection"));
         String remediation = harness.textContent("#nativePreflightRemediationSection");
         assertTrue(remediation.contains("Ralphy never installs or authenticates Codex automatically"));
+        assertTrue(remediation.contains("@github/copilot"));
         assertTrue(remediation.contains("codex login"));
         assertTrue(remediation.contains(".\\mvnw.cmd clean verify jacoco:report"));
         assertTrue(remediation.contains("Copy"));
@@ -1638,9 +1778,8 @@ class AppShellUiTest {
         Path workspaceRoot = Files.createDirectories(tempDir.resolve("wsl-workspaces"));
         Path repository = createGitRepository(workspaceRoot, "wsl-preflight-repo");
         ActiveProject activeProject = new ActiveProject(repository);
-        LocalMetadataStorage localMetadataStorage = seedStoredProject(storageDirectory, repository);
-        String projectId = localMetadataStorage.snapshot().projects().getFirst().projectId();
-        localMetadataStorage.saveExecutionProfile(projectId, new ExecutionProfile(
+        seedStoredProject(storageDirectory, repository);
+        seedUserPreferencesSettings(storageDirectory).saveExecutionProfile(new ExecutionProfile(
                 ExecutionProfile.ProfileType.WSL,
                 "Ubuntu-24.04",
                 workspaceRoot.toString(),
@@ -1682,6 +1821,20 @@ class AppShellUiTest {
                                 )
                         ),
                         new WslPreflightReport.CheckResult(
+                                "copilot_cli",
+                                "GitHub Copilot CLI",
+                                WslPreflightReport.CheckCategory.TOOLING,
+                                WslPreflightReport.CheckStatus.FAIL,
+                                "GitHub Copilot CLI is unavailable inside the selected WSL distribution: copilot: not found",
+                                List.of(
+                                        new PreflightRemediationCommand(
+                                                "Install GitHub Copilot CLI in the selected WSL distribution",
+                                                "wsl.exe --distribution \"Ubuntu-24.04\" --exec /bin/sh -lc "
+                                                        + "\"npm install -g @github/copilot\""
+                                        )
+                                )
+                        ),
+                        new WslPreflightReport.CheckResult(
                                 "codex_auth",
                                 "Codex Auth",
                                 WslPreflightReport.CheckCategory.AUTHENTICATION,
@@ -1707,6 +1860,7 @@ class AppShellUiTest {
 
         harness = new JavaFxUiHarness();
         harness.launchPrimaryShell(storageDirectory);
+        harness.clickOn("#agentConfigurationNavButton");
 
         assertEquals("WSL execution blocked", harness.text("#wslPreflightSummaryLabel"));
         assertTrue(harness.text("#wslPreflightDetailLabel").contains("WSL runs stay blocked"));
@@ -1714,11 +1868,13 @@ class AppShellUiTest {
         assertTrue(checks.contains("PASS | Distribution | WSL Distribution"));
         assertTrue(checks.contains("PASS | Path Mapping | Repository Path Mapping"));
         assertTrue(checks.contains("FAIL | Tooling | Codex CLI"));
+        assertTrue(checks.contains("FAIL | Tooling | GitHub Copilot CLI"));
         assertTrue(checks.contains("FAIL | Authentication | Codex Auth"));
         assertTrue(checks.contains("PASS | Git | Git Readiness"));
         assertTrue(harness.isVisible("#wslPreflightRemediationSection"));
         String remediation = harness.textContent("#wslPreflightRemediationSection");
         assertTrue(remediation.contains("wsl.exe --distribution \"Ubuntu-24.04\""));
+        assertTrue(remediation.contains("@github/copilot"));
         assertTrue(remediation.contains("codex login"));
         assertTrue(remediation.contains("Copy"));
     }
@@ -1758,6 +1914,14 @@ class AppShellUiTest {
         localMetadataStorage.recordProjectActivation(new ActiveProject(repository));
         localMetadataStorage.finishSession();
         return localMetadataStorage;
+    }
+
+    private UserPreferencesSettingsService seedUserPreferencesSettings(Path storageDirectory) {
+        Preferences preferences = Preferences.userRoot().node("/net/uberfoo/ai/ralphy/tests/"
+                + Integer.toUnsignedString(storageDirectory.toAbsolutePath().normalize().toString().hashCode()));
+        UserPreferencesSettingsService settingsService = new UserPreferencesSettingsService(preferences);
+        settingsService.clearForTest();
+        return settingsService;
     }
 
     private void seedStoryProgressArtifacts(Path repository, String markdown, String prdJson) throws IOException {
@@ -2211,6 +2375,13 @@ class AppShellUiTest {
                                 "Detected fake Codex CLI."
                         ),
                         new NativeWindowsPreflightReport.CheckResult(
+                                "copilot_cli",
+                                "GitHub Copilot CLI",
+                                NativeWindowsPreflightReport.CheckCategory.TOOLING,
+                                NativeWindowsPreflightReport.CheckStatus.PASS,
+                                "Detected fake GitHub Copilot CLI."
+                        ),
+                        new NativeWindowsPreflightReport.CheckResult(
                                 "codex_auth",
                                 "Codex Auth",
                                 NativeWindowsPreflightReport.CheckCategory.AUTHENTICATION,
@@ -2326,11 +2497,31 @@ class AppShellUiTest {
                     echo codex-cli 0.114.0
                     exit /b 0
                 )
+                if "%~1"=="app-server" (
+                    powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"init-1\",\"result\":{\"capabilities\":{}}}'; Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"model-list-1\",\"result\":{\"data\":[{\"id\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Frontier model\",\"isDefault\":true,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\",\"xhigh\"]},{\"id\":\"gpt-5.4-mini\",\"displayName\":\"GPT-5.4 Mini\",\"description\":\"Fast model\",\"isDefault\":false,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\"]}]}}'"
+                    exit /b 0
+                )
 
                 powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Start-Sleep -Milliseconds __SLEEP_MS__; Write-Output '{\"event\":\"assistant_message.delta\",\"role\":\"assistant\",\"delta\":\"Working...\"}'; Write-Output '{\"event\":\"assistant_message.completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Completed story.\"}]}'"
                 exit /b 0
                 """.replace("__SLEEP_MS__", Long.toString(sleepMilliseconds)));
         return commandPath;
+    }
+
+    private void waitForPlannerReply(JavaFxUiHarness harness) throws Exception {
+        try {
+            harness.waitUntil(() -> !harness.isDisabled("#prdPlannerSendButton")
+                    && harness.text("#prdPlannerTranscriptArea").contains("Completed story."));
+        } catch (java.util.concurrent.TimeoutException timeoutException) {
+            throw new AssertionError(
+                    "Planner reply did not complete in time. sendDisabled=" + harness.isDisabled("#prdPlannerSendButton")
+                            + ", progressVisible=" + harness.isVisible("#prdPlannerProgressRow")
+                            + ", progressLabel=" + harness.text("#prdPlannerProgressLabel")
+                            + ", plannerMessage=" + harness.text("#prdPlannerMessageLabel")
+                            + ", transcript=" + harness.text("#prdPlannerTranscriptArea"),
+                    timeoutException
+            );
+        }
     }
 
     private Path createFlakyCodexCommandScript(Path invocationCounterPath) throws IOException {
@@ -2339,6 +2530,10 @@ class AppShellUiTest {
                 @echo off
                 if "%~1"=="--version" (
                     echo codex-cli 0.114.0
+                    exit /b 0
+                )
+                if "%~1"=="app-server" (
+                    powershell.exe -NoLogo -NoProfile -Command "$null = [Console]::In.ReadToEnd(); Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"init-1\",\"result\":{\"capabilities\":{}}}'; Write-Output '{\"jsonrpc\":\"2.0\",\"id\":\"model-list-1\",\"result\":{\"data\":[{\"id\":\"gpt-5.4\",\"displayName\":\"GPT-5.4\",\"description\":\"Frontier model\",\"isDefault\":true,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\",\"xhigh\"]},{\"id\":\"gpt-5.4-mini\",\"displayName\":\"GPT-5.4 Mini\",\"description\":\"Fast model\",\"isDefault\":false,\"hidden\":false,\"reasoningEfforts\":[\"low\",\"medium\",\"high\"]}]}}'"
                     exit /b 0
                 )
 
@@ -2391,9 +2586,23 @@ class AppShellUiTest {
 
     private Object liveRunOutputPresentationState(String rawOutput) throws Exception {
         Class<?> stateClass = Class.forName("net.uberfoo.ai.ralphy.AppShellController$RunOutputPresentationState");
-        Method liveMethod = stateClass.getDeclaredMethod("live", String.class, String.class, String.class, String.class);
+        Method liveMethod = stateClass.getDeclaredMethod(
+                "live",
+                ExecutionAgentProvider.class,
+                String.class,
+                String.class,
+                String.class,
+                String.class
+        );
         liveMethod.setAccessible(true);
-        return liveMethod.invoke(null, "Streaming US-040 | RUNNING", "Run run-040-1 started in test.", "", rawOutput);
+        return liveMethod.invoke(
+                null,
+                ExecutionAgentProvider.CODEX,
+                "Streaming US-040 | RUNNING",
+                "Run run-040-1 started in test.",
+                "",
+                rawOutput
+        );
     }
 
     private void runOnFxThread(ThrowingRunnable action) throws Exception {

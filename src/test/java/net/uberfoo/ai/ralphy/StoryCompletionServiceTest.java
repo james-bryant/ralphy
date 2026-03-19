@@ -21,7 +21,11 @@ class StoryCompletionServiceTest {
     void validateAndCommitRunsAutomatedQualityGatesAndStoresCommitMetadata() throws IOException {
         Path repository = createGitRepository("commit-success-repo");
         FakeCommandExecutor commandExecutor = new FakeCommandExecutor();
-        StoryCompletionService service = new StoryCompletionService(commandExecutor);
+        StoryCompletionService service = new StoryCompletionService(
+                commandExecutor,
+                "git",
+                HostOperatingSystem.WINDOWS
+        );
 
         StoryCompletionService.StoryCompletionResult result = service.validateAndCommit(
                 new ActiveProject(repository),
@@ -73,7 +77,11 @@ class StoryCompletionServiceTest {
                 return StoryCompletionService.CommandResult.failure("Unexpected command");
             }
         };
-        StoryCompletionService service = new StoryCompletionService(commandExecutor);
+        StoryCompletionService service = new StoryCompletionService(
+                commandExecutor,
+                "git",
+                HostOperatingSystem.WINDOWS
+        );
 
         StoryCompletionService.StoryCompletionResult result = service.validateAndCommit(
                 new ActiveProject(repository),
@@ -100,6 +108,53 @@ class StoryCompletionServiceTest {
                 )),
                 commandExecutor.commands()
         );
+    }
+
+    @Test
+    void validateAndCommitUsesPosixShellForLinuxQualityGates() throws IOException {
+        Path repository = createGitRepository("linux-commit-repo");
+        FakeCommandExecutor commandExecutor = new FakeCommandExecutor() {
+            @Override
+            public StoryCompletionService.CommandResult execute(Path workingDirectory, List<String> command) {
+                commands().add(List.copyOf(command));
+                if (command.equals(List.of("/bin/sh", "-lc", "./mvnw clean verify jacoco:report"))) {
+                    return StoryCompletionService.CommandResult.success(0, "BUILD SUCCESS");
+                }
+                if (command.equals(List.of("git", "add", "--all"))) {
+                    return StoryCompletionService.CommandResult.success(0, "");
+                }
+                if (command.equals(List.of("git", "status", "--porcelain"))) {
+                    return StoryCompletionService.CommandResult.success(0, "M src/main/java/net/uberfoo/ai/ralphy/AppShellController.java");
+                }
+                if (command.equals(List.of("git", "commit", "-m", "US-034: Commit Each Completed Story"))) {
+                    return StoryCompletionService.CommandResult.success(0, "");
+                }
+                if (command.equals(List.of("git", "rev-parse", "HEAD"))) {
+                    return StoryCompletionService.CommandResult.success(0, "abc123def456");
+                }
+                return StoryCompletionService.CommandResult.failure("Unexpected command");
+            }
+        };
+        StoryCompletionService service = new StoryCompletionService(
+                commandExecutor,
+                "git",
+                HostOperatingSystem.LINUX
+        );
+
+        StoryCompletionService.StoryCompletionResult result = service.validateAndCommit(
+                new ActiveProject(repository),
+                PrdTaskRecord.created(
+                        "US-034",
+                        "Commit Each Completed Story",
+                        "Implementation history is traceable story by story.",
+                        "2026-03-16T00:00:00Z"
+                ),
+                List.of("./mvnw clean verify jacoco:report and Linux smoke verification")
+        );
+
+        assertTrue(result.successful());
+        assertEquals(List.of("/bin/sh", "-lc", "./mvnw clean verify jacoco:report"),
+                commandExecutor.commands().getFirst());
     }
 
     private Path createGitRepository(String directoryName) throws IOException {

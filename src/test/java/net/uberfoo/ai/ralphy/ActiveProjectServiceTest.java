@@ -15,6 +15,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.prefs.Preferences;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -112,7 +113,7 @@ class ActiveProjectServiceTest {
                 metadataSnapshot.projects().getFirst().storagePaths().prdsDirectoryPath());
         assertEquals(activeProject.logsDirectoryPath().toString(),
                 metadataSnapshot.sessions().getFirst().storagePaths().logsDirectoryPath());
-        assertEquals("POWERSHELL", metadataSnapshot.profiles().getFirst().profileType());
+        assertEquals("NATIVE", metadataSnapshot.profiles().getFirst().profileType());
     }
 
     @Test
@@ -401,14 +402,14 @@ class ActiveProjectServiceTest {
     }
 
     @Test
-    void saveExecutionProfilePersistsWslSettingsAndReloadsThemPerProject() throws IOException {
+    void saveExecutionProfilePersistsWslSettingsAsUserScopedSettings() throws IOException {
         LocalMetadataStorage localMetadataStorage = createStorage();
         ActiveProjectService activeProjectService = createService(localMetadataStorage);
         Path repositoryOne = createGitDirectoryRepository("profile-one");
         Path repositoryTwo = createGitDirectoryRepository("profile-two");
 
         assertTrue(activeProjectService.openRepository(repositoryOne).successful());
-        assertEquals(ExecutionProfile.ProfileType.POWERSHELL,
+        assertEquals(ExecutionProfile.ProfileType.NATIVE,
                 activeProjectService.executionProfile().orElseThrow().type());
 
         ActiveProjectService.ExecutionProfileSaveResult wslSaveResult = activeProjectService.saveExecutionProfile(
@@ -427,7 +428,7 @@ class ActiveProjectServiceTest {
         assertEquals("/mnt/c/Users/james/workspaces", wslSaveResult.executionProfile().wslPathPrefix());
 
         assertTrue(activeProjectService.openRepository(repositoryTwo).successful());
-        assertEquals(ExecutionProfile.ProfileType.POWERSHELL,
+        assertEquals(ExecutionProfile.ProfileType.WSL,
                 activeProjectService.executionProfile().orElseThrow().type());
 
         assertTrue(activeProjectService.openRepository(repositoryOne).successful());
@@ -436,14 +437,6 @@ class ActiveProjectServiceTest {
         assertEquals("Ubuntu-24.04", restoredProfile.wslDistribution());
         assertEquals("C:\\Users\\james\\workspaces", restoredProfile.windowsPathPrefix());
         assertEquals("/mnt/c/Users/james/workspaces", restoredProfile.wslPathPrefix());
-
-        LocalMetadataStorage.ProfileRecord persistedProfile = localMetadataStorage.snapshot().profiles().stream()
-                .filter(profileRecord -> profileRecord.projectId().equals(
-                        localMetadataStorage.projectRecordForRepository(repositoryOne).orElseThrow().projectId()))
-                .findFirst()
-                .orElseThrow();
-        assertEquals("WSL", persistedProfile.profileType());
-        assertEquals("Ubuntu-24.04", persistedProfile.wslDistribution());
     }
 
     @Test
@@ -536,7 +529,7 @@ class ActiveProjectServiceTest {
     }
 
     @Test
-    void startEligibleSingleStoryAddsSelectedModelToCodexOptions() throws IOException {
+    void startEligibleSingleStoryAddsSelectedCodexModelAndThinkingToOptions() throws IOException {
         LocalMetadataStorage localMetadataStorage = createStorage();
         AtomicReference<CodexLauncherService.CodexLaunchPlan> capturedLaunchPlan = new AtomicReference<>();
         ActiveProjectService activeProjectService = createService(
@@ -561,14 +554,60 @@ class ActiveProjectServiceTest {
 
         ActiveProjectService.SingleStoryStartResult startResult = activeProjectService.startEligibleSingleStory(
                 PresetUseCase.STORY_IMPLEMENTATION,
-                new ExecutionAgentSelection(ExecutionAgentProvider.CODEX, "gpt-5.4-mini"),
+                new ExecutionAgentSelection(ExecutionAgentProvider.CODEX, "gpt-5.4-mini", "high"),
                 CodexLauncherService.RunOutputListener.noop()
         );
 
         assertTrue(startResult.successful());
         assertNotNull(capturedLaunchPlan.get());
+        assertEquals(ExecutionAgentProvider.CODEX, capturedLaunchPlan.get().agentSelection().provider());
+        assertTrue(capturedLaunchPlan.get().command().contains("--json"));
         assertTrue(capturedLaunchPlan.get().command().contains("--model"));
         assertTrue(capturedLaunchPlan.get().command().contains("gpt-5.4-mini"));
+        assertTrue(capturedLaunchPlan.get().command().contains("--reasoning-effort"));
+        assertTrue(capturedLaunchPlan.get().command().contains("high"));
+    }
+
+    @Test
+    void startEligibleSingleStorySupportsCopilotProviderModelAndThinkingSelection() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        AtomicReference<CodexLauncherService.CodexLaunchPlan> capturedLaunchPlan = new AtomicReference<>();
+        ActiveProjectService activeProjectService = createService(
+                localMetadataStorage,
+                launchPlan -> {
+                    capturedLaunchPlan.set(launchPlan);
+                    return CodexLauncherService.ProcessExecution.completed(4321L, 0, "Done.", "");
+                },
+                () -> "run-copilot-1"
+        );
+        Path repository = createGitDirectoryRepository("single-story-copilot-selection-repo");
+        seedQualityGateFiles(repository);
+
+        assertTrue(activeProjectService.openRepository(repository).successful());
+        assertTrue(activeProjectService.saveActivePrd(validPrdMarkdown(
+                "- .\\mvnw.cmd clean verify jacoco:report",
+                """
+                ### US-043: Choose Copilot Execution
+                **Outcome:** Story runs with the selected GitHub Copilot model and thinking level.
+                """
+        )).successful());
+
+        ActiveProjectService.SingleStoryStartResult startResult = activeProjectService.startEligibleSingleStory(
+                PresetUseCase.STORY_IMPLEMENTATION,
+                new ExecutionAgentSelection(ExecutionAgentProvider.GITHUB_COPILOT, "gpt-5.4", "high"),
+                CodexLauncherService.RunOutputListener.noop()
+        );
+
+        assertTrue(startResult.successful());
+        assertNotNull(capturedLaunchPlan.get());
+        assertEquals(ExecutionAgentProvider.GITHUB_COPILOT, capturedLaunchPlan.get().agentSelection().provider());
+        assertTrue(capturedLaunchPlan.get().command().contains("-sp"));
+        assertTrue(capturedLaunchPlan.get().command().contains("--no-ask-user"));
+        assertTrue(capturedLaunchPlan.get().command().contains("--model"));
+        assertTrue(capturedLaunchPlan.get().command().contains("gpt-5.4"));
+        assertTrue(capturedLaunchPlan.get().command().contains("--reasoning-effort"));
+        assertTrue(capturedLaunchPlan.get().command().contains("high"));
+        assertFalse(capturedLaunchPlan.get().command().contains("--json"));
     }
 
     @Test
@@ -1028,7 +1067,30 @@ class ActiveProjectServiceTest {
 
         assertFalse(saveResult.successful());
         assertEquals("Enter a WSL distribution before saving the WSL execution profile.", saveResult.message());
-        assertEquals(ExecutionProfile.ProfileType.POWERSHELL,
+        assertEquals(ExecutionProfile.ProfileType.NATIVE,
+                activeProjectService.executionProfile().orElseThrow().type());
+    }
+
+    @Test
+    void saveExecutionProfileRejectsWslProfilesWhenRunningOnLinux() throws IOException {
+        LocalMetadataStorage localMetadataStorage = createStorage();
+        ActiveProjectService activeProjectService = createService(localMetadataStorage, HostOperatingSystem.LINUX);
+        Path repository = createGitDirectoryRepository("linux-profile-repo");
+        assertTrue(activeProjectService.openRepository(repository).successful());
+
+        ActiveProjectService.ExecutionProfileSaveResult saveResult = activeProjectService.saveExecutionProfile(
+                new ExecutionProfile(
+                        ExecutionProfile.ProfileType.WSL,
+                        "Ubuntu-24.04",
+                        "/home/james/workspaces",
+                        "/home/james/workspaces"
+                )
+        );
+
+        assertFalse(saveResult.successful());
+        assertEquals("WSL execution profiles are only available when Ralphy is running on Windows.",
+                saveResult.message());
+        assertEquals(ExecutionProfile.ProfileType.NATIVE,
                 activeProjectService.executionProfile().orElseThrow().type());
     }
 
@@ -1794,7 +1856,7 @@ class ActiveProjectServiceTest {
         assertTrue(activationResult.successful());
         NativeWindowsPreflightReport report = activeProjectService.latestNativeWindowsPreflightReport().orElseThrow();
         assertTrue(report.passed());
-        assertEquals(4, report.checks().size());
+        assertEquals(5, report.checks().size());
         NativeWindowsPreflightReport storedReport = projectMetadataInitializer
                 .readNativeWindowsPreflight(new ActiveProject(repository))
                 .orElseThrow();
@@ -1823,7 +1885,7 @@ class ActiveProjectServiceTest {
         assertTrue(saveResult.successful());
         WslPreflightReport report = activeProjectService.latestWslPreflightReport().orElseThrow();
         assertTrue(report.passed());
-        assertEquals(5, report.checks().size());
+        assertEquals(6, report.checks().size());
         WslPreflightReport storedReport = projectMetadataInitializer
                 .readWslPreflight(new ActiveProject(repository))
                 .orElseThrow();
@@ -1845,15 +1907,21 @@ class ActiveProjectServiceTest {
     }
 
     private ActiveProjectService createService() throws IOException {
-        return createService(createStorage());
+        return createService(createStorage(), HostOperatingSystem.WINDOWS);
     }
 
     private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage) throws IOException {
+        return createService(localMetadataStorage, HostOperatingSystem.WINDOWS);
+    }
+
+    private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage,
+                                               HostOperatingSystem hostOperatingSystem) throws IOException {
         return createService(
                 localMetadataStorage,
                 launchPlan -> CodexLauncherService.ProcessExecution.completed(1234L, 0, "", ""),
                 () -> "run-default",
-                createStoryCompletionCommandExecutor()
+                createStoryCompletionCommandExecutor(hostOperatingSystem),
+                hostOperatingSystem
         );
     }
 
@@ -1864,7 +1932,8 @@ class ActiveProjectServiceTest {
                 localMetadataStorage,
                 processExecutor,
                 runIdGenerator,
-                createStoryCompletionCommandExecutor()
+                createStoryCompletionCommandExecutor(HostOperatingSystem.WINDOWS),
+                HostOperatingSystem.WINDOWS
         );
     }
 
@@ -1873,21 +1942,42 @@ class ActiveProjectServiceTest {
                                                java.util.function.Supplier<String> runIdGenerator,
                                                StoryCompletionService.CommandExecutor storyCompletionCommandExecutor)
             throws IOException {
+        return createService(
+                localMetadataStorage,
+                processExecutor,
+                runIdGenerator,
+                storyCompletionCommandExecutor,
+                HostOperatingSystem.WINDOWS
+        );
+    }
+
+    private ActiveProjectService createService(LocalMetadataStorage localMetadataStorage,
+                                               CodexLauncherService.ProcessExecutor processExecutor,
+                                               java.util.function.Supplier<String> runIdGenerator,
+                                               StoryCompletionService.CommandExecutor storyCompletionCommandExecutor,
+                                               HostOperatingSystem hostOperatingSystem)
+            throws IOException {
         PresetCatalogService presetCatalogService = new PresetCatalogService();
         CodexLauncherService codexLauncherService = new CodexLauncherService(
                 localMetadataStorage,
                 java.time.Clock.systemUTC(),
                 runIdGenerator,
-                processExecutor
+                processExecutor,
+                CodexCliSupport.DEFAULT_COMMAND,
+                CopilotCliSupport.DEFAULT_COMMAND,
+                distribution -> "/bin/zsh",
+                hostOperatingSystem
         );
-        StoryCompletionService storyCompletionService = new StoryCompletionService(storyCompletionCommandExecutor);
+        StoryCompletionService storyCompletionService =
+                new StoryCompletionService(storyCompletionCommandExecutor, "git", hostOperatingSystem);
         return new ActiveProjectService(
                 createGitFeatureBranchService(),
                 gitRepositoryInitializer,
                 projectMetadataInitializer,
                 projectStorageInitializer,
                 localMetadataStorage,
-                createNativePreflightService(),
+                createUserPreferencesSettingsService(),
+                createNativePreflightService(hostOperatingSystem),
                 prdStructureValidator,
                 prdTaskStateStore,
                 prdTaskSynchronizer,
@@ -1896,8 +1986,16 @@ class ActiveProjectServiceTest {
                 presetCatalogService,
                 codexLauncherService,
                 createWslPreflightService(),
+                hostOperatingSystem,
                 true,
                 true
+        );
+    }
+
+    private UserPreferencesSettingsService createUserPreferencesSettingsService() {
+        return new UserPreferencesSettingsService(
+                Preferences.userRoot().node("/net/uberfoo/ai/ralphy/tests/active-project-service/"
+                        + Integer.toUnsignedString(tempDir.toString().hashCode()))
         );
     }
 
@@ -1951,17 +2049,22 @@ class ActiveProjectServiceTest {
         });
     }
 
-    private StoryCompletionService.CommandExecutor createStoryCompletionCommandExecutor() {
+    private StoryCompletionService.CommandExecutor createStoryCompletionCommandExecutor(
+            HostOperatingSystem hostOperatingSystem) {
         return new StoryCompletionService.CommandExecutor() {
             @Override
             public StoryCompletionService.CommandResult execute(Path workingDirectory, List<String> command) {
-                if (command.equals(List.of(
+                if ((hostOperatingSystem.isWindows() && command.equals(List.of(
                         "powershell.exe",
                         "-NoLogo",
                         "-NoProfile",
                         "-Command",
                         ".\\mvnw.cmd clean verify jacoco:report"
-                ))) {
+                ))) || (!hostOperatingSystem.isWindows() && command.equals(List.of(
+                        "/bin/sh",
+                        "-lc",
+                        "./mvnw clean verify jacoco:report"
+                )))) {
                     return StoryCompletionService.CommandResult.success(0, "BUILD SUCCESS");
                 }
                 if (command.equals(List.of("git", "add", "--all"))) {
@@ -2012,7 +2115,8 @@ class ActiveProjectServiceTest {
         };
     }
 
-    private NativeWindowsPreflightService createNativePreflightService() throws IOException {
+    private NativeWindowsPreflightService createNativePreflightService(HostOperatingSystem hostOperatingSystem)
+            throws IOException {
         Path codexHome = tempDir.resolve("codex-home");
         Files.createDirectories(codexHome);
         Files.writeString(codexHome.resolve("auth.json"), """
@@ -2027,8 +2131,10 @@ class ActiveProjectServiceTest {
         return new NativeWindowsPreflightService(
                 java.util.Map.of(),
                 codexHome,
+                hostOperatingSystem,
                 (workingDirectory, command) -> switch (command.getFirst()) {
                     case "codex" -> NativeWindowsPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
+                    case "copilot" -> NativeWindowsPreflightService.CommandResult.success(0, "copilot-cli 1.0.7");
                     case "git" -> NativeWindowsPreflightService.CommandResult.success(0, "true");
                     default -> NativeWindowsPreflightService.CommandResult.failure("Unexpected command");
                 }
@@ -2048,7 +2154,10 @@ class ActiveProjectServiceTest {
             if (script.contains("pwd")) {
                 return WslPreflightService.CommandResult.success(0, "/mnt/c/wsl-workspaces/wsl-preflight-repo");
             }
-            if (script.contains("configured interactive shell")) {
+            if (script.contains("GitHub Copilot CLI")) {
+                return WslPreflightService.CommandResult.success(0, "copilot-cli 1.0.7");
+            }
+            if (script.contains("Codex CLI")) {
                 return WslPreflightService.CommandResult.success(0, "codex-cli 0.114.0");
             }
             if (script.contains("OPENAI_API_KEY")) {

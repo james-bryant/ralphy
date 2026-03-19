@@ -16,19 +16,27 @@ import java.util.Objects;
 public class StoryCompletionService {
     private final CommandExecutor commandExecutor;
     private final String gitCommand;
+    private final HostOperatingSystem hostOperatingSystem;
 
     @Autowired
     public StoryCompletionService(@Value("${ralphy.git.command:git}") String gitCommand) {
-        this(new SystemCommandExecutor(), gitCommand);
+        this(new SystemCommandExecutor(), gitCommand, HostOperatingSystem.detectRuntime());
     }
 
     StoryCompletionService(CommandExecutor commandExecutor) {
-        this(commandExecutor, "git");
+        this(commandExecutor, "git", HostOperatingSystem.detectRuntime());
     }
 
     StoryCompletionService(CommandExecutor commandExecutor, String gitCommand) {
+        this(commandExecutor, gitCommand, HostOperatingSystem.detectRuntime());
+    }
+
+    StoryCompletionService(CommandExecutor commandExecutor,
+                           String gitCommand,
+                           HostOperatingSystem hostOperatingSystem) {
         this.commandExecutor = Objects.requireNonNull(commandExecutor, "commandExecutor must not be null");
         this.gitCommand = Objects.requireNonNull(gitCommand, "gitCommand must not be null");
+        this.hostOperatingSystem = hostOperatingSystem == null ? HostOperatingSystem.detectRuntime() : hostOperatingSystem;
     }
 
     public StoryCompletionResult validateAndCommit(ActiveProject activeProject,
@@ -42,7 +50,7 @@ public class StoryCompletionService {
         for (String qualityGate : automatedQualityGates) {
             CommandResult validationResult = commandExecutor.execute(
                     repositoryPath,
-                    List.of("powershell.exe", "-NoLogo", "-NoProfile", "-Command", qualityGate)
+                    qualityGateCommand(qualityGate)
             );
             if (!validationResult.successful()) {
                 return StoryCompletionResult.failure(
@@ -121,12 +129,25 @@ public class StoryCompletionService {
 
         String trimmedValue = value.trim();
         String normalizedValue = trimmedValue.toLowerCase(Locale.ROOT);
-        String mavenWrapperCommand = ".\\mvnw.cmd clean verify jacoco:report";
-        int mavenWrapperIndex = normalizedValue.indexOf(mavenWrapperCommand);
-        if (mavenWrapperIndex >= 0) {
-            return trimmedValue.substring(mavenWrapperIndex, mavenWrapperIndex + mavenWrapperCommand.length());
+        for (String supportedMavenWrapperCommand : List.of(
+                ".\\mvnw.cmd clean verify jacoco:report",
+                "./mvnw clean verify jacoco:report")) {
+            int mavenWrapperIndex = normalizedValue.indexOf(supportedMavenWrapperCommand);
+            if (mavenWrapperIndex >= 0) {
+                return trimmedValue.substring(
+                        mavenWrapperIndex,
+                        mavenWrapperIndex + supportedMavenWrapperCommand.length()
+                );
+            }
         }
         return trimmedValue;
+    }
+
+    private List<String> qualityGateCommand(String qualityGate) {
+        if (hostOperatingSystem.isWindows()) {
+            return List.of("powershell.exe", "-NoLogo", "-NoProfile", "-Command", qualityGate);
+        }
+        return List.of("/bin/sh", "-lc", qualityGate);
     }
 
     private boolean looksExecutable(String value) {

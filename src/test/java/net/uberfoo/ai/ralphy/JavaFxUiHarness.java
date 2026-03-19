@@ -80,6 +80,11 @@ final class JavaFxUiHarness {
     void launchPrimaryShell(Path storageDirectory, String... additionalArgs) throws Exception {
         springBridge = new JavaFxSpringBridge(RalphySpringApplication.class);
         List<String> applicationArgs = new ArrayList<>();
+        String preferencesNodeSeed = (storageDirectory == null
+                ? Path.of(".").toAbsolutePath().normalize()
+                : storageDirectory.toAbsolutePath().normalize()).toString();
+        applicationArgs.add("--ralphy.user.settings.node-path=/net/uberfoo/ai/ralphy/tests/"
+                + Integer.toUnsignedString(preferencesNodeSeed.hashCode()));
         if (storageDirectory != null) {
             applicationArgs.add("--ralphy.storage.directory=" + storageDirectory.toAbsolutePath().normalize());
         }

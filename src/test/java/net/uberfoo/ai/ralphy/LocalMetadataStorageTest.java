@@ -47,7 +47,7 @@ class LocalMetadataStorageTest {
         assertEquals(activeProject.promptsDirectoryPath().toString(), sessionRecord.storagePaths().promptsDirectoryPath());
         assertEquals(activeProject.logsDirectoryPath().toString(), sessionRecord.storagePaths().logsDirectoryPath());
         assertEquals(projectRecord.projectId(), profileRecord.projectId());
-        assertEquals("POWERSHELL", profileRecord.profileType());
+        assertEquals("NATIVE", profileRecord.profileType());
         assertNull(profileRecord.wslDistribution());
         assertNull(profileRecord.windowsPathPrefix());
         assertNull(profileRecord.wslPathPrefix());
@@ -106,11 +106,11 @@ class LocalMetadataStorageTest {
         assertEquals(activeProject.logsDirectoryPath().toString(),
                 migratedSnapshot.sessions().getFirst().storagePaths().logsDirectoryPath());
         assertEquals(1, migratedSnapshot.profiles().size());
-        assertEquals("POWERSHELL", migratedSnapshot.profiles().getFirst().profileType());
+        assertEquals("NATIVE", migratedSnapshot.profiles().getFirst().profileType());
     }
 
     @Test
-    void versionTwoMetadataStoreMigratesLegacyUnconfiguredProfilesToPowerShell() throws IOException {
+    void versionTwoMetadataStoreMigratesLegacyUnconfiguredProfilesToNative() throws IOException {
         Path storageDirectory = tempDir.resolve("schema-two-storage");
         Files.createDirectories(storageDirectory);
         Path repositoryPath = Files.createDirectory(tempDir.resolve("schema-two-repo"));
@@ -176,7 +176,7 @@ class LocalMetadataStorageTest {
         LocalMetadataStorage.ProfileRecord migratedProfile =
                 LocalMetadataStorage.forTest(storageDirectory).snapshot().profiles().getFirst();
 
-        assertEquals("POWERSHELL", migratedProfile.profileType());
+        assertEquals("NATIVE", migratedProfile.profileType());
         assertNull(migratedProfile.wslDistribution());
         assertNull(migratedProfile.windowsPathPrefix());
         assertNull(migratedProfile.wslPathPrefix());

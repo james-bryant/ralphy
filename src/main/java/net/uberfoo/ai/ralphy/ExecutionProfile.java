@@ -12,20 +12,30 @@ public record ExecutionProfile(ProfileType type,
         windowsPathPrefix = normalize(windowsPathPrefix);
         wslPathPrefix = normalize(wslPathPrefix);
 
-        if (type == ProfileType.POWERSHELL) {
+        if (type == ProfileType.NATIVE) {
             wslDistribution = null;
             windowsPathPrefix = null;
             wslPathPrefix = null;
         }
     }
 
+    public static ExecutionProfile nativeHost() {
+        return new ExecutionProfile(ProfileType.NATIVE, null, null, null);
+    }
+
     public static ExecutionProfile nativePowerShell() {
-        return new ExecutionProfile(ProfileType.POWERSHELL, null, null, null);
+        return nativeHost();
     }
 
     public String summary() {
-        if (type == ProfileType.POWERSHELL) {
-            return type.label();
+        return summary(HostOperatingSystem.detectRuntime());
+    }
+
+    public String summary(HostOperatingSystem hostOperatingSystem) {
+        HostOperatingSystem resolvedHostOperatingSystem =
+                hostOperatingSystem == null ? HostOperatingSystem.OTHER : hostOperatingSystem;
+        if (type == ProfileType.NATIVE) {
+            return resolvedHostOperatingSystem.nativeProfileLabel();
         }
 
         return "WSL: " + valueOrEmpty(wslDistribution)
@@ -42,7 +52,7 @@ public record ExecutionProfile(ProfileType type,
     }
 
     public enum ProfileType {
-        POWERSHELL("POWERSHELL", "Native Windows PowerShell"),
+        NATIVE("NATIVE", "Native"),
         WSL("WSL", "WSL");
 
         private final String storageValue;
@@ -62,8 +72,12 @@ public record ExecutionProfile(ProfileType type,
         }
 
         public static ProfileType fromStorageValue(String storageValue) {
-            if (storageValue == null || storageValue.isBlank() || "UNCONFIGURED".equalsIgnoreCase(storageValue)) {
-                return POWERSHELL;
+            if (storageValue == null
+                    || storageValue.isBlank()
+                    || "UNCONFIGURED".equalsIgnoreCase(storageValue)
+                    || "POWERSHELL".equalsIgnoreCase(storageValue)
+                    || "NATIVE".equalsIgnoreCase(storageValue)) {
+                return NATIVE;
             }
 
             for (ProfileType candidate : values()) {
@@ -72,7 +86,20 @@ public record ExecutionProfile(ProfileType type,
                 }
             }
 
-            return POWERSHELL;
+            return NATIVE;
         }
+    }
+
+    public static String storedProfileTypeLabel(String storageValue) {
+        if ("WSL".equalsIgnoreCase(storageValue)) {
+            return "WSL";
+        }
+        if ("POWERSHELL".equalsIgnoreCase(storageValue)) {
+            return HostOperatingSystem.WINDOWS.nativeProfileLabel();
+        }
+        if ("NATIVE".equalsIgnoreCase(storageValue)) {
+            return "Native profile";
+        }
+        return valueOrEmpty(storageValue);
     }
 }
