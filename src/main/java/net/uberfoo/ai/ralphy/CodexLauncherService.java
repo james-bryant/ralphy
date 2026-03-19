@@ -483,15 +483,17 @@ public class CodexLauncherService {
             return;
         }
 
-        boolean currentAssistantContext = assistantContext || isAssistantContext(node);
+        if (!deltaOnly) {
+            addCandidate(candidates, readPreferredText(node, List.of("assistant_summary", "final_summary")));
+        }
+
+        boolean currentAssistantContext = assistantContextForNode(node, assistantContext);
         if (currentAssistantContext) {
             if (deltaOnly) {
                 addCandidate(candidates, readPreferredText(node, List.of("delta", "text_delta", "output_text_delta")));
             } else {
                 addCandidate(candidates, readPreferredText(node, List.of(
-                        "assistant_summary",
                         "summary",
-                        "final_summary",
                         "output_text",
                         "text",
                         "message"
@@ -506,19 +508,68 @@ public class CodexLauncherService {
         );
     }
 
-    private boolean isAssistantContext(JsonNode node) {
-        String role = node.path("role").asText("");
-        if ("assistant".equalsIgnoreCase(role)) {
+    private boolean assistantContextForNode(JsonNode node, boolean assistantContext) {
+        String explicitRole = explicitRole(node);
+        if (isAssistantRole(explicitRole)) {
             return true;
+        }
+        if (hasText(explicitRole)) {
+            return false;
         }
 
         String type = node.path("type").asText("");
         String event = node.path("event").asText("");
-        String kind = (type + " " + event).toLowerCase();
-        return kind.contains("assistant")
-                || kind.contains("message")
-                || kind.contains("response")
-                || kind.contains("summary");
+        if (isKnownNonAssistantEventType(type) || isKnownNonAssistantEventType(event)) {
+            return false;
+        }
+
+        return assistantContext
+                || isAssistantEventType(type)
+                || isAssistantEventType(event)
+                || isResponseEventType(type)
+                || isResponseEventType(event);
+    }
+
+    private String explicitRole(JsonNode node) {
+        return firstNonBlank(
+                node.path("role").asText(""),
+                node.path("author").path("role").asText(""),
+                node.path("sender").path("role").asText(""),
+                node.path("message").path("role").asText(""),
+                node.path("item").path("role").asText("")
+        );
+    }
+
+    private boolean isAssistantRole(String role) {
+        return "assistant".equalsIgnoreCase(role);
+    }
+
+    private boolean isAssistantEventType(String value) {
+        if (!hasText(value)) {
+            return false;
+        }
+
+        String normalizedValue = value.toLowerCase();
+        return normalizedValue.contains("assistant") || normalizedValue.contains("agent_message");
+    }
+
+    private boolean isResponseEventType(String value) {
+        return hasText(value) && value.toLowerCase().startsWith("response");
+    }
+
+    private boolean isKnownNonAssistantEventType(String value) {
+        if (!hasText(value)) {
+            return false;
+        }
+
+        String normalizedValue = value.toLowerCase();
+        return normalizedValue.contains("user")
+                || normalizedValue.contains("command_execution")
+                || normalizedValue.contains("reasoning")
+                || normalizedValue.contains("todo_list")
+                || normalizedValue.contains("web_search")
+                || normalizedValue.contains("file_change")
+                || normalizedValue.contains("tool");
     }
 
     private String readPreferredText(JsonNode node, List<String> preferredFields) {
@@ -761,6 +812,15 @@ public class CodexLauncherService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (hasText(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     public record CodexLaunchRequest(String storyId,

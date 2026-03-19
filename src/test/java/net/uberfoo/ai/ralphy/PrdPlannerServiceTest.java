@@ -246,6 +246,36 @@ class PrdPlannerServiceTest {
         assertEquals(2, result.session().messages().size());
     }
 
+    @Test
+    void continueConversationIgnoresTrailingUserMessageEventsAfterAnAgentReply() throws IOException {
+        ActiveProject activeProject = new ActiveProject(createRepository("planner-user-echo-repo"));
+        PrdPlannerService plannerService = new PrdPlannerService(
+                createLauncherService(),
+                new PresetCatalogService(),
+                (launchPlan, runOutputListener) -> PrdPlannerService.PlannerExecution.completed(
+                        47L,
+                        0,
+                        """
+                        {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"1. Clarify the target users."}}
+                        {"type":"item.completed","item":{"id":"item_2","type":"user_message","text":"Plan a live PRD planner."}}
+                        """,
+                        ""
+                )
+        );
+
+        PrdPlannerService.PlannerTurnResult result = plannerService.continueConversation(
+                activeProject,
+                ExecutionProfile.nativePowerShell(),
+                PrdPlanningSession.empty(),
+                "Plan a live PRD planner.",
+                CodexLauncherService.RunOutputListener.noop()
+        );
+
+        assertTrue(result.successful());
+        assertEquals("1. Clarify the target users.", result.assistantMessage());
+        assertEquals("1. Clarify the target users.", result.session().lastAssistantMessage());
+    }
+
     private CodexLauncherService createLauncherService() {
         return createLauncherService("C:\\tools\\codex.cmd");
     }

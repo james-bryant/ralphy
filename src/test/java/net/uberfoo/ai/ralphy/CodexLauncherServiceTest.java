@@ -594,6 +594,47 @@ class CodexLauncherServiceTest {
                 Files.readString(launchResult.artifacts().assistantSummaryPath()));
     }
 
+    @Test
+    void launchIgnoresTrailingUserMessageEventsWhenExtractingAssistantSummary() throws IOException {
+        Path storageDirectory = tempDir.resolve("assistant-summary-local-storage");
+        LocalMetadataStorage localMetadataStorage = LocalMetadataStorage.forTest(storageDirectory);
+        ActiveProject activeProject = new ActiveProject(createGitRepository("assistant-summary-launch-repo"));
+        localMetadataStorage.startSession();
+        localMetadataStorage.recordProjectActivation(activeProject);
+
+        CodexLauncherService launcherService = new CodexLauncherService(
+                localMetadataStorage,
+                Clock.fixed(Instant.parse("2026-03-15T22:10:00Z"), ZoneOffset.UTC),
+                () -> "run-user-echo-1",
+                launchPlan -> CodexLauncherService.ProcessExecution.completed(
+                        1010L,
+                        0,
+                        """
+                        {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Implemented US-031."}}
+                        {"type":"item.completed","item":{"id":"item_2","type":"user_message","text":"Implement US-031."}}
+                        """,
+                        ""
+                ),
+                TEST_NATIVE_CODEX_COMMAND
+        );
+
+        CodexLauncherService.CodexLaunchResult launchResult =
+                launcherService.launch(new CodexLauncherService.CodexLaunchRequest(
+                        "US-031",
+                        activeProject,
+                        ExecutionProfile.nativePowerShell(),
+                        presetCatalogService.defaultPreset(PresetUseCase.STORY_IMPLEMENTATION),
+                        List.of(new CodexLauncherService.PromptInput("Story", "US-031")),
+                        "",
+                        List.of("--json")
+                ));
+
+        assertTrue(launchResult.successful());
+        assertEquals("Implemented US-031.", launchResult.assistantSummary());
+        assertEquals("Implemented US-031.",
+                Files.readString(launchResult.artifacts().assistantSummaryPath()));
+    }
+
     private CodexLauncherService createLauncherService(CodexLauncherService.ProcessExecutor processExecutor) {
         return createLauncherService(
                 processExecutor,
