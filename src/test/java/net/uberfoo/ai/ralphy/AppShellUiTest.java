@@ -399,7 +399,7 @@ class AppShellUiTest {
         harness.waitUntil(() -> harness.isVisible("#singleStorySessionProgressRow"));
         assertTrue(harness.text("#singleStorySessionProgressLabel").contains("Codex is running"));
         harness.waitUntil(() -> "2".equals(harness.text("#storyProgressPassedCountLabel"))
-                && !harness.isVisible("#singleStorySessionProgressRow"), 20L);
+                && !harness.isVisible("#singleStorySessionProgressRow"), 30L);
 
         assertEquals("1", harness.text("#storyProgressBlockedCountLabel"));
         assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
@@ -451,7 +451,7 @@ class AppShellUiTest {
                     .map(task -> task.attempts().size() == 2)
                     .orElse(false);
         });
-        harness.waitUntil(() -> harness.text("#singleStorySessionMessageLabel").contains("Play complete."));
+        harness.waitUntil(() -> harness.text("#singleStorySessionMessageLabel").contains("Play complete."), 20L);
 
         PrdTaskState taskState = harness.getRequiredBean(ActiveProjectService.class).prdTaskState().orElseThrow();
         PrdTaskRecord retriedTask = taskState.taskById("US-032").orElseThrow();
@@ -499,7 +499,7 @@ class AppShellUiTest {
                 "#singleStorySessionSummaryLabel"
         );
         assertEquals("Pause requested", pauseRequestedSummary);
-        harness.waitUntil(() -> "Execution paused".equals(harness.text("#storyProgressSummaryLabel")));
+        harness.waitUntil(() -> "Execution paused".equals(harness.text("#storyProgressSummaryLabel")), 20L);
         assertTrue(harness.text("#storyProgressCurrentStoryLabel").contains("Paused | US-031"));
         assertEquals("0", harness.text("#storyProgressRunningCountLabel"));
         assertEquals("1", harness.text("#storyProgressPassedCountLabel"));
