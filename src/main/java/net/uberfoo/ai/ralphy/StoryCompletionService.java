@@ -134,13 +134,16 @@ public class StoryCompletionService {
                 "./mvnw clean verify jacoco:report")) {
             int mavenWrapperIndex = normalizedValue.indexOf(supportedMavenWrapperCommand);
             if (mavenWrapperIndex >= 0) {
-                return trimmedValue.substring(
-                        mavenWrapperIndex,
-                        mavenWrapperIndex + supportedMavenWrapperCommand.length()
-                );
+                return canonicalMavenWrapperCommand();
             }
         }
         return trimmedValue;
+    }
+
+    private String canonicalMavenWrapperCommand() {
+        return hostOperatingSystem.isWindows()
+                ? ".\\mvnw.cmd clean verify jacoco:report"
+                : "./mvnw clean verify jacoco:report";
     }
 
     private List<String> qualityGateCommand(String qualityGate) {

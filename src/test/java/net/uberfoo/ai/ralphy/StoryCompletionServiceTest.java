@@ -149,7 +149,7 @@ class StoryCompletionServiceTest {
                         "Implementation history is traceable story by story.",
                         "2026-03-16T00:00:00Z"
                 ),
-                List.of("./mvnw clean verify jacoco:report and Linux smoke verification")
+                List.of(".\\mvnw.cmd clean verify jacoco:report and Linux smoke verification")
         );
 
         assertTrue(result.successful());

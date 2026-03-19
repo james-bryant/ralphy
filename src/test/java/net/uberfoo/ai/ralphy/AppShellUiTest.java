@@ -1935,6 +1935,12 @@ class AppShellUiTest {
 
     private void seedQualityGateFiles(Path repository) throws IOException {
         Files.writeString(repository.resolve("mvnw.cmd"), "@echo off\r\nexit /b 0\r\n");
+        Path posixWrapper = repository.resolve("mvnw");
+        Files.writeString(posixWrapper, """
+                #!/usr/bin/env sh
+                exit 0
+                """);
+        posixWrapper.toFile().setExecutable(true);
         Files.writeString(repository.resolve("pom.xml"), "<project/>");
         Files.createDirectories(repository.resolve(".mvn"));
     }
