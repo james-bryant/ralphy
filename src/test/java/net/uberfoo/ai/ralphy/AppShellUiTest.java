@@ -2635,19 +2635,18 @@ class AppShellUiTest {
     }
 
     private void waitForPlannerReply(JavaFxUiHarness harness) throws Exception {
-        try {
-            harness.waitUntil(() -> !harness.isDisabled("#prdPlannerSendButton")
-                    && harness.text("#prdPlannerTranscriptArea").contains("Completed story."));
-        } catch (java.util.concurrent.TimeoutException timeoutException) {
-            throw new AssertionError(
-                    "Planner reply did not complete in time. sendDisabled=" + harness.isDisabled("#prdPlannerSendButton")
-                            + ", progressVisible=" + harness.isVisible("#prdPlannerProgressRow")
-                            + ", progressLabel=" + harness.text("#prdPlannerProgressLabel")
-                            + ", plannerMessage=" + harness.text("#prdPlannerMessageLabel")
-                            + ", transcript=" + harness.text("#prdPlannerTranscriptArea"),
-                    timeoutException
-            );
-        }
+        waitForPlannerCondition(
+                harness,
+                () -> !harness.isDisabled("#prdPlannerSendButton")
+                        && !harness.isVisible("#prdPlannerProgressRow"),
+                20L,
+                "Planner reply did not complete in time."
+        );
+        assertTrue(
+                harness.text("#prdPlannerTranscriptArea").contains("Completed story."),
+                "Planner reply completed but the transcript did not include the expected assistant summary. "
+                        + plannerReplyDiagnostics(harness)
+        );
     }
 
     private Path createFlakyCodexCommandScript(Path invocationCounterPath) throws IOException {
@@ -2780,6 +2779,25 @@ class AppShellUiTest {
                 + ", progressVisible=" + progressVisible
                 + ", progressLabel=" + progressLabel
                 + ", taskState=" + taskState;
+    }
+
+    private void waitForPlannerCondition(JavaFxUiHarness harness,
+                                         JavaFxUiHarness.ThrowingBooleanSupplier condition,
+                                         long timeoutSeconds,
+                                         String failureMessage) throws Exception {
+        try {
+            harness.waitUntil(condition, timeoutSeconds);
+        } catch (java.util.concurrent.TimeoutException timeoutException) {
+            throw new AssertionError(failureMessage + " " + plannerReplyDiagnostics(harness), timeoutException);
+        }
+    }
+
+    private String plannerReplyDiagnostics(JavaFxUiHarness harness) throws Exception {
+        return "sendDisabled=" + harness.isDisabled("#prdPlannerSendButton")
+                + ", progressVisible=" + harness.isVisible("#prdPlannerProgressRow")
+                + ", progressLabel=" + harness.text("#prdPlannerProgressLabel")
+                + ", plannerMessage=" + harness.text("#prdPlannerMessageLabel")
+                + ", transcript=" + harness.text("#prdPlannerTranscriptArea");
     }
 
     private String codexOutputSample() throws IOException {
